@@ -26,10 +26,8 @@ pub fn system(tbl: []const Data, vm: *VM) !NativeResult {
     defer vm.runtime.alloc.free(argv);
     defer for (argv) |arg| vm.runtime.alloc.free(arg);
 
-    for (table.array.items, 0..) |arg, i| {
-        // just assume
-        argv[i] = try vm.runtime.alloc.dupe(u8, vm.stringValue(arg.?.string));
-    }
+    for (table.array.items, 0..) |arg, i|
+        argv[i] = try vm.runtime.alloc.dupe(u8, vm.stringValue(arg.string));
 
     var proc = try std.process.spawn(vm.runtime.io, .{
         .argv = argv,

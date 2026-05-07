@@ -1,10 +1,5 @@
-fn frec(n) match n
-	| x when x < 2 x
-	| x frec(x - 1) + frec(x - 2)
-
 fn fib(n)
   if n < 2 n
 	else fib(n - 1) + fib(n - 2) 
 
 print(fib(20))
-print(frec(20))

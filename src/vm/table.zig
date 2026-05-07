@@ -2,7 +2,6 @@ const std = @import("std");
 
 const revo = @import("revo");
 
-
 const memory = revo.memory;
 const Data = memory.Data;
 const testing = revo.lang.testing;
@@ -100,8 +99,7 @@ pub const Table = struct {
     const HashEntries = std.HashMap(Data, Data, KeyContext, std.hash_map.default_max_load_percentage);
 
     alloc: std.mem.Allocator,
-    // TODO: they're never optional anymore
-    array: std.ArrayList(?Data),
+    array: std.ArrayList(Data),
     hash_entries: HashEntries,
     hash_order: std.ArrayList(Data),
     metatable: ?memory.TableID = null,
@@ -109,7 +107,7 @@ pub const Table = struct {
     pub fn init(alloc: std.mem.Allocator) !Table {
         return .{
             .alloc = alloc,
-            .array = try std.ArrayList(?Data).initCapacity(alloc, 0),
+            .array = try std.ArrayList(Data).initCapacity(alloc, 0),
             .hash_entries = HashEntries.init(alloc),
             .hash_order = try std.ArrayList(Data).initCapacity(alloc, 0),
         };
@@ -305,9 +303,9 @@ pub const Table = struct {
     }
 
     pub fn mark(self: *Table, vm: *revo.VM) void {
-        for (self.array.items) |entry| {
-            if (entry) |val| vm.markData(val);
-        }
+        for (self.array.items) |entry|
+            vm.markData(entry);
+
         var it = self.hash_entries.iterator();
         while (it.next()) |entry| {
             vm.markData(entry.key_ptr.*);
@@ -317,8 +315,8 @@ pub const Table = struct {
 
     pub fn count(self: *const Table) usize {
         var n: usize = self.hash_entries.count();
-        for (self.array.items) |entry| {
-            if (entry != null) n += 1;
+        for (self.array.items) |_| {
+            n += 1;
         }
         return n;
     }
@@ -330,15 +328,13 @@ pub const Table = struct {
     pub fn write(self: *Table, buf: *std.ArrayList(u8), vm: *revo.VM, mode: Data.RenderMode) anyerror!void {
         try buf.appendSlice(vm.runtime.alloc, "{ ");
         const should_write_idx = self.hash_entries.count() != 0;
-        for (self.array.items, 0..) |entry, idx| {
-            if (entry) |val| {
-                if (should_write_idx) {
-                    try Data.new.num(idx).write(buf, vm, mode);
-                    try buf.appendSlice(vm.runtime.alloc, ": ");
-                }
-                try val.write(buf, vm, mode);
-                try buf.appendSlice(vm.runtime.alloc, ", ");
+        for (self.array.items, 0..) |val, idx| {
+            if (should_write_idx) {
+                try Data.new.num(idx).write(buf, vm, mode);
+                try buf.appendSlice(vm.runtime.alloc, ": ");
             }
+            try val.write(buf, vm, mode);
+            try buf.appendSlice(vm.runtime.alloc, ", ");
         }
         for (self.hash_order.items) |key| {
             const val = self.hash_entries.get(key) orelse continue;

@@ -1,0 +1,6 @@
+# this is the one issue im trying to fix about match expressions
+fn frec(n) match n
+	| x when x < 2 x
+	| x frec(x - 1) + frec(x - 2)
+
+print(frec(20))

@@ -370,10 +370,10 @@ test "string metatable" {
 fn contains(args: []const Data, vm: *VM) !NativeResult {
     const str_id = args[0].string;
     const search_id = args[1].string;
-    
+
     const str = vm.stringValue(str_id);
     const search = vm.stringValue(search_id);
-    
+
     return .okBool(std.mem.indexOf(u8, str, search) != null);
 }
 
@@ -382,10 +382,10 @@ fn contains(args: []const Data, vm: *VM) !NativeResult {
 fn index_of(args: []const Data, vm: *VM) !NativeResult {
     const str_id = args[0].string;
     const search_id = args[1].string;
-    
+
     const str = vm.stringValue(str_id);
     const search = vm.stringValue(search_id);
-    
+
     if (std.mem.indexOf(u8, str, search)) |idx| {
         return .{ .ok = Data.new.num(idx) };
     }
@@ -397,27 +397,25 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
 fn join(args: []const Data, vm: *VM) !NativeResult {
     const tbl_id = args[0].table;
     const sep_id = args[1].string;
-    
+
     const tbl = try vm.tables.get(tbl_id);
     const sep = vm.stringValue(sep_id);
-    
+
     var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 64);
     defer buf.deinit(vm.runtime.alloc);
-    
-    for (tbl.array.items, 0..) |maybe_item, i| {
-        if (maybe_item) |item| {
-            const item_str = switch (item) {
-                .string => |sid| vm.stringValue(sid),
-                .number => |n| try std.fmt.allocPrint(vm.runtime.alloc, "{}", .{n}),
-                else => "?",
-            };
-            try buf.appendSlice(vm.runtime.alloc, item_str);
-        }
-        if (i < tbl.array.items.len - 1 and tbl.array.items[i + 1] != null) {
+
+    for (tbl.array.items, 0..) |item, i| {
+        const item_str = switch (item) {
+            .string => |sid| vm.stringValue(sid),
+            .number => |n| try std.fmt.allocPrint(vm.runtime.alloc, "{}", .{n}),
+            else => "?",
+        };
+        try buf.appendSlice(vm.runtime.alloc, item_str);
+        if (i < tbl.array.items.len - 1 and tbl.array.items.len >= i) {
             try buf.appendSlice(vm.runtime.alloc, sep);
         }
     }
-    
+
     const owned = try buf.toOwnedSlice(vm.runtime.alloc);
     return .{ .ok = try vm.adoptDataString(owned) };
 }

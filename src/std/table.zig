@@ -60,13 +60,13 @@ pub fn @"try"(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].table;
     const table = try vm.tables.get(table_id);
     if (table.array.items.len < 2) return .errType(0, "table with at least 2 elements", "table with less than 2 elements");
-    const tag = table.array.items[0].?;
+    const tag = table.array.items[0];
 
     return switch (tag) {
         .atom => |atom| blk: {
             const ok_id = revo.core_atoms.atom_id(.ok);
-            if (atom != ok_id) return root.panic_(&[1]Data{table.array.items[1].?}, vm);
-            break :blk .{ .ok = table.array.items[1].? };
+            if (atom != ok_id) return root.panic_(&[1]Data{table.array.items[1]}, vm);
+            break :blk .{ .ok = table.array.items[1] };
         },
         else => .errType(0, "tuple starting with atom", "tuple starting with non-atom"),
     };
@@ -83,11 +83,8 @@ fn as_tuple(args: []const Data, vm: *VM) !NativeResult {
 
     defer values_list.deinit(vm.runtime.alloc);
 
-    for (table.array.items) |maybe_val| {
-        if (maybe_val) |val| {
-            try values_list.append(vm.runtime.alloc, val);
-        }
-    }
+    for (table.array.items) |val|
+        try values_list.append(vm.runtime.alloc, val);
 
     const values_slice = try values_list.toOwnedSlice(vm.runtime.alloc);
     defer vm.runtime.alloc.free(values_slice);
@@ -142,7 +139,7 @@ fn remove(args: []const Data, vm: *VM) !NativeResult {
 
     const pos_usize = @as(usize, @intCast(pos));
     const removed = table.array.orderedRemove(pos_usize);
-    return .okData(if (removed) |val| val else revo.core_atoms.data(.nil));
+    return .okData(removed);
 }
 
 /// > table:concat(delim: string) -> string
@@ -162,14 +159,12 @@ fn concat(args: []const Data, vm: *VM) !NativeResult {
     var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 32);
     defer buf.deinit(vm.runtime.alloc);
 
-    for (table.array.items, 0..) |maybe_item, idx| {
+    for (table.array.items, 0..) |item, idx| {
         if (idx > 0) try buf.appendSlice(vm.runtime.alloc, delim);
-        if (maybe_item) |item| {
-            var temp = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 8);
-            defer temp.deinit(vm.runtime.alloc);
-            try item.write(&temp, vm, .display);
-            try buf.appendSlice(vm.runtime.alloc, temp.items);
-        }
+        var temp = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 8);
+        defer temp.deinit(vm.runtime.alloc);
+        try item.write(&temp, vm, .display);
+        try buf.appendSlice(vm.runtime.alloc, temp.items);
     }
 
     const slice = try buf.toOwnedSlice(vm.runtime.alloc);
@@ -220,11 +215,8 @@ fn values(args: []const Data, vm: *VM) !NativeResult {
     var values_list = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, table.array.items.len + 10);
     defer values_list.deinit(vm.runtime.alloc);
 
-    for (table.array.items) |maybe_val| {
-        if (maybe_val) |val| {
-            try values_list.append(vm.runtime.alloc, val);
-        }
-    }
+    for (table.array.items) |val|
+        try values_list.append(vm.runtime.alloc, val);
 
     for (table.hash_order.items) |key| {
         if (table.hash_entries.get(key)) |val| {
@@ -452,15 +444,13 @@ fn sort(args: []const Data, vm: *VM) !NativeResult {
 
     const Context = struct {
         vm: *VM,
-        pub fn compare(ctx: @This(), a: ?Data, b: ?Data) bool {
-            const aa = a orelse return false;
-            const bb = b orelse return false;
-            switch (aa) {
-                .number => |an| switch (bb) {
+        pub fn compare(ctx: @This(), a: Data, b: Data) bool {
+            switch (a) {
+                .number => |an| switch (b) {
                     .number => |bn| return an < bn,
                     else => return true,
                 },
-                .string => |as| switch (bb) {
+                .string => |as| switch (b) {
                     .string => |bs| {
                         const astr = ctx.vm.stringValue(as);
                         const bstr = ctx.vm.stringValue(bs);
@@ -475,7 +465,7 @@ fn sort(args: []const Data, vm: *VM) !NativeResult {
     };
 
     const ctx = Context{ .vm = vm };
-    std.mem.sort(?Data, tbl.array.items, ctx, Context.compare);
+    std.mem.sort(Data, tbl.array.items, ctx, Context.compare);
     return .okData(args[0]);
 }
 
@@ -489,16 +479,14 @@ fn sort_by(args: []const Data, vm: *VM) !NativeResult {
     const Context = struct {
         vm: *VM,
         fn_data: Data,
-        pub fn compare(ctx: @This(), a: ?Data, b: ?Data) bool {
-            const aa = a orelse return false;
-            const bb = b orelse return false;
-            const result = ctx.vm.callFunction(ctx.fn_data, &[_]Data{ aa, bb }) catch return false;
+        pub fn compare(ctx: @This(), a: Data, b: Data) bool {
+            const result = ctx.vm.callFunction(ctx.fn_data, &[_]Data{ a, b }) catch return false;
             return !revo.isFalse(result);
         }
     };
 
     const ctx = Context{ .vm = vm, .fn_data = compare_fn };
-    std.mem.sort(?Data, tbl.array.items, ctx, Context.compare);
+    std.mem.sort(Data, tbl.array.items, ctx, Context.compare);
     return .okData(args[0]);
 }
 
@@ -510,7 +498,7 @@ fn first(args: []const Data, vm: *VM) !NativeResult {
     if (tbl.array.items.len == 0) {
         return .{ .ok = revo.core_atoms.data(.nil) };
     }
-    return .{ .ok = tbl.array.items[0] orelse revo.core_atoms.data(.nil) };
+    return .{ .ok = tbl.array.items[0] };
 }
 
 /// > table:last() -> any
@@ -521,7 +509,7 @@ fn last(args: []const Data, vm: *VM) !NativeResult {
     if (tbl.array.items.len == 0) {
         return .{ .ok = revo.core_atoms.data(.nil) };
     }
-    return .{ .ok = tbl.array.items[tbl.array.items.len - 1] orelse revo.core_atoms.data(.nil) };
+    return .{ .ok = tbl.array.items[tbl.array.items.len - 1] };
 }
 
 /// > table:reverse() -> table
@@ -529,7 +517,7 @@ fn last(args: []const Data, vm: *VM) !NativeResult {
 fn reverse(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].table;
     const tbl = try vm.tables.get(table_id);
-    std.mem.reverse(?Data, tbl.array.items);
+    std.mem.reverse(Data, tbl.array.items);
     return .{ .ok = args[0] };
 }
 
@@ -542,8 +530,7 @@ fn flatten(args: []const Data, vm: *VM) !NativeResult {
     const result_id = try vm.tables.create();
     const result = try vm.tables.get(result_id);
 
-    for (src.array.items) |maybe_item| {
-        const item = maybe_item orelse continue;
+    for (src.array.items) |item| {
         if (item == .table) {
             const nested_id = item.table;
             const nested = try vm.tables.get(nested_id);
@@ -565,8 +552,7 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
     const search_val = args[1];
     const tbl = try vm.tables.get(table_id);
 
-    for (tbl.array.items, 0..) |maybe_item, i| {
-        const item = maybe_item orelse continue;
+    for (tbl.array.items, 0..) |item, i| {
         if (dataEq(item, search_val)) {
             return .{ .ok = Data.new.num(i) };
         }
@@ -581,8 +567,7 @@ fn contains(args: []const Data, vm: *VM) !NativeResult {
     const search_val = args[1];
     const tbl = try vm.tables.get(table_id);
 
-    for (tbl.array.items) |maybe_item| {
-        const item = maybe_item orelse continue;
+    for (tbl.array.items) |item| {
         if (dataEq(item, search_val)) {
             return .okBool(true);
         }
@@ -599,12 +584,9 @@ fn unique(args: []const Data, vm: *VM) !NativeResult {
     const result_id = try vm.tables.create();
     const result = try vm.tables.get(result_id);
 
-    for (src.array.items) |maybe_item| {
-        const item = maybe_item orelse continue;
-
+    for (src.array.items) |item| {
         var found = false;
-        for (result.array.items) |maybe_res| {
-            const res = maybe_res orelse continue;
+        for (result.array.items) |res| {
             if (dataEq(item, res)) {
                 found = true;
                 break;
@@ -626,12 +608,9 @@ fn sum(args: []const Data, vm: *VM) !NativeResult {
     const tbl = try vm.tables.get(table_id);
 
     var total: f64 = 0;
-    for (tbl.array.items) |maybe_item| {
-        if (maybe_item) |item| {
-            if (item == .number) {
-                total += item.number;
-            }
-        }
+    for (tbl.array.items) |item| {
+        if (item == .number)
+            total += item.number;
     }
 
     return .{ .ok = Data.new.num(total) };

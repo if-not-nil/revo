@@ -79,15 +79,11 @@ pub fn map_fn(args: []const Data, vm: *VM) !NativeResult {
             const result_table_id = try vm.tables.create();
             const result_table = try vm.tables.get(result_table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
-                        return err;
-                    };
-                    try result_table.array.append(vm.runtime.alloc, fn_result);
-                } else {
-                    try result_table.array.append(vm.runtime.alloc, null);
-                }
+            for (table.array.items) |item| {
+                const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
+                    return err;
+                };
+                try result_table.array.append(vm.runtime.alloc, fn_result);
             }
 
             for (table.hash_order.items) |key| {
@@ -160,14 +156,12 @@ pub fn filter_fn(args: []const Data, vm: *VM) !NativeResult {
             const result_table_id = try vm.tables.create();
             const result_table = try vm.tables.get(result_table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
-                        return err;
-                    };
-                    if (isTruthy(fn_result)) {
-                        try result_table.array.append(vm.runtime.alloc, item);
-                    }
+            for (table.array.items) |item| {
+                const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
+                    return err;
+                };
+                if (isTruthy(fn_result)) {
+                    try result_table.array.append(vm.runtime.alloc, item);
                 }
             }
 
@@ -224,12 +218,10 @@ pub fn reduce_fn(args: []const Data, vm: *VM) !NativeResult {
             const table_id = args[0].table;
             const table = try vm.tables.get(table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    accumulator = vm.callFunction(fn_data, &[_]Data{ accumulator, item }) catch |err| {
-                        return err;
-                    };
-                }
+            for (table.array.items) |item| {
+                accumulator = vm.callFunction(fn_data, &[_]Data{ accumulator, item }) catch |err| {
+                    return err;
+                };
             }
 
             for (table.hash_order.items) |key| {
@@ -280,12 +272,10 @@ pub fn each_fn(args: []const Data, vm: *VM) !NativeResult {
             const table_id = args[0].table;
             const table = try vm.tables.get(table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    _ = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
-                        return err;
-                    };
-                }
+            for (table.array.items) |item| {
+                _ = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
+                    return err;
+                };
             }
 
             for (table.hash_order.items) |key| {
@@ -342,14 +332,12 @@ pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
             const table_id = args[0].table;
             const table = try vm.tables.get(table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
-                        return err;
-                    };
-                    if (isTruthy(fn_result)) {
-                        return .{ .ok = item };
-                    }
+            for (table.array.items) |item| {
+                const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
+                    return err;
+                };
+                if (isTruthy(fn_result)) {
+                    return .{ .ok = item };
                 }
             }
 
@@ -410,14 +398,12 @@ pub fn all_fn(args: []const Data, vm: *VM) !NativeResult {
             const table_id = args[0].table;
             const table = try vm.tables.get(table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
-                        return err;
-                    };
-                    if (!isTruthy(fn_result)) {
-                        return .{ .ok = Data.new.boolean(false) };
-                    }
+            for (table.array.items) |item| {
+                const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
+                    return err;
+                };
+                if (!isTruthy(fn_result)) {
+                    return .{ .ok = Data.new.boolean(false) };
                 }
             }
 
@@ -478,14 +464,12 @@ pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
             const table_id = args[0].table;
             const table = try vm.tables.get(table_id);
 
-            for (table.array.items) |maybe_item| {
-                if (maybe_item) |item| {
-                    const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
-                        return err;
-                    };
-                    if (isTruthy(fn_result)) {
-                        return .{ .ok = Data.new.boolean(true) };
-                    }
+            for (table.array.items) |item| {
+                const fn_result = vm.callFunction(fn_data, &[_]Data{item}) catch |err| {
+                    return err;
+                };
+                if (isTruthy(fn_result)) {
+                    return .{ .ok = Data.new.boolean(true) };
                 }
             }
 
