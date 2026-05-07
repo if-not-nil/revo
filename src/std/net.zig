@@ -21,7 +21,7 @@ pub fn register(vm: *VM) !void {
         .{ .name = "accept", .f = root.define(&.{.table}, accept_fn) },
         .{ .name = "send", .f = root.define(&.{ .table, .string }, send_fn) },
         .{ .name = "recv", .f = root.defineVariadic(&.{.table}, recv_fn) },
-        .{ .name = "close", .f = root.define(&.{.table}, close_fn) },
+        .{ .name = "close", .f = root.define(&.{.table}, socket_close_fn) },
     });
 }
 
@@ -96,7 +96,8 @@ fn closeEntry(socket_data: Data, vm: *VM) !void {
     );
 }
 
-// net.connect(host, port) -> !socket
+/// > net:connect(host: string, port: number) -> socket
+/// connects to a remote host and port, returns a socket handle
 fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
     const host = vm.stringValue(args[0].string);
     const port: u16 = @as(u16, @intFromFloat(args[1].number));
@@ -119,7 +120,8 @@ fn connect_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, try wrapSocket(vm, entry_ptr, false));
 }
 
-// net.listen(port [, backlog]) -> !server_socket
+/// > net:listen(port: number [, backlog: number]) -> socket
+/// listens for incoming connections on the given port, returns server socket
 fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
     const port: u16 = @as(u16, @intFromFloat(args[0].number));
     const backlog: u31 = if (args.len > 1) @as(u31, @intFromFloat(args[1].number)) else 128;
@@ -142,7 +144,8 @@ fn listen_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, try wrapSocket(vm, entry_ptr, true));
 }
 
-// socket:accept() -> !client_socket
+/// > socket:accept() -> socket
+/// accepts an incoming client connection on a server socket
 fn accept_fn(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data{ .table = args[0].table };
 
@@ -164,7 +167,8 @@ fn accept_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, try wrapSocket(vm, new_entry_ptr, false));
 }
 
-// socket:send(data) -> !bytes_sent
+/// > socket:send(data: string) -> number
+/// sends data over the socket, returns number of bytes sent
 fn send_fn(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data{ .table = args[0].table };
     const message = vm.stringValue(args[1].string);
@@ -187,7 +191,8 @@ fn send_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, Data.new.num(message.len));
 }
 
-// socket:recv([max_bytes]) -> !string
+/// > socket:recv([max_bytes: number]) -> string
+/// receives data from the socket, returns data as string
 fn recv_fn(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data{ .table = args[0].table };
     const max_bytes: usize = if (args.len > 1) @as(usize, @intFromFloat(args[1].number)) else 4096;
@@ -212,8 +217,9 @@ fn recv_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, try vm.ownDataString(recv_buf[0..n]));
 }
 
-// socket:close() -> :nil
-fn close_fn(args: []const Data, vm: *VM) !NativeResult {
+/// > socket:close() -> atom
+/// closes the socket
+fn socket_close_fn(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data{ .table = args[0].table };
     try closeEntry(socket_data, vm);
     return try .Ok(vm, revo.core_atoms.data(.nil));

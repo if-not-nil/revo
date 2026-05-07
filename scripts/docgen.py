@@ -18,21 +18,15 @@ from pathlib import Path
 
 ROOT_ZIG = Path("src/std/root.zig")
 NATIVES_DIR = Path("src/std")
-MOD_ORDER = ["math", "string", "table", "meta", "net", "stupid", "iter"]
+MOD_ORDER = ["math", "string", "table", "meta", "fs", "net", "stupid", "iter"]
 
 docs = {}
 hl_lang = "ruby"
 
 # build output start
-output = (
-    ["---"]
-    + """title: 'the standard library'
----
-
-# revo's std lib
-> auto-generated from source
-""".splitlines()
-)
+output: list[str] = []
+with (Path(__file__).parent / "doc-prefix.txt").open() as file:
+    output = file.read().strip().splitlines()
 
 
 # extract fns from zig source
@@ -222,41 +216,26 @@ for mod_name in MOD_ORDER:
 
     mod_text = mod_path.read_text()
 
-    # extract table fns
-    entries = []
-    tbl_pat = re.compile(
-        r'\.name\s*=\s*"([^"]+)".*?'
-        r"\.f\s*=\s*(?:std_lib\.)?(define(?:Variadic)?)\s*\(\s*&\.?\{([^}]+)\}",
+    # group by table name from registerTableFunctions
+    table_entries = {}  # table_name: [entries]
+    
+    # extract from registerTableFunctions with tbl names
+    reg_table_pat = re.compile(
+        r"registerTableFunctions\s*\(vm,\s*\"([^\"]+)\"\s*,\s*&\[_\]root\.FuncDef\{(.+?)\}\s*\)",
         re.DOTALL,
     )
-    for m in tbl_pat.finditer(mod_text):
-        types = [
-            t.strip().lstrip(".")
-            for t in m.group(3).split(",")
-            if t.strip().lstrip(".")
-        ]
-        entries.append(
-            {
-                "name": m.group(1),
-                "impl": m.group(1),
-                "types": types,
-                "variadic": "Variadic" in m.group(2),
-            }
-        )
-
-    # extract from registerFunctions
-    reg_fn_pat = re.compile(
-        r"registerFunctions\s*\(vm,\s*&\[_\]root\.FuncDef\{(.+?)\}\s*\)",
-        re.DOTALL,
-    )
-    for match in reg_fn_pat.finditer(mod_text):
-        for func_def in re.split(r"(?=\.name\s*=)", match.group(1)):
+    for match in reg_table_pat.finditer(mod_text):
+        table_name = match.group(1)
+        if table_name not in table_entries:
+            table_entries[table_name] = []
+        
+        for func_def in re.split(r"(?=\.name\s*=)", match.group(2)):
             if not func_def.strip():
                 continue
 
             name_match = re.search(r'\.name\s*=\s*"([^"]+)"', func_def)
             impl_match = re.search(
-                r"(?:std_lib\.)?root\.define\s*\([^)]*,\s*(\w+)\s*\)", func_def
+                r"(?:std_lib\.)?root\.define(?:Variadic)?\s*\([^)]*,\s*(\w+)\s*\)", func_def
             )
             types_match = re.search(r"&(?:\.|[_\]])\{([^}]+)\}", func_def)
 
@@ -266,28 +245,54 @@ for mod_name in MOD_ORDER:
                     for t in types_match.group(1).split(",")
                     if t.strip().lstrip(".")
                 ]
-                entries.append(
+                table_entries[table_name].append(
                     {
                         "name": name_match.group(1),
                         "impl": impl_match.group(1),
                         "types": types,
+                        "variadic": "Variadic" in func_def,
                     }
                 )
 
-    # extract mts
-    meta_pat = re.compile(
-        r"MethodDef\{(.*?)\}\s*,\s*(try\s+vm\.ownDataString|Data\.new\.[a-zA-Z_]+)",
+    # also extract from registerFunctions (no table name)
+    reg_fn_pat = re.compile(
+        r"registerFunctions\s*\(vm,\s*&\[_\]root\.FuncDef\{(.+?)\}\s*\)",
         re.DOTALL,
     )
-    type_map = {
-        'ownDataString("")': '"asdf"',
-        "Data.new.table(std.math.maxInt(usize)": '{k = "v", 123}',
-        "Data.new.tuple(std.math.maxInt(usize))": "(1,2,3)",
-        'try vm.ownDataString("")': '"asdf"',
-        "try vm.ownDataString": '"asdf"',
-        "Data.new.table": '{k = "v", 123}',
-        "Data.new.tuple": "(1,2,3)",
-    }
+    for match in reg_fn_pat.finditer(mod_text):
+        if mod_name not in table_entries:
+            table_entries[mod_name] = []
+        
+        for func_def in re.split(r"(?=\.name\s*=)", match.group(1)):
+            if not func_def.strip():
+                continue
+
+            name_match = re.search(r'\.name\s*=\s*"([^"]+)"', func_def)
+            impl_match = re.search(
+                r"(?:std_lib\.)?root\.define(?:Variadic)?\s*\([^)]*,\s*(\w+)\s*\)", func_def
+            )
+            types_match = re.search(r"&(?:\.|[_\]])\{([^}]+)\}", func_def)
+
+            if name_match and impl_match and types_match:
+                types = [
+                    t.strip().lstrip(".")
+                    for t in types_match.group(1).split(",")
+                    if t.strip().lstrip(".")
+                ]
+                table_entries[mod_name].append(
+                    {
+                        "name": name_match.group(1),
+                        "impl": impl_match.group(1),
+                        "types": types,
+                        "variadic": "Variadic" in func_def,
+                    }
+                )
+
+    # extract metamethods
+    meta_pat = re.compile(
+        r"registerMetatable\s*\(vm,\s*&\[_\]root\.MethodDef\{(.+?)\}\s*,\s*(try\s+vm\.ownDataString|Data\.new\.[a-zA-Z_]+)",
+        re.DOTALL,
+    )
     type_name_map = {
         "try vm.ownDataString": "string",
         "Data.new.table": "table",
@@ -297,6 +302,9 @@ for mod_name in MOD_ORDER:
     for match in meta_pat.finditer(mod_text):
         type_val = match.group(2).strip()
         type_hint = type_name_map.get(type_val, type_val)
+
+        if type_hint not in table_entries:
+            table_entries[type_hint] = []
 
         for method_str in re.split(r"(?=\.key\s*=)", match.group(1)):
             if not method_str.strip():
@@ -313,7 +321,7 @@ for mod_name in MOD_ORDER:
 
             types_match = re.search(r"&(?:\.|[_\]])\{([^}]+)\}", method_str)
             impl_match = re.search(
-                r"(?:std_lib\.)?root\.define\s*\([^)]*,\s*(\w+)\s*\)", method_str
+                r"(?:std_lib\.)?root\.define(?:Variadic)?\s*\([^)]*,\s*(\w+)\s*\)", method_str
             )
 
             if types_match and impl_match:
@@ -322,7 +330,7 @@ for mod_name in MOD_ORDER:
                     for t in types_match.group(1).split(",")
                     if t.strip().lstrip(".")
                 ]
-                entries.append(
+                table_entries[type_hint].append(
                     {
                         "name": key,
                         "impl": impl_match.group(1),
@@ -331,7 +339,12 @@ for mod_name in MOD_ORDER:
                     }
                 )
 
-    if entries:
+    # output sections for each table in order they were found
+    for table_name in sorted(table_entries.keys()):
+        entries = table_entries[table_name]
+        if not entries:
+            continue
+        
         # dedup if same name exists as both global and mm keep only global
         seen_names = {}
         deduped = []
@@ -348,7 +361,7 @@ for mod_name in MOD_ORDER:
                 seen_names[name] = entry
                 deduped.append(entry)
 
-        output.append(f"\n---\n# {mod_name}")
+        output.append(f"\n---\n# {table_name}")
         for entry in deduped:
             info = (
                 docs.get(entry["name"])
@@ -367,3 +380,4 @@ for mod_name in MOD_ORDER:
             )
 
 print("\n".join(output))
+

@@ -128,6 +128,8 @@ fn makeStatTable(vm: *VM, stat: File.Stat) !Data {
     return Data{ .table = table };
 }
 
+/// > fs:open(path: string) -> file_handle
+/// opens a file or directory at the given path
 fn open_fn(args: []const Data, vm: *VM) !NativeResult {
     const path = vm.stringValue(args[0].string);
     const io = vm.runtime.io;
@@ -160,6 +162,8 @@ fn open_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, wrapped);
 }
 
+/// > file:read() -> string
+/// reads file contents as string, or directory entries separated by newlines
 fn read_fn(args: []const Data, vm: *VM) !NativeResult {
     const file_data = args[0];
     if (file_data != .table) {
@@ -207,6 +211,8 @@ fn read_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, result_data);
 }
 
+/// > file:write(data: string) -> number
+/// writes data to file, returns number of bytes written
 fn write_fn(args: []const Data, vm: *VM) !NativeResult {
     const file_data = args[0];
     if (file_data != .table or args[1] != .string) {
@@ -242,6 +248,8 @@ fn write_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, Data.new.num(data.len));
 }
 
+/// > file:stat() -> table
+/// returns table with file statistics (size, kind, mtime, ctime, atime)
 fn stat_fn(args: []const Data, vm: *VM) !NativeResult {
     const file_data = args[0];
     if (file_data != .table) {
@@ -263,6 +271,8 @@ fn stat_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, stat_table);
 }
 
+/// > file:close() -> atom
+/// closes the file handle, returns :ok
 fn close_fn(args: []const Data, vm: *VM) !NativeResult {
     const file_data = args[0];
     if (file_data != .table) {
@@ -274,6 +284,8 @@ fn close_fn(args: []const Data, vm: *VM) !NativeResult {
     return try .Ok(vm, Data.new.atom(try vm.internAtom("ok")));
 }
 
+/// > file:readdir() -> table
+/// reads directory entries, returns table of {name, kind} pairs
 fn readdir_fn(args: []const Data, vm: *VM) !NativeResult {
     const file_data = args[0];
     if (file_data != .table) {
