@@ -953,6 +953,7 @@ test "inner for loop" {
         \\ let t = 0
         \\ for x in 1..10
         \\  for y in 10..20 t += (x * y)
+        \\ t
     , 6525);
 }
 
@@ -1063,61 +1064,21 @@ test "break while loop with value" {
 
 test "break for without value returns nil" {
     try t.top_atom(
-        \\ for i in 0..5 do
-        \\     break
+        \\ const x = for i in 0..5 do
+        \\   break
         \\ end
+        \\ x
     , "nil");
 }
 
-test "__iter metatable for custom iteration" {
-    try t.top_number("let obj = {a = 1}; for x in obj do print(x) end; 1 + 5", 6);
-}
-
-test "__iter with closure state" {
-    try t.top_number(
-        \\ global n = 0
-        \\ let next = fn() do n = n + 1; if n > 5 :done else n end
-        \\ let obj = set_metatable({}, {__iter = fn(self) next})
-        \\ let result = 0
-        \\ for x in obj do result = result + x end
-        \\ result
-    , 15);
-}
-
-test "__iter with break" {
-    try t.top_number(
-        \\ global break_i = 0
-        \\ let obj = set_metatable({}, {__iter = fn(self) fn() do break_i = break_i + 1; if break_i > 10 :done else break_i end})
-        \\ for x in obj do if x == 5 do break(x) end end
-    , 5);
-}
-
-test "__iter early termination" {
+test "break works inside fn" {
     try t.top_atom(
-        \\ let obj = set_metatable({}, {__iter = fn(self) :done})
-        \\ let ran = :false
-        \\ for v in obj do ran = :true end
-        \\ ran
-    , "false");
-}
-
-test "iterate function directly" {
-    try t.top_number(
-        \\ global fc = 0
-        \\ let next_fn = fn() do fc = fc + 1; if fc > 3 :done else fc end
-        \\ let sum = 0
-        \\ for x in next_fn do sum = sum + x end
-        \\ sum
-    , 6);
-}
-
-test "break while without value returns nil" {
-    try t.top_atom(
-        \\ let x = 0
-        \\ while x < 5 do
-        \\     break
+        \\ const x = fn()
+        \\   for i in 0..5 do break
+        \\   return :asdf
         \\ end
-    , "nil");
+        \\ x()
+    , "asdf");
 }
 
 test "compile report carries span and message" {

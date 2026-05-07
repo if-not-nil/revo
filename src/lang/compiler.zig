@@ -368,32 +368,14 @@ pub const Compiler = struct {
             .for_loop => |v| try self.compileFor(v.params, v.body, v.iter),
             .while_loop => |v| try self.compileWhile(v.predicate, v.body),
             .break_expr => |value| {
-                if (self.in_loop_depth == 0) return self.fail(.UnsupportedSyntax, expr, "break is only valid inside loop");
-                if (self.loop_result_regs.items.len == 0) {
-                    // break inside a closure-based loop (function body): use return
-                    if (value) |v| try self.compile(v, true) else try self.emitNil();
-                    try self.emit(.ret, 1);
-                } else {
-                    // break inside an inline loop: compile value, move to loop result reg, jump to exit (placeholder)
-                    if (value) |v| try self.compile(v, true) else try self.emitNil();
-                    const result_reg = self.loop_result_regs.items[self.loop_result_regs.items.len - 1];
-                    const src_reg: Register = @intCast(self.active_registers - 1);
-                    const dst_reg: Register = @intCast(result_reg);
-                    const move_instr: Instruction = .{
-                        .op = .move,
-                        .a = dst_reg,
-                        .b = src_reg,
-                    };
-                    try self.instructions.append(self.alloc, move_instr);
-                    try self.spans.append(self.alloc, self.active_span);
-                    // emit jump with placeholder (will be patched at loop end)
-                    const jump_idx = self.instructions.items.len;
-                    try self.emit(.jump, 0);
-                    try self.break_jumps.append(self.alloc, jump_idx);
-                    // keep active_registers unchanged since for compilerm
-                    // the value is still on the stack in both src and result reg
-                    // and at runtime, the jump means this code path is never reached
-                }
+                if (self.in_loop_depth == 0) return self.fail(
+                    .UnsupportedSyntax,
+                    expr,
+                    "break is only valid inside loop",
+                );
+                // break inside a closure-based loop (function body): use return
+                if (value) |v| try self.compile(v, true) else try self.emitNil();
+                try self.emit(.ret, 1);
             },
             .fn_expr => |fn_expr| try self.compileFn(fn_expr, null, false),
             .match_expr => |v| try self.compileMatch(v.subject, v.arms),
