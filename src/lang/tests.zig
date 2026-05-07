@@ -1818,6 +1818,16 @@ test "recursive function with guards" {
     , 15);
 }
 
+test "fibonacci w/ match guards" {
+    try t.top_number(
+        \\ fn frec(n) match n
+        \\ | x when x < 2 x
+        \\ | x frec(x - 1) + frec(x - 2)
+        \\
+        \\ frec(5)
+    , 5);
+}
+
 //
 // operator behaviour
 //

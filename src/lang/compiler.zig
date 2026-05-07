@@ -735,6 +735,13 @@ pub const Compiler = struct {
         return slot;
     }
 
+    fn reserveLocalSlots(self: *Compiler) void {
+        if (self.currentFunctionState()) |state| {
+            if (self.active_registers < state.next_slot) self.active_registers = state.next_slot;
+            if (self.max_registers < state.next_slot) self.max_registers = state.next_slot;
+        }
+    }
+
     fn currentScopeStartIn(self: *const Compiler, fn_index: usize) usize {
         const state = self.functions.items[fn_index];
         if (state.scope_starts.items.len == 0) return 0;
@@ -1214,7 +1221,7 @@ pub const Compiler = struct {
         // stack: loop_result
     }
 
-    const IterStorage = union(enum) {
+    const VarStorage = union(enum) {
         local: Operand,
         global: revo.AtomID,
     };
@@ -1246,7 +1253,7 @@ pub const Compiler = struct {
         var loop = try LoopScope.init(self);
         defer loop.deinit();
 
-        const iter_storage: IterStorage = if (in_fn) blk: {
+        const iter_storage: VarStorage = if (in_fn) blk: {
             const fn_state = &self.functions.items[self.functions.items.len - 1];
             const iter_slot: Operand = @intCast(fn_state.next_slot);
             fn_state.next_slot += 1;
@@ -1257,7 +1264,7 @@ pub const Compiler = struct {
             break :blk .{ .global = iter_global };
         };
 
-        const idx_storage: IterStorage = if (in_fn) blk: {
+        const idx_storage: VarStorage = if (in_fn) blk: {
             const fn_state = &self.functions.items[self.functions.items.len - 1];
             const idx_slot: Operand = @intCast(fn_state.next_slot);
             fn_state.next_slot += 1;
@@ -1323,7 +1330,7 @@ pub const Compiler = struct {
 
     fn emitStorageLoad(
         self: *Compiler,
-        storage: IterStorage,
+        storage: VarStorage,
     ) InternalLowerError!void {
         switch (storage) {
             .local => |slot| try self.emit(.load_local, slot),
@@ -1333,7 +1340,7 @@ pub const Compiler = struct {
 
     fn emitStorageStore(
         self: *Compiler,
-        storage: IterStorage,
+        storage: VarStorage,
         is_const: bool,
     ) InternalLowerError!void {
         switch (storage) {
@@ -1345,8 +1352,8 @@ pub const Compiler = struct {
     /// TODO: move the whole thing into vm
     fn emitForValueLoad(
         self: *Compiler,
-        iter_storage: IterStorage,
-        idx_storage: IterStorage,
+        iter_storage: VarStorage,
+        idx_storage: VarStorage,
     ) InternalLowerError!void {
         const base_depth = self.active_registers;
         const tuple_check = try self.emitForTypeCheck(iter_storage, "tuple");
@@ -1386,7 +1393,7 @@ pub const Compiler = struct {
 
     fn emitForTypeCheck(
         self: *Compiler,
-        iter_storage: IterStorage,
+        iter_storage: VarStorage,
         type_name: []const u8,
     ) InternalLowerError!usize {
         try self.emit(.load_global, try self.vm.internAtom("type"));
@@ -1430,11 +1437,18 @@ pub const Compiler = struct {
         subject: *const Node,
         arms: []const ast.MatchArm,
     ) InternalLowerError!void {
+        // match gets its own scope for the subject var
+        try self.pushScope();
+        errdefer self.popScope();
+
         const subject_name = try self.nextTemp("__match");
-        const subject_sym = try self.vm.internAtom(subject_name);
+        const subject_slot = try self.declareLocal(subject_name, false);
         try self.compile(subject, true);
-        try self.emit(.store_global, subject_sym);
+        self.markLocalInitialized(subject_slot);
+        try self.emit(.bind_local, subject_slot);
+        self.reserveLocalSlots();
         const arm_base_registers = self.active_registers;
+        const subject_storage: VarStorage = .{ .local = subject_slot };
 
         var end_jumps = try std.ArrayList(usize).initCapacity(self.alloc, arms.len);
         defer end_jumps.deinit(self.alloc);
@@ -1448,41 +1462,98 @@ pub const Compiler = struct {
                 .expr => |e| e,
             };
 
-            const fail_jumps = try self.compilePatternChecks(subject_sym, matcher_expr);
+            try self.pushScope();
+            errdefer self.popScope();
+
+            const fail_jumps = try self.compilePatternChecks(subject_storage, matcher_expr);
             var fail_list = try std.ArrayList(usize).initCapacity(self.alloc, fail_jumps.len + 1);
             defer fail_list.deinit(self.alloc);
             try fail_list.appendSlice(self.alloc, fail_jumps);
             self.alloc.free(fail_jumps);
 
-            if (matcher_expr) |me| try self.bindPatternFromMatcher(me, subject_sym);
+            if (matcher_expr) |me| try self.bindMatchPattern(me, subject_storage);
             if (arm.guard) |guard| {
                 try self.compile(guard, true);
-                try fail_list.append(self.alloc, try self.emitJump(.jump_if_false));
-                self.active_registers = arm_base_registers;
+                const guard_jump = try self.emitJump(.jump_if_false);
+                try fail_list.append(self.alloc, guard_jump);
             }
+            // always reset active_registers before body compilation to make it very very sure
+            // all arms alloc their result in the same reg pos
+            self.active_registers = arm_base_registers;
             try self.compile(arm.then, true);
-            if (self.active_registers != arm_base_registers + 1) return error.InvalidBytecode;
-            try end_jumps.append(self.alloc, try self.emitJump(.jump));
-            for (fail_list.items) |jump_idx| self.patchJump(jump_idx);
+            const end_jump = try self.emitJump(.jump);
+            try end_jumps.append(self.alloc, end_jump);
+            self.popScope();
+            for (fail_list.items) |jump_idx| {
+                self.patchJump(jump_idx);
+            }
         }
 
+        self.popScope();
         self.active_registers = arm_base_registers;
         try self.emitNil();
         for (end_jumps.items) |jump_idx| self.patchJump(jump_idx);
     }
 
-    fn bindPatternFromMatcher(
+    fn bindMatchPattern(
         self: *Compiler,
         matcher: *const Node,
-        subject_sym: revo.AtomID,
+        subject: VarStorage,
     ) InternalLowerError!void {
         switch (matcher.expr) {
             .ident => |name| {
                 if (ast.isDiscardName(name)) return;
-                try self.emit(.load_global, subject_sym);
-                try self.emit(.store_global, try self.vm.internAtom(name));
+                try self.emitStorageLoad(subject);
+                const slot = try self.declareLocal(name, true);
+                self.markLocalInitialized(slot);
+                try self.emit(.bind_local, slot);
+                self.reserveLocalSlots();
             },
-            .tuple_pattern => try self.bindPattern(matcher, subject_sym, .let),
+            .tuple_pattern => try self.bindMatchTuplePattern(matcher, subject),
+            else => {},
+        }
+    }
+
+    fn bindMatchTuplePattern(
+        self: *Compiler,
+        pattern: *const Node,
+        source: VarStorage,
+    ) InternalLowerError!void {
+        switch (pattern.expr) {
+            .ident => |name| {
+                if (ast.isDiscardName(name)) return;
+                try self.emitStorageLoad(source);
+                const slot = try self.declareLocal(name, true);
+                self.markLocalInitialized(slot);
+                try self.emit(.bind_local, slot);
+                self.reserveLocalSlots();
+            },
+            .tuple_pattern => |items| {
+                for (items, 0..) |item, idx| {
+                    switch (item.expr) {
+                        .ident => |name| {
+                            if (ast.isDiscardName(name)) continue;
+                            try self.emitStorageLoad(source);
+                            try self.emit(.tuple_get_const, idx);
+                            const slot = try self.declareLocal(name, true);
+                            self.markLocalInitialized(slot);
+                            try self.emit(.bind_local, slot);
+                            self.reserveLocalSlots();
+                        },
+                        .tuple_pattern => {
+                            try self.emitStorageLoad(source);
+                            try self.emit(.tuple_get_const, idx);
+                            const nested_name = try self.nextTemp("__bind");
+                            const nested_slot = try self.declareLocal(nested_name, false);
+                            self.markLocalInitialized(nested_slot);
+                            try self.emit(.bind_local, nested_slot);
+                            self.reserveLocalSlots();
+                            try self.bindMatchTuplePattern(item, .{ .local = nested_slot });
+                        },
+                        else => {},
+                    }
+                }
+            },
             else => {},
         }
     }
@@ -1493,7 +1564,7 @@ pub const Compiler = struct {
 
     fn compilePatternChecks(
         self: *Compiler,
-        subject_sym: revo.AtomID,
+        subject: VarStorage,
         matcher: ?*const Node,
     ) InternalLowerError![]usize {
         var fail_jumps = try std.ArrayList(usize).initCapacity(self.alloc, 4);
@@ -1504,7 +1575,7 @@ pub const Compiler = struct {
             .tuple_pattern => |items| {
                 // check tuple type
                 try self.emit(.load_global, try self.vm.internAtom("type"));
-                try self.emit(.load_global, subject_sym);
+                try self.emitStorageLoad(subject);
                 try self.emit(.call, 1);
                 try self.emitConst(try self.vm.ownDataString("tuple"));
                 try self.emit(.eq, 0);
@@ -1512,7 +1583,7 @@ pub const Compiler = struct {
 
                 // check exact tuple length
                 try self.emit(.load_global, try self.vm.internAtom("len"));
-                try self.emit(.load_global, subject_sym);
+                try self.emitStorageLoad(subject);
                 try self.emit(.call, 1);
                 try self.emitConst(Data.new.num(items.len));
                 try self.emit(.eq, 0);
@@ -1524,20 +1595,21 @@ pub const Compiler = struct {
                         else => {},
                     }
                     const depth_before = self.active_registers;
-                    try self.emit(.load_global, subject_sym);
+                    try self.emitStorageLoad(subject);
                     try self.emit(.tuple_get_const, idx);
                     const nested_name = try self.nextTemp("__match");
-                    const nested_sym = try self.vm.internAtom(nested_name);
-                    try self.duplicateRegister();
-                    try self.emit(.store_global, nested_sym);
-                    const nested_fails = try self.compilePatternChecks(nested_sym, item);
+                    const nested_slot = try self.declareLocal(nested_name, false);
+                    self.markLocalInitialized(nested_slot);
+                    try self.emit(.bind_local, nested_slot);
+                    self.reserveLocalSlots();
+                    const nested_fails = try self.compilePatternChecks(.{ .local = nested_slot }, item);
                     for (nested_fails) |jump_idx| try fail_jumps.append(self.alloc, jump_idx);
                     self.alloc.free(nested_fails);
                     self.active_registers = depth_before;
                 }
             },
             else => {
-                try self.emit(.load_global, subject_sym);
+                try self.emitStorageLoad(subject);
                 try self.compile(expr, true);
                 try self.emit(.eq, 0);
                 try fail_jumps.append(self.alloc, try self.emitJump(.jump_if_false));

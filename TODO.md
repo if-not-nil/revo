@@ -2,7 +2,7 @@
 
 ## 1.0 requirements
 
-these must be completed before the language goes public:
+these should be done before the language is considered complete:
 
 - [ ] **predictable type inference and typechecker**
   - needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
@@ -50,6 +50,9 @@ these must be completed before the language goes public:
 ### advanced io
 - [ ] **kqueue** (bsd and osx)
 - [ ] **uring** (linux)
+### struct Runtime
+- [ ] as a type
+    add default presets. that means, the entirety of the lookup could be marked as inline and, eventually, just folded into an enum lookup and handled by the type system. this could also mean builds with full abscense of Runtime at runtime (and maybe as a field in vm), if comptimed the right way
 
 ## std expansion
 
