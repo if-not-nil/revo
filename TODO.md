@@ -50,9 +50,11 @@ these should be done before the language is considered complete:
 ### advanced io
 - [ ] **kqueue** (bsd and osx)
 - [ ] **uring** (linux)
-### struct Runtime
-- [ ] as a type
+- [ ] struct Runtime as a type
     add default presets. that means, the entirety of the lookup could be marked as inline and, eventually, just folded into an enum lookup and handled by the type system. this could also mean builds with full abscense of Runtime at runtime (and maybe as a field in vm), if comptimed the right way
+- [ ] struct Runtime figure out the who-owns-what with the vm and runtime relation. maybe entrypoint owns one runtime that is then always shared,
+    but the runtime owns the string interner and other state theoretically shareable between vm instances?
+- [ ] move more state into the global scope
 
 ## std expansion
 
