@@ -1,15 +1,14 @@
 ## > match expressions, in revo
 ideal shape, when stable, is this
 
-let f = match os.open("./readme.md")
-| (:ok, file) file
-| (:err, error) do
-	match error
-	| :FileDNE panic("file does not exist")
-	| x panic("other error: ", x)
-end
 ##
+let f = match fs.open("./readme.md")
+| (:ok, file) file
+| (:err, error) error
 
+print(f)
+
+##
 const x = match (:number, 123)
 | (:number, v) print("is number", v)
 
@@ -19,3 +18,4 @@ fn frec(n) match n
 	| x frec(x - 1) + frec(x - 2)
 
 print(frec(20))
+##

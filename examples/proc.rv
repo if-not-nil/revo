@@ -75,9 +75,9 @@ proc cmul!(iter) do
 	print("inner: ", add3!(10,20,12))
 	print("peek: ", iter:peek())
 	match iter:peek()
-	| (:number, n) print("is number", n)
-	| (other, n) print(other, n)
-	| x print("not tuple: ", x) # breaks right here today :(
+		| (:number, n) print("is number", n)
+		| (other, n) print(other, n)
+		| x print("not tuple: ", x) # breaks right here today :(
 	let a = 10 + (iter:next_of(:number))
   let b = iter:next_of(:number)
   let c = iter:next_of(:number)

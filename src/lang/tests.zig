@@ -1709,6 +1709,28 @@ test "match guard prevents match" {
     , 2);
 }
 
+test "match patterns" {
+    try t.top_number(
+        \\ const x = (:ok, 42)
+        \\ match x
+        \\ | (:asdf, v) 1
+        \\ | (:ok, v) v
+        \\ | (:err, e) 2
+    , 42);
+}
+
+test "match patterns with guards" {
+    try t.top_number(
+        \\ const x = (:ok, 42)
+        \\ match x
+        \\ | (:asdf, v) 1
+        \\ | (:ok, v) when v < 20 2
+        \\ | (:ok, v) when v > 40 v
+        \\ | (:ok, v) when number?(v) 3
+        \\ | (:err, e) 2
+    , 42);
+}
+
 //
 // table
 //
