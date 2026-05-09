@@ -9,11 +9,11 @@ print(c()) # 2
 
 # comp closures
 const x = comp do
-	let res = io:read():unwrap()
+	let res = read():unwrap()
 		|> fn(c) c:upper()
 
 	match res
-	| "HELLO" when io:read():unwrap():len() < 2
+	| "HELLO" when read():unwrap():len() < 2
 		{}:set_meta({
 				__index = fn(self, k) k * 2
 		})

@@ -2,11 +2,11 @@
 ideal shape, when stable, is this
 
 ##
-let f = match fs.open("./readme.md")
+let f = match fs.open(".")
 | (:ok, file) file
-| (:err, error) error
+| (:err, e) panic("e", e)
 
-print(f)
+print(f:read())
 
 ##
 const x = match (:number, 123)

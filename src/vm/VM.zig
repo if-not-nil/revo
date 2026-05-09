@@ -44,21 +44,6 @@ pub const DebugInfo = struct {
 /// another way to do so would be an enum(AtomID), and making sure they always start initialization at 0
 /// not sure about that! may switch over to that model later
 ///
-/// never garbage collected
-/// an io table is a table which implements all of those ops. those exact atom names are preserved
-pub const IoOps = struct {
-    read: revo.std_lib.NativeFn, // until delimiter
-    // read_all: NativeFN, // whole file
-    // read_bytes: NativeFN, // n bytes
-
-    // write: NativeFN, // raw to stdout/file
-    // print: NativeFN, // stdout newline, later allow no newline when kwargs and flush
-    // eprint: NativeFN, // stderr with newline and flush
-    // flush: NativeFN, // flush handle
-
-    cwd: revo.std_lib.NativeFn,
-    import: revo.std_lib.NativeFn,
-};
 /// quite a hefty struct,,, but its worth it
 pub const Fiber = struct {
     pub const OpenUpvalueRef = struct {
@@ -132,7 +117,6 @@ const ChannelState = Scheduler.ChannelState;
 sched: Scheduler,
 
 runtime: revo.Runtime,
-io_ops: IoOps = @import("io/blocking.zig").ops,
 // TODO: move all pools and sets into one big struct, remove useless fns like intern_atom
 constants: std.ArrayList(Data),
 bootstrap_globals: Globals,
@@ -459,6 +443,14 @@ pub fn internAtom(self: *VM, name: []const u8) !mem.AtomID {
 
 pub fn atomName(self: *VM, id: mem.AtomID) []const u8 {
     return self.strings.get(id) catch "<dead>";
+}
+
+pub fn dataAtom(self: *VM, name: []const u8) !Data {
+    if (self.atoms.get(name)) |id| return .{ .atom = id };
+    const id = try self.strings.own(name);
+    const owned = self.strings.getAssumeAlive(id);
+    try self.atoms.put(owned, id);
+    return .{ .atom = id };
 }
 
 pub fn setGlobal(self: *VM, name: []const u8, val: Data) !void {
@@ -1778,7 +1770,6 @@ test {
     _ = @import("debug.zig");
     _ = @import("functions.zig");
     _ = @import("interner.zig");
-    _ = @import("io/blocking.zig");
     _ = @import("lookup.zig");
     _ = @import("memory.zig");
     _ = @import("module.zig");

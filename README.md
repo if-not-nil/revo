@@ -49,7 +49,7 @@ const a = fn() :true
 - **no nil by default** - use atoms like `:nil`, `:undef` instead. booleans are `:true` and `:false` as well
 ```ruby
 const t = {1,2,3}
-const res = io:read():unwrap()
+const res = read():unwrap()
 t[42] == :undef
 do end == :nil
 ```
@@ -87,7 +87,7 @@ compiles scripts to bytecode and tries to take full advantage of that
 ```ruby
 # revo -b ./src.rv builds, executes the comp blocks, and bakes them into the final
 # program but does not run anything non-comp
-const name = comp io:read()
+const name = comp read()
 
 # macros are expanded at compile time and are zero-cost
 const println! = macro `(%fmt:str %ARGS(, %arg:expr)*)` `(print(fmt(%fmt %ARGS(, %arg))))`
@@ -105,7 +105,7 @@ struct Counter {
 
 ```ruby
 # pattern matching
-const res = io:read()
+const res = read()
 
 match res
 | (:ok, v) print("ok: ", v)

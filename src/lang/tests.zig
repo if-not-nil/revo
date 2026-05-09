@@ -1264,12 +1264,38 @@ test "natives register as functions" {
     try t.top_true("assert(type(len) == :function)");
 }
 
-test "os.read reads from file path" {
-    try t.top_true(":true");
+test "read reads from file path" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "readme.rv",
+        .data = "hello\nworld",
+    });
+
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+
+    try t.top_string_in_dir(module_dir,
+        \\ read({path = "readme.rv"}):unwrap()
+    , "hello");
 }
 
-test "os.read accepts delimiter and path" {
-    try t.top_true(":true");
+test "read accepts delimiter and path" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "delim.txt",
+        .data = "a|b|c",
+    });
+
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+
+    try t.top_string_in_dir(module_dir,
+        \\ read({path = "delim.txt", delimiter = "|"}):unwrap()
+    , "a");
 }
 
 test "import caches modules and reuses the same table" {

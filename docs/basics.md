@@ -481,7 +481,7 @@ bytecode. compile time happens both when executing a script directly and when ru
 const LIMIT = comp (1024 * 1024)
 print(comp ("prefix_" + "suffix")) # prefix_suffix
 print(comp (1 < 2))                # :true
-print(comp io.read())              # only runs at compilation time
+print(comp read())                 # only runs at compilation time
 ```
 
 # macros

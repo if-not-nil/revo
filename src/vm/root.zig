@@ -35,7 +35,6 @@ test {
     _ = @import("debug.zig");
     _ = @import("functions.zig");
     _ = @import("interner.zig");
-    _ = @import("io/blocking.zig");
     _ = @import("memory.zig");
     _ = @import("module.zig");
     _ = @import("opcode.zig");
