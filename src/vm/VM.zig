@@ -1563,7 +1563,6 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             try self.const_globals.put(instr.bx, {});
         },
         .load_local => try self.copyRegister(instr.a, instr.b),
-        .bind_local => try self.copyRegister(instr.a, instr.b),
         .store_local => {
             if (try self.localIsConst(instr.a)) return error.ConstantReassignment;
             try self.copyRegister(instr.a, instr.b);

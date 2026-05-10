@@ -12,7 +12,6 @@ pub const Opcode = enum(u8) {
     store_global, // "globals[bx] <- R[a]"
     store_global_const, // "globals[bx] <- R[a], mark const"
     load_local, // "R[a] <- R[b] (local read)"
-    bind_local, // "R[a] <- R[b] (local init)"
     store_local, // "R[a] <- R[b] (local write)"
     load_upval, // "R[a] <- upvalue[bx]"
     store_upval, // "upvalue[bx] <- R[a]"

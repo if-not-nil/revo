@@ -631,7 +631,7 @@ pub const Compiler = struct {
             else => .unknown,
         });
         try self.duplicateRegister();
-        try self.emit(.bind_local, slot);
+        try self.emit(.load_local, slot);
     }
 
     fn bindPattern(
@@ -1454,7 +1454,7 @@ pub const Compiler = struct {
         const subject_slot = try self.declareLocal(subject_name, false);
         try self.compile(subject, true);
         self.markLocalInitialized(subject_slot);
-        try self.emit(.bind_local, subject_slot);
+        try self.emit(.load_local, subject_slot);
         self.reserveLocalSlots();
 
         const arm_base_registers = self.active_registers;
@@ -1555,7 +1555,7 @@ pub const Compiler = struct {
                 try self.emitStorageLoad(subject);
                 const slot = try self.declareLocal(name, true);
                 self.markLocalInitialized(slot);
-                try self.emit(.bind_local, slot);
+                try self.emit(.load_local, slot);
                 self.reserveLocalSlots();
             },
             .tuple_pattern => try self.bindMatchTuplePattern(matcher, subject),
@@ -1574,7 +1574,7 @@ pub const Compiler = struct {
                 try self.emitStorageLoad(source);
                 const slot = try self.declareLocal(name, true);
                 self.markLocalInitialized(slot);
-                try self.emit(.bind_local, slot);
+                try self.emit(.load_local, slot);
                 self.reserveLocalSlots();
             },
             .tuple_pattern => |items| {
@@ -1586,7 +1586,7 @@ pub const Compiler = struct {
                             try self.emit(.tuple_get_const, idx);
                             const slot = try self.declareLocal(name, true);
                             self.markLocalInitialized(slot);
-                            try self.emit(.bind_local, slot);
+                            try self.emit(.load_local, slot);
                             self.reserveLocalSlots();
                         },
                         .tuple_pattern => {
@@ -1595,7 +1595,7 @@ pub const Compiler = struct {
                             const nested_name = try self.nextTemp("__bind");
                             const nested_slot = try self.declareLocal(nested_name, false);
                             self.markLocalInitialized(nested_slot);
-                            try self.emit(.bind_local, nested_slot);
+                            try self.emit(.load_local, nested_slot);
                             self.reserveLocalSlots();
                             try self.bindMatchTuplePattern(item, .{ .local = nested_slot });
                         },
@@ -1645,7 +1645,7 @@ pub const Compiler = struct {
                     const nested_name = try self.nextTemp("__match");
                     const nested_slot = try self.declareLocal(nested_name, false);
                     self.markLocalInitialized(nested_slot);
-                    try self.emit(.bind_local, nested_slot);
+                    try self.emit(.load_local, nested_slot);
                     self.reserveLocalSlots();
                     const nested_fails = try self.compilePatternChecks(.{ .local = nested_slot }, item);
                     for (nested_fails) |jump_idx| try fail_jumps.append(self.alloc, jump_idx);
@@ -1791,7 +1791,7 @@ pub const Compiler = struct {
         try self.emit(.load_global, descriptor_sym);
         self.markLocalInitialized(descriptor_slot);
         try self.duplicateRegister();
-        try self.emit(.bind_local, descriptor_slot);
+        try self.emit(.load_local, descriptor_slot);
     }
 
     const StructFieldTableKind = enum {
@@ -2077,9 +2077,9 @@ pub const Compiler = struct {
                 instr = .{ .op = .load_local, .a = try reg(depth), .b = try reg(operand) };
                 depth += 1;
             },
-            .bind_local, .store_local => {
+            .store_local => {
                 if (depth == 0) return error.InvalidBytecode;
-                instr = .{ .op = if (op == .bind_local) .bind_local else .store_local, .a = try reg(operand), .b = try reg(depth - 1) };
+                instr = .{ .op = if (op == .load_local) .load_local else .store_local, .a = try reg(operand), .b = try reg(depth - 1) };
                 depth -= 1;
             },
 
