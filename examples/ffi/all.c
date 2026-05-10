@@ -1,15 +1,22 @@
 #include "../../revo.h"
 #include <regex.h>
-#include <stdlib.h>
 #include <string.h>
+
+static RevoData make_string(void *vm, const char *str) {
+  return (RevoData){
+      .tag = revo_string,
+      .value = revo_intern(vm, (uint64_t)(uintptr_t)str, strlen(str)),
+  };
+}
 
 /// > echo(s) -> string
 void echo(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   if (argc < 1 || argv[0].tag != revo_string) {
-    *out_result = (RevoData){.tag = revo_atom, .value = ra_ok};
+    *out_result = revo_nil();
     return;
   }
-  *out_result = argv[0];
+  const char *str = (const char *)(uintptr_t)argv[0].value;
+  *out_result = make_string(vm, str);
 }
 
 /// > strlen(s) -> number
@@ -39,7 +46,7 @@ void add(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
 /// returns type tag: 0=number, 1=string, 2=atom, etc
 void type(void *vm, size_t argc, RevoData *argv, RevoData *out_result) {
   if (argc < 1) {
-    *out_result = R_NIL();
+    *out_result = revo_nil();
     return;
   }
   double tag = (double)argv[0].tag;

@@ -23,8 +23,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const erevo_mod = b.addModule("erevo", .{
+        .root_source_file = b.path("src/erevo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
-    const all_mods = [_]*std.Build.Module{ vm_mod, revo_mod };
+    const all_mods = [_]*std.Build.Module{ vm_mod, revo_mod, erevo_mod };
     const imports = [_]struct { []const u8, *std.Build.Module }{
         .{ "revo", revo_mod },
         .{ "vm", vm_mod },
@@ -86,7 +91,7 @@ pub fn build(b: *std.Build) void {
     b.step("run", "run the cli").dependOn(&run_cmd.step);
 
     const check_modules = [_]*std.Build.Module{
-        tests_root, revo_mod, vm_mod, exe_root,
+        tests_root, revo_mod, vm_mod, erevo_mod, exe_root,
     };
 
     const test_step = b.step("test", "run all tests");
@@ -102,9 +107,9 @@ pub fn build(b: *std.Build) void {
     for (check_modules) |mod| {
         check_step.dependOn(&b.addTest(.{ .root_module = mod, .filters = test_filters }).step);
     }
-    // 
+    //
     // releases
-    // 
+    //
     const release_targets: []const []const u8 = &.{
         "x86_64-linux-musl",
         // "aarch64-linux-musl",
@@ -146,4 +151,11 @@ pub fn build(b: *std.Build) void {
         const install = b.addInstallArtifact(release_exe, .{});
         release_step.dependOn(&install.step);
     }
+
+    const lib = b.addLibrary(.{
+        .name = "erevo",
+        .root_module = erevo_mod,
+    });
+    b.installArtifact(lib);
+    b.getInstallStep().dependOn(&b.addInstallHeaderFile(b.path("revo.h"), "revo.h").step);
 }

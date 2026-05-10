@@ -1,34 +1,8 @@
 print("// examples module")
 
-const ex = import("examples.so")
+const ex = import("all.so")
 
 print("echo:", ex.echo("hello"))
 print("strlen:", ex.strlen_fn("hello"))
 print("add:", ex.add(3, 4))
 print("type(5):", ex.type(5))
-
-print("// regex module")
-
-const regex = import("regex")
-const r = Regex{pattern = "[a-z]+"}
-
-print("regex obj:", r)
-print("regex.test(\"[0-9]+\", \"a1b\"):", regex.test("[0-9]+", "a1b"))
-print("regex.test(\"[a-z]+\", \"abc\"):", regex.test("[a-z]+", "abc"))
-
-print()
-print(":ok")
-
-fn reg() do
-	const mod = import("regex.so")
-
-	struct Regex {
-		compiled: number,
-		fn compile(str) do
-			const ptr = mod.compile(str)
-			Regex{compiled = ptr}
-		end,
-	}
-
-	return Regex
-end

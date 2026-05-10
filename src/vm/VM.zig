@@ -1038,7 +1038,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
 
             var string_copies = try std.ArrayList([]u8).initCapacity(self.runtime.alloc, argc);
             defer {
-                for (string_copies.items) |copy| self.runtime.alloc.free(copy);
+                for (string_copies.items) |copy| self.runtime.alloc.free(copy.ptr[0 .. copy.len + 1]);
                 string_copies.deinit(self.runtime.alloc);
             }
 
@@ -1048,7 +1048,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
             var c_result: revo.ffi.CRevoData = .{ .tag = 0, .value = 0 };
             f.fn_ptr(@ptrCast(self), argc, c_args.ptr, &c_result);
 
-            try self.writeRegister(instr.c, c_result.toData());
+            try self.writeRegister(instr.c, try c_result.toData(self));
         },
         .native => |f| {
             const args_start = callee_slot + 1;

@@ -1,13 +1,11 @@
-LDFLAGS := -shared -Wall -Wextra -O2
+LDFLAGS := -std=c99 -shared -Wall -Wextra
 UNAME := $(shell uname -s)
 ifeq ($(UNAME), Darwin)
-	LDFLAGS += -undefined dynamic_lookup -target -fPIC arm64-apple-macos11
+	LDFLAGS += -undefined dynamic_lookup -target arm64-apple-macos11 -fPIC
 endif
 
-all: examples.so regex.so
-
-%.so: %.c
-	clang $(LDFLAGS) -o $@ $^
+all:
+	clang $(LDFLAGS) all.c -o all.so
 
 clean:
 	rm -f *.so *.dylib
