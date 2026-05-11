@@ -272,6 +272,17 @@ test "test blocks run in test mode" {
     , true);
 }
 
+test "test blocks render eval failures and continue" {
+    try t.top_nil_test(
+        \\test "runtime failure" do
+        \\    panic("boom")
+        \\end
+        \\test "still runs" do
+        \\    assert(2 == 2)?
+        \\end
+    , true);
+}
+
 test "hash literals are real atoms" {
     try t.top_atom(":good", "good");
 }

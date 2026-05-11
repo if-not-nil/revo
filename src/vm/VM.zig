@@ -500,7 +500,7 @@ fn debugInfo(self: *VM, id: DebugInfoID) ?*const DebugInfo {
     return &self.debug_infos.items[id];
 }
 
-fn currentDebugInfo(self: *VM) ?*const DebugInfo {
+pub fn currentDebugInfo(self: *VM) ?*const DebugInfo {
     if (self.currentFiber().debug_info_id) |id| return self.debugInfo(id);
     if (self.pending_debug_info_id) |id| return self.debugInfo(id);
     return null;
@@ -836,6 +836,11 @@ fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     }
     failure.trace_len = out_idx;
     return failure;
+}
+
+/// TODO: dont
+pub fn evalFailureForStd(self: *VM, err: EvalError) EvalFailure {
+    return self.evalFailure(err);
 }
 
 pub fn callMetamethodByAtom(self: *VM, a: Data, b: Data, atom: mem.AtomID) !bool {

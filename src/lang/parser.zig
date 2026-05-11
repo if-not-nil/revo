@@ -712,9 +712,15 @@ const Parser = struct {
         const name = try self.expect(.string);
         const body_start = try self.expect(.kw_do);
         const body = try self.parseBlock(body_start);
+        const body_fn = try self.allocExpr(Span.merge(body_start.span(), body.span), .{
+            .fn_expr = .{
+                .params = &.{},
+                .body = body,
+            },
+        });
         return self.allocExpr(Span.merge(start.span(), body.span), .{ .test_block = .{
             .name = name.text,
-            .body = body,
+            .body = body_fn,
             .skip = skip,
         } });
     }
@@ -882,7 +888,7 @@ const Parser = struct {
             \\test "smoke" do
             \\    ok?
             \\end
-        , "(test smoke (block ok?))");
+        , "(test smoke (fn () (block ok?)))");
     }
 
     /// (expr, expr, ...) or ()

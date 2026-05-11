@@ -411,18 +411,11 @@ pub const Compiler = struct {
             .test_block => |block| {
                 if (self.test_mode) {
                     if (!block.skip) {
-                        const message = try std.fmt.allocPrint(
-                            self.vm.runtime.alloc,
-                            "* test \"{s}\"...",
-                            .{block.name},
-                        );
-                        defer self.vm.runtime.alloc.free(message);
-
-                        try self.emit(.load_global, try self.vm.internAtom("print"));
-                        try self.emitConst(try self.vm.ownDataString(message));
-                        try self.emit(.call, 1);
+                        try self.emit(.load_global, try self.vm.internAtom("@dotest"));
+                        try self.emitConst(try self.vm.ownDataString(block.name));
+                        try self.compile(block.body, true);
+                        try self.emit(.call, 2);
                         try self.releaseRegister();
-                        try self.compile(block.body, false);
                     }
                 }
                 try self.emitNil();

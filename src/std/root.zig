@@ -26,6 +26,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         .{ .name = "@range_from", .f = define(&[_]TypeSpec{ .number, .number }, range_from_) },
         .{ .name = "@struct_new", .f = define(&[_]TypeSpec{ .table, .table }, struct_new) },
         .{ .name = "@try", .f = define(&[_]TypeSpec{.tuple}, try_) },
+        .{ .name = "@dotest", .f = define(&[_]TypeSpec{ .string, .function }, dotest) },
         .{ .name = "@eval", .f = define(&[_]TypeSpec{.string}, @import("stupid.zig").eval) },
         .{ .name = "chan", .f = defineVariadic(&[_]TypeSpec{}, chan_new) },
         .{ .name = "send", .f = define(&[_]TypeSpec{ .tuple, .any }, chan_send) },
@@ -326,6 +327,40 @@ test "fmt %? uses debug rendering" {
         \\ const t = set_metatable({}, mt)
         \\ fmt("%?", t)
     , "custom-debug");
+}
+
+/// internal, do not use pls
+pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
+    const name = args[0].string;
+    const body = args[1].function;
+    std.debug.print("* test \"{s}\"...\n", .{try vm.strings.get(name)});
+    const res = vm.callFunction(.{ .function = body }, &[0]Data{}) catch |err| {
+        const failure = vm.evalFailureForStd(err);
+        var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
+        defer buf.deinit();
+        failure.render(vm.runtime.alloc, &buf.writer, vm.currentDebugSource() orelse "") catch {
+            std.debug.print("* hard-failed: \"{s}\"\n", .{@errorName(err)});
+            return .{ .ok = Data.new.nil() };
+        };
+        std.debug.print("{s}\n", .{buf.written()});
+        return .{ .ok = Data.new.nil() };
+    };
+    // only react to err tuple
+    // everything else is pass
+    if (res == .tuple) {
+        const tpl = try vm.tuples.get(res.tuple);
+        if (tpl.items.len != 2)
+            return .{ .ok = Data.new.nil() };
+        if (tpl.items[0] != .atom or tpl.items[0].atom != revo.core_atoms.atom_id(.err))
+            return .{ .ok = Data.new.nil() };
+
+        var buf = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 4);
+        defer buf.deinit(vm.runtime.alloc);
+        try append_data(&buf, tpl.items[1], vm, .display);
+
+        std.debug.print("* failed: {s}\n", .{buf.items});
+    }
+    return .{ .ok = Data.new.nil() };
 }
 
 /// > len(arg0: any) -> number|nil
