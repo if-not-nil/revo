@@ -190,7 +190,7 @@ zig build test --summary all -Dtest_filter="some test name filter"
 ```
 
 ### writing extensions in C
-[see the docs](http://localhost:1313/revo/c)
+[see the docs](https://gills.pages.dev/revo/c)
 ```bash
 zig build test --summary all -Dtest_filter="some test name filter"
 ```
