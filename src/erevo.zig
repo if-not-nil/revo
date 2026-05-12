@@ -1,6 +1,6 @@
-// 
+//
 // exports for embedding revo from c
-// 
+//
 const std = @import("std");
 const revo = @import("revo");
 

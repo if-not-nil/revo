@@ -236,7 +236,7 @@ pub const Compiler = struct {
     }
 
     fn compileRoot(self: *Compiler, expr: *const Node) InternalLowerError!void {
-        try self.compileClosureBody(&.{}, expr, "__main", null);
+        try self.compileFn(&.{}, expr, "__main", null);
         try self.emit(.call, 0);
         try self.emit(.halt, 0);
     }
@@ -401,7 +401,7 @@ pub const Compiler = struct {
                 if (value) |v| try self.compile(v, true) else try self.emitNil();
                 try self.emit(.ret, 1);
             },
-            .fn_expr => |fn_expr| try self.compileFn(fn_expr, null, false),
+            .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.body, "<fn>", null),
             .match_expr => |v| try self.compileMatch(v.subject, v.arms),
             .tuple_pattern => return self.fail(
                 .UnsupportedSyntax,
@@ -524,7 +524,7 @@ pub const Compiler = struct {
                 try self.emit(.call, 1);
             },
             .fn_expr => |fn_expr| {
-                try self.compileFn(fn_expr, null, false);
+                try self.compileFn(fn_expr.params, fn_expr.body, "<fn>", null);
                 try self.compile(left, true);
                 try self.emit(.call, 1);
             },
@@ -657,7 +657,7 @@ pub const Compiler = struct {
         if (binding.target.expr == .ident) {
             const name = binding.target.expr.ident;
             if (binding.value.expr == .fn_expr) {
-                try self.compileFn(binding.value.expr.fn_expr, name, false);
+                try self.compileFn(binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.body, name, null);
             } else {
                 try self.compile(binding.value, true);
             }
@@ -683,7 +683,7 @@ pub const Compiler = struct {
         else
             try self.declareLocal(name, mutable);
         if (value.expr == .fn_expr) {
-            try self.compileFn(value.expr.fn_expr, name, false);
+            try self.compileFn(value.expr.fn_expr.params, value.expr.fn_expr.body, name, null);
         } else {
             try self.compile(value, true);
         }
@@ -954,64 +954,7 @@ pub const Compiler = struct {
         loop_sym: revo.AtomID = 0, // only used when is_loop
     };
 
-    fn compileFn(self: *Compiler, fn_expr: FnExpr, maybe_name: ?[]const u8, is_loop: bool) InternalLowerError!void {
-        _ = is_loop;
-        const jump_over = try self.emitJump(.jump);
-        const body_addr: ProgramCounter = @intCast(self.instructions.items.len);
-        const caller_registers = self.active_registers;
-        const caller_max_registers = self.max_registers;
-
-        var state = try FunctionState.init(self.alloc);
-        for (fn_expr.params, 0..) |param, idx| {
-            const local: LocalVar = .{ .name = param.name, .slot = @intCast(idx), .mutable = true, .initialized = true };
-            state.locals.append(self.alloc, local) catch |err| {
-                state.deinit(self.alloc);
-                return err;
-            };
-            state.all_locals.append(self.alloc, local) catch |err| {
-                state.deinit(self.alloc);
-                return err;
-            };
-        }
-        state.next_slot = @intCast(fn_expr.params.len);
-        self.functions.append(self.alloc, state) catch |err| {
-            state.deinit(self.alloc);
-            return err;
-        };
-
-        const prev_in_loop = self.in_loop_depth;
-        self.in_loop_depth = 0;
-        defer self.in_loop_depth = prev_in_loop;
-
-        self.active_registers = fn_expr.params.len;
-        self.max_registers = fn_expr.params.len;
-
-        try self.compile(fn_expr.body, true);
-        try self.emit(.ret, 1);
-
-        const fn_register_count = self.max_registers;
-        self.active_registers = caller_registers;
-        self.max_registers = caller_max_registers;
-
-        var finished = self.functions.pop().?;
-        defer finished.deinit(self.alloc);
-        const const_locals = try self.collectConstLocals(finished.all_locals.items);
-        defer self.alloc.free(const_locals);
-
-        self.patchJump(jump_over);
-        const proto_id = try self.vm.functions.createPrototype(.{
-            .addr = body_addr,
-            .arity = @intCast(fn_expr.params.len),
-            .register_count = @intCast(fn_register_count),
-            .name = maybe_name orelse "<fn>",
-            .upvalue_specs = finished.upvalues.items,
-            .const_locals = const_locals,
-            .const_local_bits = &.{},
-        });
-        try self.emit(.closure, proto_id);
-    }
-
-    fn compileClosureBody(
+    fn compileFn(
         self: *Compiler,
         params: []const ast.FnParam,
         body: *const Node,
@@ -1086,10 +1029,6 @@ pub const Compiler = struct {
         defer out.deinit(self.alloc);
         for (locals) |local| if (!local.mutable) try out.append(self.alloc, local.slot);
         return out.toOwnedSlice(self.alloc);
-    }
-
-    fn compileFunctionLiteral(self: *Compiler, fn_expr: FnExpr, maybe_name: ?[]const u8) InternalLowerError!void {
-        return self.compileClosureBody(fn_expr.params, fn_expr.body, maybe_name orelse "<fn>", null);
     }
 
     fn compileLoop(self: *Compiler, body: *const Node) InternalLowerError!void {
@@ -1494,6 +1433,43 @@ pub const Compiler = struct {
         , 55);
     }
 
+    test "closure capture nested" {
+        try lang.testing.top_number(
+            \\ fn outer() do
+            \\   const x = 41
+            \\   fn inner() do
+            \\     x + 1
+            \\   end
+            \\   inner()
+            \\ end
+            \\
+            \\ outer()
+        , 42);
+    }
+
+    test "closure returned capture" {
+        try lang.testing.top_number(
+            \\ fn make(i) do
+            \\   fn inner() do i end
+            \\   inner
+            \\ end
+            \\ const f = make(7)
+            \\ f()
+        , 7);
+    }
+
+    test "closure in loop captures current" {
+        try lang.testing.top_number(
+            \\ let sum = 0
+            \\ for i in 0..3 do
+            \\   const f = fn() do i end
+            \\   sum += f()
+            \\ end
+            \\
+            \\ sum
+        , 3);
+    }
+
     fn compileMatch(
         self: *Compiler,
         subject: *const Node,
@@ -1840,7 +1816,7 @@ pub const Compiler = struct {
                 try self.emit(.load_global, descriptor_sym);
                 try self.emitConst(Data.new.atom(key_atom));
                 if (binding.value.expr == .fn_expr) {
-                    try self.compileFn(binding.value.expr.fn_expr, binding.target.expr.ident, false);
+                    try self.compileFn(binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.body, binding.target.expr.ident, null);
                 } else {
                     try self.compile(binding.value, true);
                 }
