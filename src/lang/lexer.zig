@@ -208,6 +208,10 @@ pub fn lexReport(allocator: std.mem.Allocator, source: []const u8) !LexResult {
 
     while (true) {
         const token = lexer.next() catch |err| {
+            // your lexer obj should always be managed by an arena
+            // , and therefore shouldn't take 1000s of cpu cycles up by deallocating
+            // but just to be safe,
+            tokens.deinit(allocator);
             return .{ .err = lexer.lexFailure(err) };
         };
         try tokens.append(allocator, token);
@@ -224,6 +228,7 @@ const Lexer = struct {
     line: u32 = 1,
     column: u32 = 1,
     line_start: bool = true,
+    pending_error_span: ?ast.Span = null,
 
     fn init(source: []const u8, alloc: std.mem.Allocator) Lexer {
         return .{ .source = source, .alloc = alloc };
@@ -334,7 +339,7 @@ const Lexer = struct {
     }
 
     fn lexFailure(self: *const Lexer, err: anyerror) LexError {
-        const span = self.currentSpan();
+        const span = self.pending_error_span orelse self.currentSpan();
         return switch (err) {
             error.UnexpectedCharacter => .{ .kind = .UnexpectedCharacter, .span = span, .message = "unexpected character" },
             error.UnterminatedComment => .{ .kind = .UnterminatedComment, .span = span, .message = "unterminated multiline comment" },
@@ -393,12 +398,19 @@ const Lexer = struct {
     }
 
     fn skipMultilineComment(self: *Lexer) !void {
+        self.pending_error_span = .{
+            .start = self.pos,
+            .end = self.pos + 2,
+            .line = self.line,
+            .column = self.column,
+        };
         _ = self.advance();
         _ = self.advance();
         while (!self.atEnd()) {
             if (self.peek() == '#' and self.peekN(1) == '#') {
                 _ = self.advance();
                 _ = self.advance();
+                self.pending_error_span = null;
                 return;
             }
             _ = self.advance();
@@ -432,6 +444,7 @@ const Lexer = struct {
     }
 
     fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
+        self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
         var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
         defer buf.deinit(self.alloc);
         while (!self.atEnd()) {
@@ -473,12 +486,19 @@ const Lexer = struct {
     }
 
     fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
+        self.pending_error_span = .{
+            .start = start,
+            .end = start + 1,
+            .line = line,
+            .column = column,
+        };
         var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
         defer buf.deinit(self.alloc);
         while (!self.atEnd()) {
             const c = self.advance();
             if (c == '\n') {
                 const text = try buf.toOwnedSlice(self.alloc);
+                self.pending_error_span = null;
                 return .{
                     .type = .string,
                     .text = text,
@@ -490,6 +510,7 @@ const Lexer = struct {
             }
             if (c == '\'') {
                 const text = try buf.toOwnedSlice(self.alloc);
+                self.pending_error_span = null;
                 return .{
                     .type = .string,
                     .text = text,
@@ -505,6 +526,7 @@ const Lexer = struct {
     }
 
     fn lexMultilineString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
+        self.pending_error_span = .{ .start = start, .end = start + 3, .line = line, .column = column };
         var buf = try std.ArrayList(u8).initCapacity(self.alloc, 64);
         defer buf.deinit(self.alloc);
         while (!self.atEnd()) {
@@ -513,6 +535,7 @@ const Lexer = struct {
                 _ = self.advance();
                 _ = self.advance();
                 const text = try buf.toOwnedSlice(self.alloc);
+                self.pending_error_span = null;
                 return .{
                     .type = .multiline_string,
                     .text = text,
@@ -528,6 +551,7 @@ const Lexer = struct {
     }
 
     fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
+        self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
         var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
         defer buf.deinit(self.alloc);
         while (!self.atEnd()) {
@@ -553,6 +577,7 @@ const Lexer = struct {
             if (c == '`') {
                 const text = try buf.toOwnedSlice(self.alloc);
                 errdefer self.alloc.free(text);
+                self.pending_error_span = null;
                 return .{
                     .type = .backtick_string,
                     .text = text,
@@ -947,6 +972,28 @@ test "lexes string with newline escape" {
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
     try std.testing.expectEqualStrings("hello\nworld", tokens[0].text);
+}
+
+test "unterminated string span points at opening quote" {
+    const report = try lexReport(std.testing.allocator,
+        \\  
+        \\  "unterminated
+    );
+    try std.testing.expect(report == .err);
+    try std.testing.expectEqual(LexError.Kind.UnterminatedString, report.err.kind);
+    try std.testing.expectEqual(@as(u32, 2), report.err.span.line);
+    try std.testing.expectEqual(@as(u32, 3), report.err.span.column);
+}
+
+test "unterminated multiline comment span points at opening hashes" {
+    const report = try lexReport(std.testing.allocator,
+        \\  
+        \\  ## never closed
+    );
+    try std.testing.expect(report == .err);
+    try std.testing.expectEqual(LexError.Kind.UnterminatedComment, report.err.kind);
+    try std.testing.expectEqual(@as(u32, 2), report.err.span.line);
+    try std.testing.expectEqual(@as(u32, 3), report.err.span.column);
 }
 
 test "lexes string with tab escape" {
