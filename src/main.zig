@@ -33,9 +33,6 @@ const USAGE =
     \\  revo -b -o output.rvo script   compile script with custom output path
     \\  revo --bench script.rv         run with performance counters
     \\  revo --dis script.rv           show bytecode disassembly
-    \\
-    \\revo uses a modified version of the GPLv3, refer to LICENSE.md
-    \\https://codeberg.org/lung/revo/LICENSE.txt; sha256:415d4cce
 ;
 
 const ExecutionMode = enum { run, bench, disassemble, compile };

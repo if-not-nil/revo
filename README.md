@@ -1,17 +1,18 @@
 # revo
-
-[homepage](https://gills.pages.dev/revo)
+[homepage & docs](https://gills.pages.dev/revo)
 | [learn](https://gills.pages.dev/revo/basics)
 | [codeberg](https://codeberg.org/lung/revo)
 | [github (mirror)](https://github.com/if-not-nil/revo)
-| [license (REVO-GPLv3)](#license), not GPL-compatible
 
 **revo** is an expressive, dynamically-typed language that is made\
 to balance semantic freedom and readability
 
-more on the [homepage](https://gills.pages.dev/revo)
+see [homepage](https://gills.pages.dev/revo) and [docs/basics](https://gills.pages.dev/revo/basics/)
 
-introduction at [docs/basics](https://gills.pages.dev/revo/basics/)
+- [installation](#installing)
+- [cli reference](#cli-reference)
+  - [development](#development)
+  - [credits](#credits)
 
 # installing
 you will need [zig `0.16.0`](https://ziglang.org/download)
@@ -22,11 +23,11 @@ cp ./zig-out/bin/revo ~/.local/bin/revo
 revo -h
 ```
 
-binary releases not available until a release
+binary releases not yet available
 
-# cli reference
+# usage
 
-```help
+```bash
 usage: revo [options] [script [args...]]
 
 options:
@@ -50,9 +51,6 @@ examples:
   revo -b -o output.rvo script   compile script with custom output path
   revo --bench script.rv         run with performance counters
   revo --dis script.rv           show bytecode disassembly
-
-revo uses a modified version of the GPLv3, refer to LICENSE.md
-https://codeberg.org/lung/revo/LICENSE.txt; sha256:415d4cce
 ```
 
 ## development
@@ -72,9 +70,6 @@ the default repl backend is the vendored bestline, linked statically. read [buil
 zig build test --summary all -Dtest_filter="some test name filter"
 ```
 
-### writing extensions in C
-[see docs](https://gills.pages.dev/revo/c)
-
 ### contributing
 
 recommending to a friend is always greatly appreciated. any contributions are welcome!
@@ -86,14 +81,7 @@ if adding an std function, please add a doc-comment that can get parsed by `scri
 please do not submit LLM-authored code if you do not understand it,\
 can't explain it or have not tested it. describe the request in your own words,\
 rather than pulling in a wall of AI-generated text.\
-this greatly reducec maintenance burden
-
-## license
-
-revo is licensed under a modified GPLv3 license\
-it is NOT compatible with article 10 of the GPLv3
-
-see `LICENSE.txt`
+this greatly reduces maintenance burden
 
 ## credits
 
