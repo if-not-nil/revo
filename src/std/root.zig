@@ -1164,7 +1164,7 @@ pub fn typeUtils(vm: *VM) !void {
             }
         }.is_of;
         const id = try vm.functions.create(.{ .native = define(
-            &[1]TypeSpec{@field(TypeSpec, field.name)},
+            &[1]TypeSpec{.any},
             func,
         ) });
         const atom = try vm.internAtom(field.name ++ "?");
@@ -1178,7 +1178,7 @@ pub fn typeUtils(vm: *VM) !void {
             return .okBool(true);
         }
     }.num;
-    const id = try vm.functions.create(.{ .native = define(&[_]TypeSpec{.number}, is_number) });
+    const id = try vm.functions.create(.{ .native = define(&[_]TypeSpec{.any}, is_number) });
     const atom = try vm.internAtom("number?");
     try vm.globals.put(atom, .{ .function = id });
 }
