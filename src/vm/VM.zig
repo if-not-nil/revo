@@ -535,6 +535,11 @@ pub fn setPanicMessage(self: *VM, message: []const u8) !void {
     self.panic_message = try self.runtime.alloc.dupe(u8, message);
 }
 
+pub fn setPanicMessageOwned(self: *VM, message: []u8) void {
+    self.clearPanicMessage();
+    self.panic_message = message;
+}
+
 pub fn clearPanicMessage(self: *VM) void {
     if (self.panic_message) |message| self.runtime.alloc.free(message);
     self.panic_message = null;
@@ -548,8 +553,13 @@ pub fn setRuntimeMessage(self: *VM, message: []const u8) !void {
 
 pub fn setRuntimeMessageFmt(self: *VM, comptime fmt_str: []const u8, args: anytype) !void {
     const message = try std.fmt.allocPrint(self.runtime.alloc, fmt_str, args);
-    defer self.runtime.alloc.free(message);
-    try self.setRuntimeMessage(message);
+    self.clearRuntimeMessage();
+    self.runtime_message = message;
+}
+
+pub fn setRuntimeMessageOwned(self: *VM, message: []u8) void {
+    self.clearRuntimeMessage();
+    self.runtime_message = message;
 }
 
 pub fn clearRuntimeMessage(self: *VM) void {
@@ -727,6 +737,9 @@ pub fn callFunction(self: *VM, callee: Data, args: []const Data) EvalError!Data 
     defer self.host_call_depth -= 1;
 
     const fiber = self.currentFiber();
+    const initial_frame_depth = fiber.frames.items.len;
+    const initial_pc = fiber.pc;
+    const initial_slot_len = fiber.slots.items.len;
     if (fiber.frames.items.len == 0) {
         if (fiber.debug_info_id == null) fiber.debug_info_id = self.pending_debug_info_id;
         try fiber.frames.append(self.runtime.alloc, .{
@@ -738,7 +751,13 @@ pub fn callFunction(self: *VM, callee: Data, args: []const Data) EvalError!Data 
     const caller_frame_depth = fiber.frames.items.len;
     const base = (try self.currentFrame()).base;
     const callee_slot = fiber.slots.items.len;
-    errdefer fiber.slots.items.len = callee_slot;
+    errdefer {
+        fiber.slots.items.len = initial_slot_len;
+        fiber.pc = initial_pc;
+        while (fiber.frames.items.len > initial_frame_depth) {
+            _ = fiber.frames.pop();
+        }
+    }
     try fiber.slots.append(self.runtime.alloc, callee);
     for (args) |arg| try fiber.slots.append(self.runtime.alloc, arg);
 
@@ -1221,7 +1240,7 @@ fn returnRegister(self: *VM, instr: Instruction) EvalError!void {
                         error.OutOfMemory => return error.OutOfMemory,
                         else => return error.Panic,
                     };
-                    try self.setPanicMessage(buf.written());
+                    self.setPanicMessageOwned(try buf.toOwnedSlice());
                 }
                 return error.Panic;
             }
@@ -1348,7 +1367,8 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             if (lhs == .string and rnum != null) {
                 const str = self.stringValue(lhs.string);
                 const count = @as(usize, @intCast(std.math.clamp(@as(i64, @intFromFloat(rnum.?)), 0, std.math.maxInt(i32))));
-                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, str.len * count);
+                const cap = std.math.mul(usize, str.len, count) catch return error.OutOfMemory;
+                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, cap);
                 errdefer buf.deinit(self.runtime.alloc);
                 for (0..count) |_| {
                     try buf.appendSlice(self.runtime.alloc, str);
@@ -1360,7 +1380,8 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             if (rhs == .string and lnum != null) {
                 const str = self.stringValue(rhs.string);
                 const count = @as(usize, @intCast(std.math.clamp(@as(i64, @intFromFloat(lnum.?)), 0, std.math.maxInt(i32))));
-                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, str.len * count);
+                const cap = std.math.mul(usize, str.len, count) catch return error.OutOfMemory;
+                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, cap);
                 errdefer buf.deinit(self.runtime.alloc);
                 for (0..count) |_| {
                     try buf.appendSlice(self.runtime.alloc, str);
@@ -1731,7 +1752,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                                 error.OutOfMemory => return error.OutOfMemory,
                                 else => return error.Panic,
                             };
-                            try self.setPanicMessage(buf.written());
+                            self.setPanicMessageOwned(try buf.toOwnedSlice());
                         }
                         self.panic_span = if (self.currentDebugInfo()) |debug|
                             self.spanAtPc(debug, if (self.currentFiber().pc > 0) self.currentFiber().pc - 1 else 0)
@@ -1879,6 +1900,25 @@ test "set_metatable on number applies to all number values" {
     const mt = try vm.getMetatableId(Data.new.num(1.5));
     try std.testing.expect(mt != null);
     try std.testing.expectEqual(mt_id, mt.?);
+}
+
+test "callFunction unwinds frames on native error" {
+    const fail_native = struct {
+        fn call(_: []const Data, _: *VM) anyerror!revo.std_lib.NativeResult {
+            return error.Panic;
+        }
+    }.call;
+
+    var vm = try VM.init(testing.runtime());
+    defer vm.deinit();
+
+    const fn_id = try vm.functions.create(.{ .native = revo.std_lib.define(&[_]revo.std_lib.TypeSpec{}, fail_native) });
+    const start_frames = vm.currentFiber().frames.items.len;
+    const start_slots = vm.currentFiber().slots.items.len;
+
+    try std.testing.expectError(error.Panic, vm.callFunction(.{ .function = fn_id }, &.{}));
+    try std.testing.expectEqual(start_frames, vm.currentFiber().frames.items.len);
+    try std.testing.expectEqual(start_slots, vm.currentFiber().slots.items.len);
 }
 
 const lang = revo.lang;
