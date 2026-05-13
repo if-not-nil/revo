@@ -305,7 +305,7 @@ match safe_div(10, 0)
 ```
 
 # pipe operator
-pipe passes a value as the first argument to the next function:
+pipe passes a value as the first argument to the next function or match expression:
 ```ruby
 fn double(x) x * 2
 fn add_one(x) x + 1
@@ -316,6 +316,16 @@ fn add_one(x) x + 1
 # chain with intermediate vars
 const val = 5 |> add_one # 6
 val |> double            # 12
+
+# polymorphism, with match!
+fn poly(x)
+  x
+  |> match 
+  | x when number?(x) "num"
+  | x when string?(x) "str"
+
+assert_eq(poly("asdf"), "str")
+assert_eq(poly(42), "num")
 ```
 
 they apply to most of the language, since everything will likely return something useful 

@@ -252,11 +252,21 @@ const Parser = struct {
             if (op == .pipe_forward or op == .pipe_forward_ok or op == .pipe_forward_err) {
                 const bp: u8 = 15;
                 if (bp < min_bp) break;
+                // consumethe pipe token
                 _ = self.advance();
-                const right = if (self.check(.kw_fn))
-                    try self.parseFnWithBodyMin(self.advance(), bp + 1)
-                else
-                    try self.parseExpression(bp + 1);
+
+                // specialcase fns and match on rhs: `value |> fn(...) body`
+                // and `value |> match | pat ...`
+                const next_tok = self.peek().type;
+                var right: *Node = undefined;
+                if (next_tok == .kw_fn) {
+                    right = try self.parseFnWithBodyMin(self.advance(), bp + 1);
+                } else if (next_tok == .kw_match) {
+                    right = try self.parseMatch(self.advance(), left);
+                } else {
+                    right = try self.parseExpression(bp + 1);
+                }
+
                 left = try self.allocExpr(Span.merge(left.span, right.span), switch (op) {
                     .pipe_forward => .{ .pipe_expr = .{ .left = left, .right = right } },
                     .pipe_forward_ok => .{ .pipe_ok_expr = .{ .left = left, .right = right } },
@@ -267,6 +277,7 @@ const Parser = struct {
             }
 
             // pf ?
+            // TODO: what did i mean by pf
             if (op == .huh) {
                 const bp: u8 = 80;
                 if (bp < min_bp) break;
@@ -313,7 +324,7 @@ const Parser = struct {
             .lparen => self.parseParenExpr(token),
             .kw_fn => self.parseFn(token),
             .kw_if => self.parseIf(token),
-            .kw_match => self.parseMatch(token),
+            .kw_match => self.parseMatch(token, null),
             .kw_do => self.parseBlock(token),
             .kw_loop => self.parseLoop(token),
             .kw_for => self.parseFor(token),
@@ -480,8 +491,8 @@ const Parser = struct {
     }
 
     /// match expr | pat expr | pat expr
-    fn parseMatch(self: *Parser, start: Token) anyerror!*Node {
-        const subject = try self.parseExpression(25);
+    fn parseMatch(self: *Parser, start: Token, subj: ?*Node) anyerror!*Node {
+        const subject = subj orelse try self.parseExpression(25);
 
         var arms = try std.ArrayList(ast.MatchArm).initCapacity(self.alloc, 2);
         errdefer arms.deinit(self.alloc);

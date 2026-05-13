@@ -688,6 +688,14 @@ test "double pipe" {
     , 42);
 }
 
+test "pipe into match" {
+    try t.top_number(
+        \\ 2
+        \\ |> match 
+        \\    | x 42
+    , 42);
+}
+
 test "|>? maps ok payloads" {
     try t.top_number(
         \\ (:ok, 20) |>? fn(x) x + 22

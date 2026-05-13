@@ -600,6 +600,9 @@ pub const Compiler = struct {
                 try self.compile(left, true);
                 try self.emit(.call, 1);
             },
+            .match_expr => |match| {
+                try self.compileMatch(left, match.arms);   
+            },
             .fn_expr => |fn_expr| {
                 try self.compileFn(fn_expr.params, fn_expr.body, "<fn>", null);
                 try self.compile(left, true);

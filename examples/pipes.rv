@@ -15,6 +15,15 @@ a = 21
 
 assert_eq(a, 42)
 
+fn poly(x)
+  x
+  |> match 
+  | x when number?(x) "num"
+  | x when string?(x) "str"
+
+assert_eq(poly("asdf"), "str")
+assert_eq(poly(42), "num")
+
 # ok pipe
 a = (:ok, 20)
   |>? fn(x) x + 22
