@@ -2,19 +2,17 @@ const a = comp macro do
 	"1 + 1"
 end
 
-print(a)
+# print(a)
 
 const x = do
 	let res = read():unwrap()
 		|> fn(c) c:upper()
-
 	match res
-	| "HELLO" when read():unwrap():len() < 2
-		{}:set_meta({
+	| "HELLO" when read()?:len() < 2
+		set_metatable({}, {
 				__index = fn(self, k) k * 2
 		})
-	| x
-	when do
+	| x when do
 		let u = x
 		print(u)
 	end :ok

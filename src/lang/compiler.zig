@@ -687,12 +687,10 @@ pub const Compiler = struct {
         if (result == .err) {
             // not sure how recursive eval will fare here
             const eval_failure = result.err;
-            const error_message = self.alloc.dupe(u8, eval_failure.message) catch
-                "comp: runtime error (allocation failed)";
             self.failure = .{
                 .kind = .ParseError,
                 .span = eval_failure.span orelse expr.span,
-                .message = error_message,
+                .message = eval_failure.message,
                 .source_name = eval_failure.source_name,
             };
             return error.LoweringFailed;
