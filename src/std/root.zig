@@ -21,7 +21,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         .{ .name = "tostring", .f = define(&[_]TypeSpec{.any}, tostring) },
         .{ .name = "tonumber", .f = define(&[_]TypeSpec{.any}, tonumber) },
         .{ .name = "expect", .f = define(&[_]TypeSpec{.any}, expect) },
-        .{ .name = "expect_eq", .f = define(&[_]TypeSpec{.any}, expect_eq) },
+        .{ .name = "expect_eq", .f = define(&[_]TypeSpec{ .any, .any }, expect_eq) },
         .{ .name = "assert", .f = define(&[_]TypeSpec{.any}, assert_) },
         .{ .name = "assert_eq", .f = define(&[_]TypeSpec{ .any, .any }, assert_eq) },
         .{ .name = "set_debug", .f = define(&[_]TypeSpec{.table}, meta.set_debug) },
