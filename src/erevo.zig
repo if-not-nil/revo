@@ -66,7 +66,7 @@ fn makeVm(alloc: std.mem.Allocator) !*VM {
     var io = std.Io.Threaded.init(alloc, .{});
     errdefer io.deinit();
 
-    const runtime = try revo.Runtime.init(alloc, io.io());
+    const runtime = try revo.Runtime.init(alloc, io.io(), &.{});
     vm.* = .{
         .alloc = alloc,
         .io = io,

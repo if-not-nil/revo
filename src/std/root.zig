@@ -45,6 +45,12 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         .{ .name = "system", .f = define(&[_]TypeSpec{.table}, system_) },
         .{ .name = "import", .f = define(&[_]TypeSpec{.string}, import_) },
     });
+    const argv_id = try vm.tables.create();
+    const argv = try vm.tables.get(argv_id);
+    for (vm.runtime.argv) |arg| {
+        try argv.push(try vm.ownDataString(arg));
+    }
+    try vm.setGlobal("argv", .{ .table = argv_id });
     // math
     try @import("math.zig").register(vm);
     try @import("string.zig").register(vm);

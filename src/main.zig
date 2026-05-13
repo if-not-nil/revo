@@ -49,6 +49,7 @@ const Config = struct {
     test_mode: bool = false,
     bench_iters: u32 = 1,
     echo_last: bool = false,
+    argv: []const [:0]const u8 = &.{},
 };
 
 pub fn main(init: std.process.Init) void {
@@ -78,7 +79,7 @@ fn runMain(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
 
     if (args.len < 2) {
-        var vm = try initVM(init, init.gpa);
+        var vm = try initVM(init, init.gpa, args[1..]);
         defer vm.deinit();
         try repl.run(&vm, init.gpa, init);
         return;
@@ -87,7 +88,8 @@ fn runMain(init: std.process.Init) !void {
     const config = try parseArgs(init, args);
 
     if (config.inline_code) |code| {
-        try runInlineCode(init, init.gpa, code, config.test_mode, config.echo_last);
+        // try runInlineCode(init, init.gpa, code, config.test_mode, config.echo_last);
+        try runInlineCode(init, init.gpa, code, config);
         if (!config.interactive and config.script_path == null) return;
     }
 
@@ -99,10 +101,10 @@ fn runMain(init: std.process.Init) !void {
 
         if (std.mem.endsWith(u8, path, ".rvo")) {
             switch (config.mode) {
-                .run => try runBytecode(init, init.gpa, path, source, config.echo_last),
-                .bench => try benchBytecode(init, init.gpa, path, source, config.bench_iters, config.echo_last),
+                .run => try runBytecode(init, init.gpa, path, source, config),
+                .bench => try benchBytecode(init, init.gpa, path, source, config), // .bench_iters, config.echo_last),
                 .disassemble => {
-                    var vm = try initVM(init, init.gpa);
+                    var vm = try initVM(init, init.gpa, config.argv);
                     defer vm.deinit();
                     var deserialized = revo.bytecode.deserialize(&vm, source, init.gpa) catch |err| {
                         printError(init, "deserializing bytecode - {}", .{err});
@@ -121,11 +123,11 @@ fn runMain(init: std.process.Init) !void {
             }
         } else {
             switch (config.mode) {
-                .run => try runSource(init, init.gpa, path, source, config.echo_last, config.test_mode),
-                .bench => try benchSource(init, init.gpa, path, source, config.bench_iters, config.echo_last, config.test_mode),
-                .compile => try compileToBytecode(init, init.gpa, arena, path, source, config.output_path, config.test_mode),
+                .run => try runSource(init, init.gpa, path, source, config),
+                .bench => try benchSource(init, init.gpa, path, source, config), // .bench_iters, config.echo_last, config.test_mode),
+                .compile => try compileToBytecode(init, init.gpa, arena, path, source, config), // .output_path, config.test_mode),
                 .disassemble => {
-                    var vm = try initVM(init, init.gpa);
+                    var vm = try initVM(init, init.gpa, config.argv);
                     defer vm.deinit();
 
                     const artifact = try compileSource(init, &vm, init.gpa, path, source, config.test_mode);
@@ -138,7 +140,7 @@ fn runMain(init: std.process.Init) !void {
         if (!config.interactive) return;
     }
 
-    var vm = try initVM(init, init.gpa);
+    var vm = try initVM(init, init.gpa, config.argv);
     defer vm.deinit();
     try repl.run(&vm, init.gpa, init);
 }
@@ -157,8 +159,8 @@ fn printSuccess(init: std.process.Init, comptime fmt: []const u8, args: anytype)
     std.debug.print("{s}", .{buf.written()});
 }
 
-fn initVM(init: std.process.Init, gpa: Allocator) !VM {
-    return VM.init(.{ .alloc = gpa, .io = init.io }) catch |err| {
+fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8) !VM {
+    return VM.init(.{ .alloc = gpa, .io = init.io, .argv = argv }) catch |err| {
         printError(init, "initializing vm - {}", .{err});
         return error.VmInitError;
     };
@@ -277,6 +279,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             return error.UnknownCommand;
         } else {
             config.script_path = arg;
+            config.argv = args[i..];
             break;
         }
         i += 1;
@@ -285,32 +288,32 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
     return config;
 }
 
-fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, test_mode: bool, echo_last: bool) !void {
-    var vm = try initVM(init, gpa);
+fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, config: Config) !void {
+    var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
-    const artifact = try compileSource(init, &vm, gpa, "<inline>", code, test_mode);
+    const artifact = try compileSource(init, &vm, gpa, "<inline>", code, config.test_mode);
     defer gpa.free(artifact.instructions);
     defer gpa.free(artifact.spans);
 
-    try runCompiledArtifact(init, gpa, &vm, "<inline>", artifact, code, echo_last);
+    try runCompiledArtifact(init, gpa, &vm, "<inline>", artifact, code, config.echo_last);
 }
 
-fn runSource(init: std.process.Init, gpa: Allocator, path: []const u8, source: []const u8, echo_last: bool, test_mode: bool) !void {
-    var vm = try initVM(init, gpa);
+fn runSource(init: std.process.Init, gpa: Allocator, path: []const u8, source: []const u8, config: Config) !void { // echo_last: bool, test_mode: bool) !void {
+    var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
-    const artifact = try compileSource(init, &vm, gpa, path, source, test_mode);
+    const artifact = try compileSource(init, &vm, gpa, path, source, config.test_mode);
     defer gpa.free(artifact.instructions);
     defer gpa.free(artifact.spans);
 
     try vm.setProgramDebugInfo(artifact.spans, source, path);
 
-    try runCompiledArtifact(init, gpa, &vm, path, artifact, source, echo_last);
+    try runCompiledArtifact(init, gpa, &vm, path, artifact, source, config.echo_last);
 }
 
-fn runBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecode_data: []const u8, echo_last: bool) !void {
-    var vm = try initVM(init, gpa);
+fn runBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecode_data: []const u8, config: Config) !void {
+    var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
     var deserialized = revo.bytecode.deserialize(&vm, bytecode_data, gpa) catch |err| {
@@ -330,7 +333,7 @@ fn runBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecod
         path,
         .{ .spans = deserialized.spans, .instructions = deserialized.instructions },
         "",
-        echo_last,
+        config.echo_last,
     );
 }
 
@@ -370,11 +373,11 @@ fn benchArtifact(
     printBenchStats(vm, times.items);
 }
 
-fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source: []const u8, iters: u32, echo_last: bool, test_mode: bool) !void {
-    var vm = try initVM(init, gpa);
+fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source: []const u8, config: Config) !void { // iters: u32, echo_last: bool, test_mode: bool) !void {
+    var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
-    const artifact = try compileSource(init, &vm, gpa, path, source, test_mode);
+    const artifact = try compileSource(init, &vm, gpa, path, source, config.test_mode);
     defer gpa.free(artifact.instructions);
     defer gpa.free(artifact.spans);
 
@@ -382,11 +385,11 @@ fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source:
         std.debug.print("debug info error - {}\n", .{err});
     };
 
-    try benchArtifact(init, gpa, &vm, path, artifact, source, iters, echo_last);
+    try benchArtifact(init, gpa, &vm, path, artifact, source, config.bench_iters, config.echo_last);
 }
 
-fn benchBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecode_data: []const u8, iters: u32, echo_last: bool) !void {
-    var vm = try initVM(init, gpa);
+fn benchBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytecode_data: []const u8, config: Config) !void {
+    var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
     var deserialized = revo.bytecode.deserialize(&vm, bytecode_data, gpa) catch |err| {
@@ -406,16 +409,17 @@ fn benchBytecode(init: std.process.Init, gpa: Allocator, path: []const u8, bytec
         path,
         .{ .instructions = deserialized.instructions, .spans = deserialized.spans },
         "",
-        iters,
-        echo_last,
+        config.bench_iters,
+        config.echo_last,
     );
 }
 
-fn compileToBytecode(init: std.process.Init, gpa: Allocator, arena: Allocator, path: []const u8, source: []const u8, opt_output_path: ?[]const u8, test_mode: bool) !void {
-    var vm = try initVM(init, gpa);
+fn compileToBytecode(init: std.process.Init, gpa: Allocator, arena: Allocator, path: []const u8, source: []const u8, config: Config) !void {
+    // , opt_output_path: ?[]const u8, test_mode: bool) !void {
+    var vm = try initVM(init, gpa, config.argv);
     defer vm.deinit();
 
-    const artifact = try compileSource(init, &vm, gpa, path, source, test_mode);
+    const artifact = try compileSource(init, &vm, gpa, path, source, config.test_mode);
     defer gpa.free(artifact.instructions);
     defer gpa.free(artifact.spans);
 
@@ -425,7 +429,7 @@ fn compileToBytecode(init: std.process.Init, gpa: Allocator, arena: Allocator, p
     };
     defer gpa.free(bytecode);
 
-    const output_path: []const u8 = if (opt_output_path) |provided|
+    const output_path: []const u8 = if (config.output_path) |provided|
         provided
     else blk: {
         if (std.mem.endsWith(u8, path, ".rv")) {

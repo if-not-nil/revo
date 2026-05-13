@@ -6,15 +6,16 @@ fn asdf() void {}
 pub const Runtime = struct {
     alloc: std.mem.Allocator,
     io: std.Io,
+    argv: []const [:0]const u8 = &.{},
     stdin: ?std.Io.File = null,
     stdout: std.Io.File = undefined,
     stderr: std.Io.File = undefined,
     vm: ?*VM = null,
 
     /// ret: a new runtime with its own vm
-    pub fn init(alloc: std.mem.Allocator, io: std.Io) !Runtime {
+    pub fn init(alloc: std.mem.Allocator, io: std.Io, argv: []const [:0]const u8) !Runtime {
         const vm_ptr = try alloc.create(VM);
-        vm_ptr.* = try VM.init(.{ .alloc = alloc, .io = io });
+        vm_ptr.* = try VM.init(.{ .alloc = alloc, .io = io, .argv = argv });
         return .{
             .alloc = alloc,
             .io = io,
