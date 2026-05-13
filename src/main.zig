@@ -79,7 +79,7 @@ fn runMain(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(arena);
 
     if (args.len < 2) {
-        var vm = try initVM(init, init.gpa, args[1..]);
+        var vm = try initVM(init, init.gpa, &.{args[0]});
         defer vm.deinit();
         try repl.run(&vm, init.gpa, init);
         return;
@@ -229,6 +229,8 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
     var config: Config = .{};
     var i: usize = 1;
 
+    var argv: std.ArrayList([:0]const u8) = .empty;
+
     while (i < args.len) {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "-e")) {
@@ -237,6 +239,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
                 printError(init, "-e requires an argument", .{});
                 return error.InsufficientArgs;
             }
+            try argv.append(init.arena.allocator(), args[0]);
             config.inline_code = args[i];
             config.echo_last = true;
         } else if (std.mem.eql(u8, arg, "-i")) {
@@ -277,13 +280,16 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             printError(init, "unknown option '{s}'", .{arg});
             std.debug.print("{s}\n", .{USAGE});
             return error.UnknownCommand;
+        } else if (config.inline_code == null) {
+            if (config.script_path == null)
+                config.script_path = arg;
+            try argv.append(init.arena.allocator(), arg);
         } else {
-            config.script_path = arg;
-            config.argv = args[i..];
-            break;
+            try argv.append(init.arena.allocator(), arg);
         }
         i += 1;
     }
+    config.argv = argv.items;
 
     return config;
 }
