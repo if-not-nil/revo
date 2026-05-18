@@ -20,6 +20,7 @@ pub fn register(vm: *VM) !void {
         .{ .key = .{ .named = "set_meta" }, .func = root.define(&.{.table}, @import("meta.zig").set_metatable_) },
         .{ .key = .{ .named = "unwrap" }, .func = root.define(&.{.table}, @"try") },
         .{ .key = .{ .named = "insert" }, .func = root.define(&.{ .table, .number, .any }, insert) },
+        .{ .key = .{ .named = "push" }, .func = root.defineVariadic(&.{.table}, push) },
         .{ .key = .{ .named = "as_tuple" }, .func = root.define(&.{.table}, as_tuple) },
         .{ .key = .{ .named = "remove" }, .func = root.define(&.{ .table, .number }, remove) },
         .{ .key = .{ .named = "concat" }, .func = root.define(&.{ .table, .string }, concat) },
@@ -139,6 +140,18 @@ fn remove(args: []const Data, vm: *VM) !NativeResult {
     const pos_usize: usize = @intCast(pos);
     const removed = table.array.orderedRemove(pos_usize);
     return .okData(removed);
+}
+
+/// > table:push(value: any) -> table
+/// inserts element as last
+fn push(args: []const Data, vm: *VM) !NativeResult {
+    const table_id = args[0].table;
+
+    const table = vm.tables.get(table_id) catch return .errType(0, "table", dataToString(args[0]));
+
+    try table.array.appendSlice(vm.runtime.alloc, args[1..]);
+
+    return .{ .ok = .{ .table = table_id } };
 }
 
 /// > table:concat(delim: string) -> string
