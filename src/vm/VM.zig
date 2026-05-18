@@ -464,6 +464,18 @@ pub inline fn readRegisterFast(self: *VM, base: usize, reg: opcode.Register) Dat
 /// callers should cache `base = frame.base`
 pub inline fn writeRegisterFast(self: *VM, base: usize, reg: opcode.Register, value: Data) !void {
     const slot = base + reg;
+    // happy path: if current frame declares a register_count and the slot lies within it,
+    // you can write without resizing
+    if (self.currentFiber().frames.items.len > 0) {
+        const f = self.currentFiber().frames.items[self.currentFiber().frames.items.len - 1];
+        if (f.register_count > 0) {
+            const frame_end = f.base + f.register_count;
+            if (slot < frame_end) {
+                self.writeRegisterUnsafe(slot, value);
+                return;
+            }
+        }
+    }
     try self.ensureAbsoluteSlot(slot);
     self.writeRegisterUnsafe(slot, value);
 }
@@ -1178,7 +1190,9 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
 
             const new_base = callee_slot + 1;
             if (proto.register_count > 0) {
-                try self.ensureAbsoluteSlot(new_base + proto.register_count - 1);
+                // prealloc callee reg window so inner writes dont need to resize
+                const end_slot = new_base + proto.register_count - 1;
+                try self.ensureAbsoluteSlot(end_slot);
                 for (argc..proto.register_count) |idx| {
                     self.currentFiber().slots.items[new_base + idx] = revo.core_atoms.data(.missing);
                 }
