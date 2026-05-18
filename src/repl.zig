@@ -71,8 +71,6 @@ fn sigintHandler(_: c_int) callconv(.c) void {
 const OS = @import("builtin").target.os.tag;
 
 pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
-    var msg_buf: [512]u8 = undefined;
-
     std.debug.print("revo " ++ build_options.version ++ " -- repl ({s} backend)\ntype :q to exit, :clear to reset session\n", .{@tagName(backend)});
 
     const signal_was_set = backend != .none and OS != .wasi;
@@ -139,13 +137,10 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
         switch (run_result) {
             .ok => {
                 const result = vm.mainResult();
-                const out = switch (result) {
-                    .number => |n| std.fmt.bufPrint(&msg_buf, "{d}\n", .{n}) catch "",
-                    .atom => |atom| std.fmt.bufPrint(&msg_buf, ":{s}\n", .{vm.atomName(atom)}) catch "",
-                    .string => |s| std.fmt.bufPrint(&msg_buf, "{s}\n", .{vm.stringValue(s)}) catch "",
-                    else => "<idk>",
-                };
-                if (out.len > 0) std.debug.print("{s}", .{out});
+                var w = std.Io.Writer.Allocating.init(gpa);
+                defer w.deinit();
+                try result.write(&w.writer, vm, .debug);
+                std.debug.print("{s}\n", .{try w.toOwnedSlice()});
             },
             .err => |failure| main.printRuntimeFailure(init, failure, "<repl>"),
         }
