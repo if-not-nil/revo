@@ -942,7 +942,9 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
     }
 
     if (vm.module_cache.get(resolved_path)) |cached| return .{ .ok = cached };
-    if (vm.loading_modules.contains(resolved_path)) return error.CyclicImport;
+    for (vm.loading_stack.items) |loading| {
+        if (std.mem.eql(u8, loading, resolved_path)) return error.CyclicImport;
+    }
 
     const source = try std.Io.Dir.cwd().readFileAlloc(
         vm.runtime.io,
@@ -952,21 +954,15 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
     );
     defer vm.runtime.alloc.free(source);
 
-    const loading_key = try vm.runtime.alloc.dupe(u8, resolved_path);
-    var loading_key_added = false;
-    defer {
-        if (loading_key_added) _ = vm.loading_modules.remove(loading_key);
-        vm.runtime.alloc.free(loading_key);
-    }
-    try vm.loading_modules.put(loading_key, {});
-    loading_key_added = true;
-
     const cache_key = try vm.runtime.alloc.dupe(u8, resolved_path);
     errdefer vm.runtime.alloc.free(cache_key);
 
+    try vm.loading_stack.append(vm.runtime.alloc, cache_key);
     const result = vm.runModule(resolved_path, source) catch |err| {
+        _ = vm.loading_stack.pop();
         return if (err == error.OutOfMemory) error.OutOfMemory else err;
     };
+    _ = vm.loading_stack.pop();
 
     try vm.module_cache.put(cache_key, result);
     return .{ .ok = result };

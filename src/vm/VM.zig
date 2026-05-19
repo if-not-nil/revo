@@ -18,7 +18,6 @@ pub const GlobalID = mem.StringID;
 pub const Globals = std.AutoHashMap(GlobalID, Data);
 pub const ConstGlobals = std.AutoHashMap(GlobalID, void);
 pub const ModuleCache = std.StringHashMap(Data);
-pub const ModuleSet = std.StringHashMap(void);
 pub const ChannelID = mem.TableID;
 pub const FiberID = usize;
 pub const PerfCounters = struct {
@@ -121,7 +120,7 @@ sched: Scheduler,
 runtime: revo.Runtime,
 // TODO: move all pools and sets into one big struct, remove useless fns like intern_atom
 constants: std.ArrayList(Data),
-bootstrap_globals: Globals,
+stdlib_globals: Globals,
 tables: TablePool,
 tuples: TuplePool,
 functions: FunctionPool,
@@ -131,10 +130,10 @@ debug: DebugOptions = .{},
 globals: Globals,
 const_globals: ConstGlobals,
 module_dir: ?[]const u8,
+loading_stack: std.ArrayList([]const u8),
 /// matches type enum order
 metatables: [@typeInfo(memory.Type).@"enum".fields.len]?mem.TableID = .{null} ** @typeInfo(memory.Type).@"enum".fields.len,
 module_cache: ModuleCache,
-loading_modules: ModuleSet,
 debug_infos: std.ArrayList(DebugInfo),
 pending_debug_info_id: ?DebugInfoID = null,
 panic_message: ?[]const u8 = null,
@@ -156,18 +155,18 @@ pub fn init(runtime: revo.Runtime) !VM {
         .runtime = runtime,
         .sched = try Scheduler.init(runtime.alloc),
         .constants = try std.ArrayList(Data).initCapacity(runtime.alloc, 16),
-        .bootstrap_globals = Globals.init(runtime.alloc),
+        .stdlib_globals = Globals.init(runtime.alloc),
         .tables = try TablePool.init(runtime.alloc),
         .tuples = try TuplePool.init(runtime.alloc),
         .functions = try FunctionPool.init(runtime.alloc),
         .strings = try Interner.init(runtime.alloc),
         .atoms = std.StringHashMap(mem.AtomID).init(runtime.alloc),
         .module_cache = ModuleCache.init(runtime.alloc),
-        .loading_modules = ModuleSet.init(runtime.alloc),
         .debug_infos = try std.ArrayList(DebugInfo).initCapacity(runtime.alloc, 8),
         .globals = Globals.init(runtime.alloc),
         .const_globals = ConstGlobals.init(runtime.alloc),
         .module_dir = null,
+        .loading_stack = try std.ArrayList([]const u8).initCapacity(runtime.alloc, 1),
         .loaded_extensions = try .initCapacity(runtime.alloc, 0),
     };
     // wire scheduler io poll to net poll as default; runtime may replace this
@@ -195,9 +194,10 @@ pub fn init(runtime: revo.Runtime) !VM {
     // try vm.atoms.put("t", revo.core_atoms.atom_id(.true));
 
     try revo.std_lib.register_stdlib(&vm);
+
     var it = vm.globals.iterator();
     while (it.next()) |entry| {
-        try vm.bootstrap_globals.put(entry.key_ptr.*, entry.value_ptr.*);
+        try vm.stdlib_globals.put(entry.key_ptr.*, entry.value_ptr.*);
     }
 
     // leave async backend nil unless explicitly configured by runtime host
@@ -246,7 +246,9 @@ pub fn deinit(self: *VM) void {
     self.constants.deinit(self.runtime.alloc);
     self.globals.deinit();
     self.const_globals.deinit();
-    self.bootstrap_globals.deinit();
+    self.stdlib_globals.deinit();
+    for (self.loading_stack.items) |path| self.runtime.alloc.free(path);
+    self.loading_stack.deinit(self.runtime.alloc);
     self.tables.deinit();
     self.tuples.deinit();
     self.functions.deinit();
@@ -263,11 +265,6 @@ pub fn deinit(self: *VM) void {
         self.runtime.alloc.free(key.*);
 
     self.module_cache.deinit();
-    var loading_it = self.loading_modules.keyIterator();
-    while (loading_it.next()) |key|
-        self.runtime.alloc.free(key.*);
-
-    self.loading_modules.deinit();
 
     for (self.loaded_extensions.items) |*lib| {
         if (builtin.target.os.tag != .windows)
@@ -507,7 +504,7 @@ pub fn setGlobal(self: *VM, name: []const u8, val: Data) !void {
 }
 
 pub fn seedBootstrapGlobals(self: *VM, target: *Globals) !void {
-    var it = self.bootstrap_globals.iterator();
+    var it = self.stdlib_globals.iterator();
     while (it.next()) |entry| {
         try target.put(entry.key_ptr.*, entry.value_ptr.*);
     }
@@ -1861,9 +1858,6 @@ fn markRoots(self: *VM) void {
         const atom_id: revo.AtomID = @intFromEnum(@field(revo.core_atoms, field.name));
         self.strings.mark(atom_id);
     }
-
-    var bootstrap_it = self.bootstrap_globals.iterator();
-    while (bootstrap_it.next()) |global| self.markData(global.value_ptr.*);
 
     var cache_it = self.module_cache.iterator();
     while (cache_it.next()) |v| self.markData(v.value_ptr.*);
