@@ -10,7 +10,7 @@
 
 # typed bindings: int literal inferred as int
 let x: int = 42
-let bad_int: int = "hello"      # type mismatch: expected int, got string
+# let bad_int: int = "hello"      # type mismatch: expected int, got string
 
 # typed bindings: float literal inferred as float
 let y: float = 3.14
@@ -25,7 +25,7 @@ let z: float = 10
 # typed function params: both args must be int, result inferred
 fn add(a: int, b: int) a + b
 let sum = add(3, 4)
-# add(3, "wrong")                 # type mismatch in function call
+add(3, "wrong") # type mismatch in function call
 
 # typed function with return type annotation
 fn double(n: int) -> int do

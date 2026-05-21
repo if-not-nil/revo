@@ -162,7 +162,6 @@ fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8) !V
 }
 
 fn handleBuildError(init: std.process.Init, gpa: Allocator, source_name: []const u8, source_text: []const u8, err: anytype) void {
-    std.debug.print("build error: ", .{});
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
     revo.lang.renderError(gpa, &buf.writer, .{ .name = source_name, .text = source_text }, err) catch |render_err| {

@@ -387,16 +387,44 @@ pub const Compiler = struct {
                 const actual_type = type_check.inferExprType(self, args[i]);
                 type_check.checkType(self.alloc, type_check.typeInfoFromName(expected_type), actual_type, args[i].span) catch |err| switch (err) {
                     error.TypeError => {
+                        var actual_types = try std.ArrayList([]const u8).initCapacity(self.alloc, args.len);
+                        defer actual_types.deinit(self.alloc);
+                        for (args) |arg| try actual_types.append(self.alloc, types.typeName(type_check.inferExprType(self, arg)));
+
+                        var expected_types = try std.ArrayList([]const u8).initCapacity(self.alloc, sig.param_types.len);
+                        defer expected_types.deinit(self.alloc);
+                        for (sig.param_types) |maybe_type| {
+                            try expected_types.append(self.alloc, maybe_type orelse "any");
+                        }
+
+                        const actual_sig = try formatCallSignature(self.alloc, fn_name, actual_types.items);
+                        defer self.alloc.free(actual_sig);
+                        const expected_sig = try formatCallSignature(self.alloc, fn_name, expected_types.items);
+                        defer self.alloc.free(expected_sig);
+
                         const msg = try std.fmt.allocPrint(
                             self.alloc,
-                            "argument {d} to `{s}` expects {s}, got {s}",
-                            .{ i + 1, fn_name, expected_type, types.typeName(actual_type) },
+                            "argument {d} to `{s}` expects {s}, got {s}\n  got: {s}\n want: {s}",
+                            .{ i + 1, fn_name, expected_type, types.typeName(actual_type), actual_sig, expected_sig },
                         );
                         return self.fail(.ParseError, args[i], msg);
                     },
                 };
             }
         }
+    }
+
+    fn formatCallSignature(alloc: std.mem.Allocator, fn_name: []const u8, types_list: []const []const u8) ![]u8 {
+        var buf = try std.ArrayList(u8).initCapacity(alloc, fn_name.len + types_list.len * 8 + 4);
+        defer buf.deinit(alloc);
+        try buf.appendSlice(alloc, fn_name);
+        try buf.append(alloc, '(');
+        for (types_list, 0..) |type_name, idx| {
+            if (idx > 0) try buf.appendSlice(alloc, ", ");
+            try buf.appendSlice(alloc, type_name);
+        }
+        try buf.append(alloc, ')');
+        return try buf.toOwnedSlice(alloc);
     }
 
     pub fn resolveTypedStructFieldOffset(self: *Compiler, object: *const Node, field_name: []const u8) ?usize {
@@ -634,7 +662,7 @@ pub const Compiler = struct {
         };
     }
 
-    /// compat in case i wanna add 
+    /// compat in case i wanna add
     pub fn fail(self: *Compiler, kind: LowerErrorKind, expr: *const Node, message: []const u8) error{LoweringFailed} {
         return emit.fail(self, kind, expr, message);
     }
