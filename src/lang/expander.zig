@@ -117,6 +117,7 @@ fn walkExpr(
         } }),
         .fn_expr => |v| alloc(allocator, expr.span, .{ .fn_expr = .{
             .params = v.params,
+            .return_type = v.return_type,
             .body = try ctx.walk(allocator, v.body, ctx),
         } }),
         .loop_expr => |v| alloc(allocator, expr.span, .{ .loop_expr = .{
@@ -417,7 +418,7 @@ const AstSubstituter = struct {
                 },
             }),
             .fn_expr => |f| try self.alloc(node.span, .{
-                .fn_expr = .{ .params = f.params, .body = try self.substitute(f.body) },
+                .fn_expr = .{ .params = f.params, .return_type = f.return_type, .body = try self.substitute(f.body) },
             }),
             .block => |items| blk: {
                 var out = try std.ArrayList(*Node).initCapacity(self.allocator, items.len);

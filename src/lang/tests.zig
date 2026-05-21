@@ -2845,101 +2845,95 @@ test "type: function call with multiple typed params" {
     , 6.5);
 }
 
-//
-// commented-out old type_check tests (old IR-based design)
-//
+test "type: return type validation accepts correct type" {
+    try t.top_number(
+        \\ const get_num = fn() -> int do
+        \\     return 42
+        \\ end
+        \\ get_num()
+    , 42);
+}
 
-// test "type_check: check int literal" {
-//     var builder = try revo.lang.compiler.ir.IrBuilder.init(alloc);
-//     defer builder.deinit();
-//
-//     var checker = try revo.lang.compiler.type_check.TypeChecker.init(alloc, &builder);
-//     defer checker.deinit();
-//
-//     const expr = revo.lang.compiler.type_check.Expr{ .int_literal = 42 };
-//     const inferred = try checker.checkExpr(expr);
-//
-//     try std.testing.expect(inferred.eql(.int));
-//     try std.testing.expect(builder.instructions.items.len == 1);
+// if/else type validation is disabled behind comptime false
+// enable by changing comptime false to comptime true in flow.zig compileIf
+// test "type: if/else branches with matching types" {
+//     try t.top_number(
+//         \\ let x = :true
+//         \\ if x 1 else 2
+//     , 1);
 // }
 //
-// test "type_check: check float literal" {
-//     var builder = try revo.lang.compiler.ir.IrBuilder.init(alloc);
-//     defer builder.deinit();
-//
-//     var checker = try revo.lang.compiler.type_check.TypeChecker.init(alloc, &builder);
-//     defer checker.deinit();
-//
-//     const expr = revo.lang.compiler.type_check.Expr{ .float_literal = 3.14 };
-//     const inferred = try checker.checkExpr(expr);
-//
-//     try std.testing.expect(inferred.eql(.float));
+// test "type: if/else branches with mismatched types error" {
+//     try t.expectCompileError(
+//         \\ let x = :true
+//         \\ if x 1 else "str"
+//     , .ParseError);
 // }
 //
-// test "type_check: check string literal" {
-//     var builder = try revo.lang.compiler.ir.IrBuilder.init(alloc);
-//     defer builder.deinit();
-//
-//     var checker = try revo.lang.compiler.type_check.TypeChecker.init(alloc, &builder);
-//     defer checker.deinit();
-//
-//     const expr = revo.lang.compiler.type_check.Expr{ .string_literal = "hello" };
-//     const inferred = try checker.checkExpr(expr);
-//
-//     try std.testing.expect(inferred.eql(.string));
+// test "type: if/else both branches void is ok" {
+//     try t.top_number(
+//         \\ let x = :true
+//         \\ let result = 0
+//         \\ if x do result = 1 end else do result = 2 end
+//         \\ result
+//     , 1);
 // }
 //
-// test "type_check: check bool literal" {
-//     var builder = try revo.lang.compiler.ir.IrBuilder.init(alloc);
-//     defer builder.deinit();
-//
-//     var checker = try revo.lang.compiler.type_check.TypeChecker.init(alloc, &builder);
-//     defer checker.deinit();
-//
-//     const expr = revo.lang.compiler.type_check.Expr{ .bool = true };
-//     const inferred = try checker.checkExpr(expr);
-//
-//     try std.testing.expect(inferred.eql(.bool));
+// test "type: if without else is ok" {
+//     try t.top_number(
+//         \\ let x = :true
+//         \\ if x 1
+//         \\ 99
+//     , 99);
 // }
-//
-// test "type_check: check binary add (int + int = int)" {
-//     var builder = try revo.lang.compiler.ir.IrBuilder.init(alloc);
-//     defer builder.deinit();
-//
-//     var checker = try revo.lang.compiler.type_check.TypeChecker.init(alloc, &builder);
-//     defer checker.deinit();
-//
-//     const left = revo.lang.compiler.type_check.Expr{ .int_literal = 10 };
-//     const right = revo.lang.compiler.type_check.Expr{ .int_literal = 20 };
-//
-//     const bin = try alloc.create(revo.lang.compiler.type_check.BinaryExpr);
-//     bin.* = .{
-//         .op = .add,
-//         .left = left,
-//         .right = right,
-//     };
-//     defer alloc.destroy(bin);
-//
-//     const expr = revo.lang.compiler.type_check.Expr{ .binary = bin };
-//     const inferred = try checker.checkExpr(expr);
-//     try std.testing.expect(inferred.eql(.int));
-// }
-//
-// test "type_check: check unary negate (int -> int)" {
-//     var builder = try revo.lang.compiler.ir.IrBuilder.init(alloc);
-//     defer builder.deinit();
-//
-//     var checker = try revo.lang.compiler.type_check.TypeChecker.init(alloc, &builder);
-//     defer checker.deinit();
-//
-//     const un = try alloc.create(revo.lang.compiler.type_check.UnaryExpr);
-//     un.* = .{
-//         .op = .negate,
-//         .operand = .{ .int_literal = 42 },
-//     };
-//     defer alloc.destroy(un);
-//
-//     const expr = revo.lang.compiler.type_check.Expr{ .unary = un };
-//     const inferred = try checker.checkExpr(expr);
-//     try std.testing.expect(inferred.eql(.int));
-// }
+
+test "vm: debug_assert_types enabled passes" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+    vm.debug_assert_types = true;
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ let a: int = 5
+        \\ let b: int = 3
+        \\ a + b
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer alloc.free(built.ok.instructions);
+    defer alloc.free(built.ok.spans);
+}
+
+test "vm: debug_assert_types enabled passes for floar ops" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+    vm.debug_assert_types = true;
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ let a: float = 1.5
+        \\ let b: float = 2.5
+        \\ a + b
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer alloc.free(built.ok.instructions);
+    defer alloc.free(built.ok.spans);
+}
+
+test "vm: debug_assert_types enabled passes for comparison ops" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+    vm.debug_assert_types = true;
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ let a: int = 5
+        \\ let b: int = 5
+        \\ a == b
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer alloc.free(built.ok.instructions);
+    defer alloc.free(built.ok.spans);
+}

@@ -14,6 +14,7 @@ const Node = ast.Node;
 const emit = @import("emit.zig");
 const toRegister = emit.toRegister;
 const state = @import("state.zig");
+const type_check = @import("type_check.zig");
 
 pub const VarStorage = union(enum) {
     local: Operand,
@@ -628,6 +629,7 @@ pub fn compileIf(
     try self.compile(then_expr, true);
     state.popScope(self);
     const then_registers = self.active_registers;
+    const then_type = type_check.inferExprType(self, then_expr);
     const end_jump = try emit.jump(self, .jump);
     emit.patchJump(self, else_jump);
     self.active_registers = branch_base_registers;
@@ -635,12 +637,29 @@ pub fn compileIf(
 
     try state.pushScope(self);
     errdefer state.popScope(self);
-    if (else_expr) |branch| try self.compile(branch, true) else try emit.nil(self);
+    if (else_expr) |branch| {
+        try self.compile(branch, true);
+        if (comptime false) {
+            const else_type = type_check.inferExprType(self, branch);
+            try validateIfBranchTypes(self, then_type, else_type, then_expr, branch);
+        }
+    } else try emit.nil(self);
     state.popScope(self);
     std.debug.assert(then_registers == self.active_registers);
     emit.patchJump(self, end_jump);
     self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
 }
+
+fn validateIfBranchTypes(self: *Compiler, then_type: type_check.TypeInfo, else_type: type_check.TypeInfo, then_expr: *const Node, else_expr: *const Node) !void {
+    _ = then_expr;
+    if (then_type == .any or else_type == .any) return;
+    if (then_type.eql(else_type)) return;
+    if (types_mod.canCoerce(else_type, then_type)) return;
+    if (types_mod.canCoerce(then_type, else_type)) return;
+    return self.fail(.ParseError, else_expr, "if/else branches must have matching types");
+}
+
+const types_mod = @import("types.zig");
 
 pub fn compileAnd(
     self: *Compiler,

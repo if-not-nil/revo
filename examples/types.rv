@@ -14,6 +14,11 @@ let z: float = 10
 # typed function params: both args must be int, result inferred
 const add = fn(a: int, b: int) a + b
 
+# typed function with return type annotation
+const double = fn(n: int) -> int do
+    return n * 2
+end
+
 # typed function with mixed params
 const scale = fn(v: float, factor: int) v * factor
 
@@ -55,6 +60,7 @@ let pname = person.name
 
 # call typed functions
 let sum = add(3, 4)
+let doubled = double(5)
 let scaled = scale(2.5, 4)
 let nested = outer(5)
 

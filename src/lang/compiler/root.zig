@@ -37,7 +37,9 @@ pub const LowerError = error{ ParseError, UnsupportedSyntax, InvalidAssignmentTa
 const InternalLowerError = LowerError || error{LoweringFailed};
 
 pub fn lowerExprArtifactReport(vm: *VM, expr: *const Node, test_mode: bool) !ArtifactResult {
-    var compiler = try Compiler.init(vm, test_mode);
+    var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);
+    defer arena.deinit();
+    var compiler = try Compiler.init(vm, test_mode, arena.allocator(), vm.runtime.alloc);
     defer compiler.deinit();
     compiler.compileRoot(expr) catch |err| switch (err) {
         error.LoweringFailed => return .{ .err = compiler.failure.? },
@@ -55,6 +57,8 @@ pub const Compiler = struct {
     vm: *VM,
     comp_vm: *VM,
     alloc: std.mem.Allocator,
+    runtime_alloc: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
     test_mode: bool,
     instructions: std.ArrayList(Instruction),
     functions: std.ArrayList(FunctionState),
@@ -73,21 +77,23 @@ pub const Compiler = struct {
     ir_ctx: ?ir.IrContext = null,
     use_ir_first: bool = false,
 
-    pub fn init(vm: *VM, test_mode: bool) !Compiler {
+    pub fn init(vm: *VM, test_mode: bool, arena: std.mem.Allocator, runtime_alloc: std.mem.Allocator) !Compiler {
         return .{
             .vm = vm,
             .comp_vm = vm,
-            .alloc = vm.runtime.alloc,
+            .alloc = arena,
+            .runtime_alloc = runtime_alloc,
+            .arena = std.heap.ArenaAllocator.init(arena),
             .test_mode = test_mode,
-            .instructions = try std.ArrayList(Instruction).initCapacity(vm.runtime.alloc, 32),
-            .functions = try std.ArrayList(FunctionState).initCapacity(vm.runtime.alloc, 4),
-            .slot_allocators = try std.ArrayList(LocalSlot).initCapacity(vm.runtime.alloc, 4),
-            .spans = try std.ArrayList(ast.Span).initCapacity(vm.runtime.alloc, 32),
-            .break_jumps = try std.ArrayList(usize).initCapacity(vm.runtime.alloc, 16),
-            .loop_result_regs = try std.ArrayList(usize).initCapacity(vm.runtime.alloc, 8),
-            .test_suite_names = try std.ArrayList([]const u8).initCapacity(vm.runtime.alloc, 4),
-            .struct_layouter = struct_layout.StructLayouter.init(vm.runtime.alloc),
-            .ir_ctx = try ir.IrContext.init(vm.runtime.alloc),
+            .instructions = try std.ArrayList(Instruction).initCapacity(arena, 32),
+            .functions = try std.ArrayList(FunctionState).initCapacity(arena, 4),
+            .slot_allocators = try std.ArrayList(LocalSlot).initCapacity(arena, 4),
+            .spans = try std.ArrayList(ast.Span).initCapacity(arena, 32),
+            .break_jumps = try std.ArrayList(usize).initCapacity(arena, 16),
+            .loop_result_regs = try std.ArrayList(usize).initCapacity(arena, 8),
+            .test_suite_names = try std.ArrayList([]const u8).initCapacity(arena, 4),
+            .struct_layouter = struct_layout.StructLayouter.init(arena),
+            .ir_ctx = try ir.IrContext.init(arena),
         };
     }
 
@@ -102,6 +108,7 @@ pub const Compiler = struct {
         self.test_suite_names.deinit(self.alloc);
         self.struct_layouter.deinit();
         if (self.ir_ctx) |*ctx| ctx.deinit();
+        self.arena.deinit();
     }
 
     pub fn finishArtifact(self: *Compiler) !Artifact {
@@ -111,17 +118,13 @@ pub const Compiler = struct {
                 defer folder.deinit();
                 _ = try folder.foldAll();
                 const lowered = try ctx.lowerToVerifyBytecode();
-                return .{ .instructions = lowered, .spans = try self.spans.toOwnedSlice(self.alloc) };
+                const spans_copy = try self.runtime_alloc.dupe(ast.Span, self.spans.items);
+                return .{ .instructions = lowered, .spans = spans_copy };
             }
         }
-        // too strict!
-        // if (self.ir_ctx) |*ctx| {
-        //     if (ctx.ir_builder.instructions.items.len > 0) {
-        //         const ok = try ir.verifyIrBytecode(ctx, self.instructions.items, self.alloc);
-        //         if (!ok) return error.LoweringFailed;
-        //     }
-        // }
-        return .{ .instructions = try self.instructions.toOwnedSlice(self.alloc), .spans = try self.spans.toOwnedSlice(self.alloc) };
+        const instr_copy = try self.runtime_alloc.dupe(Instruction, self.instructions.items);
+        const spans_copy = try self.runtime_alloc.dupe(ast.Span, self.spans.items);
+        return .{ .instructions = instr_copy, .spans = spans_copy };
     }
 
     pub fn compile(self: *Compiler, expr: *const Node, keep: bool) InternalLowerError!void {
@@ -263,7 +266,10 @@ pub const Compiler = struct {
             .table => |entries| try values.compileTable(self, entries),
             .struct_def => |def| try values.compileStruct(self, expr, def.name, def.items),
             .return_expr => |val| {
-                if (val) |v| try self.compile(v, true) else try emit.nil(self);
+                if (val) |v| {
+                    try self.compile(v, true);
+                    try validateReturnType(self, v);
+                } else try emit.nil(self);
                 try emit.emit(self, .ret, 1);
             },
             .import_expr => |path| {
@@ -385,7 +391,7 @@ pub const Compiler = struct {
     }
 
     pub fn compileComp(self: *Compiler, expr: *Node) InternalLowerError!void {
-        var temp_compiler = try Compiler.init(self.vm, self.test_mode);
+        var temp_compiler = try Compiler.init(self.vm, self.test_mode, self.alloc, self.runtime_alloc);
         defer temp_compiler.deinit();
         temp_compiler.compileRoot(expr) catch |err| switch (err) {
             error.LoweringFailed => {
@@ -427,7 +433,9 @@ pub const Compiler = struct {
         if (binding.target.expr == .ident and kind != .global) return values.compileLocalBinding(self, binding.target.expr.ident, binding.value, kind != .con, binding.type_name);
         if (binding.target.expr == .ident) {
             const name = binding.target.expr.ident;
-            if (binding.value.expr == .fn_expr) try self.compileFn(binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type, binding.value.expr.fn_expr.body, name, null) else try self.compile(binding.value, true);
+            if (binding.value.expr == .fn_expr) {
+                try self.compileFn(binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type, binding.value.expr.fn_expr.body, name, null);
+            } else try self.compile(binding.value, true);
             if (ast.isDiscardName(name)) return;
             try emit.regDupe(self);
             try emit.emit(self, if (kind != .con) .store_global else .store_global_const, try self.vm.internAtom(name));
@@ -500,6 +508,9 @@ pub const Compiler = struct {
         self.active_registers = params.len;
         self.max_registers = params.len;
         try self.compile(body, true);
+        if (return_type) |rt| {
+            try validateImplicitReturnType(self, body, rt);
+        }
         if (loop_sym) |sym| try flow.emitLoopRecurse(self, params.len, sym) else try emit.emit(self, .ret, 1);
 
         const fn_register_count = self.max_registers;
@@ -568,6 +579,35 @@ pub const Compiler = struct {
         return switch (t) {
             .struct_type => |s| s,
             else => @tagName(t),
+        };
+    }
+
+    fn validateReturnType(self: *Compiler, val: *const Node) !void {
+        const fn_state = state_mod.currentFunctionState(self) orelse return;
+        const declared = fn_state.return_type orelse return;
+        const actual = type_check.inferExprType(self, val);
+        const expected = type_check.typeInfoFromName(declared);
+        type_check.checkType(self.alloc, expected, actual, val.span) catch |err| switch (err) {
+            error.TypeError => {
+                const msg = try std.fmt.allocPrint(self.alloc, "return type mismatch: wanted {s}, got {s}", .{ declared, typeStr(actual) });
+                return self.fail(.ParseError, val, msg);
+            },
+        };
+    }
+
+    fn validateImplicitReturnType(self: *Compiler, body: *const Node, declared: []const u8) !void {
+        const last_expr = switch (body.expr) {
+            .block => |exprs| if (exprs.len > 0) exprs[exprs.len - 1] else return,
+            else => body,
+        };
+        if (last_expr.expr == .return_expr) return;
+        const actual = type_check.inferExprType(self, last_expr);
+        const expected = type_check.typeInfoFromName(declared);
+        type_check.checkType(self.alloc, expected, actual, last_expr.span) catch |err| switch (err) {
+            error.TypeError => {
+                const msg = try std.fmt.allocPrint(self.alloc, "return type mismatch: wanted {s}, got {s}", .{ declared, typeStr(actual) });
+                return self.fail(.ParseError, last_expr, msg);
+            },
         };
     }
 

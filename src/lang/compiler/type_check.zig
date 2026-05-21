@@ -5,7 +5,7 @@ const Compiler = revo.lang.compiler.Compiler;
 const ast = @import("../ast.zig");
 const Node = ast.Node;
 const types_mod = @import("types.zig");
-const TypeInfo = types_mod.TypeInfo;
+pub const TypeInfo = types_mod.TypeInfo;
 const FunctionSignature = types_mod.FunctionSignature;
 const state_mod = @import("state.zig");
 

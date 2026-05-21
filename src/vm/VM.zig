@@ -155,6 +155,8 @@ gc_bytes_allocated: usize = 0,
 gc_threshold: usize = 512 * 1024, // 512kb initial
 gc_pause_factor: usize = 2,
 
+debug_assert_types: bool = false,
+
 pub fn init(runtime: revo.Runtime) !VM {
     var vm: VM = .{
         .runtime = runtime,
@@ -1477,65 +1479,99 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
 
         // specialized unary opcodes (no tag checks)
         .negate_int => {
-            const v = self.readRegisterFast(base, instr.b).number;
-            const v_int = @as(i64, @intFromFloat(v));
+            const v = self.readRegisterFast(base, instr.b);
+            if (self.debug_assert_types) std.debug.assert(v == .number);
+            const v_int = @as(i64, @intFromFloat(v.number));
             try self.writeRegisterFast(base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
         },
 
         .negate_float => {
-            const v = self.readRegisterFast(base, instr.b).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(-v));
+            const v = self.readRegisterFast(base, instr.b);
+            if (self.debug_assert_types) std.debug.assert(v == .number);
+            try self.writeRegisterFast(base, instr.a, Data.new.num(-v.number));
         },
 
         // specialized arith opcodes for typed int/float (no tag checks)
         .add_int => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs + rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number + rhs.number));
         },
 
         .sub_int => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs - rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number - rhs.number));
         },
 
         .mul_int => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs * rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number * rhs.number));
         },
 
         .div_int => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            if (rhs == 0) return error.DivisionByZero;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(@divTrunc(@as(i64, @intFromFloat(lhs)), @as(i64, @intFromFloat(rhs)))));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            if (rhs.number == 0) return error.DivisionByZero;
+            try self.writeRegisterFast(base, instr.a, Data.new.num(@divTrunc(@as(i64, @intFromFloat(lhs.number)), @as(i64, @intFromFloat(rhs.number)))));
         },
 
         .add_float => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs + rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number + rhs.number));
         },
 
         .sub_float => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs - rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number - rhs.number));
         },
 
         .mul_float => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs * rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number * rhs.number));
         },
 
         .div_float => {
-            const lhs = self.readRegisterFast(base, instr.b).number;
-            const rhs = self.readRegisterFast(base, instr.c).number;
-            if (rhs == 0) return error.DivisionByZero;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs / rhs));
+            const lhs = self.readRegisterFast(base, instr.b);
+            const rhs = self.readRegisterFast(base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            if (rhs.number == 0) return error.DivisionByZero;
+            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number / rhs.number));
         },
 
         inline .eq, .neq, .lt, .gt, .lte, .gte => |op| try compare_impl.eval(self, instr, op),
@@ -1544,6 +1580,10 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         inline .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => |op| {
             const lhs_val = try self.readRegister(instr.b);
             const rhs_val = try self.readRegister(instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs_val == .number);
+                std.debug.assert(rhs_val == .number);
+            }
             const lhs = lhs_val.as_number() catch unreachable;
             const rhs = rhs_val.as_number() catch unreachable;
             const lhs_int = @as(i64, @intFromFloat(lhs));
@@ -1565,6 +1605,10 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         inline .eq_float, .neq_float, .lt_float, .gt_float, .lte_float, .gte_float => |op| {
             const lhs_val = try self.readRegister(instr.b);
             const rhs_val = try self.readRegister(instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs_val == .number);
+                std.debug.assert(rhs_val == .number);
+            }
             const lhs = lhs_val.as_number() catch unreachable;
             const rhs = rhs_val.as_number() catch unreachable;
             const result = switch (op) {

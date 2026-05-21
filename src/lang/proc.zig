@@ -231,6 +231,7 @@ fn walkExpr(
         } }),
         .fn_expr => |v| alloc(allocator, expr.span, .{ .fn_expr = .{
             .params = v.params,
+            .return_type = v.return_type,
             .body = try ctx.walk(allocator, v.body, ctx),
         } }),
         .loop_expr => |v| alloc(allocator, expr.span, .{ .loop_expr = .{

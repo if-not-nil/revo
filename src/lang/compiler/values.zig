@@ -39,10 +39,11 @@ pub fn compileLocalBinding(self: *Compiler, name: []const u8, value: *const Node
 
     state.reserveLocalSlots(self);
 
-    if (value.expr == .fn_expr)
-        try self.compileFn(value.expr.fn_expr.params, value.expr.fn_expr.return_type, value.expr.fn_expr.body, name, null)
-    else
+    if (value.expr == .fn_expr) {
+        try self.compileFn(value.expr.fn_expr.params, value.expr.fn_expr.return_type, value.expr.fn_expr.body, name, null);
+    } else {
         try self.compile(value, true);
+    }
 
     state.markLocalInitialized(self, slot);
     state.markLocalValueKind(self, slot, if (value.expr == .tuple) .tuple_literal else .unknown);
