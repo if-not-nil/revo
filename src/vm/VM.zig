@@ -399,19 +399,20 @@ fn runReadyFibers(self: *VM) !?EvalFailure {
             const instr = self.fetch() catch |e| switch (e) {
                 error.ProgramEnd => return null,
             };
-            self.perf.instructions += 1;
-            if (self.debug.each_instr) std.debug.print("+ {}\n", .{instr});
+            // self.perf.instructions += 1;
+            // if (self.debug.each_instr) std.debug.print("+ {}\n", .{instr});
             self.evalRegister(instr) catch |e| {
                 if (e == error.Parked) break;
-                if (self.debug.trace) self.trace(instr);
-                if (self.debug.dump) self.dumpStack();
+                // if (self.debug.trace) self.trace(instr);
+                // if (self.debug.dump) self.dumpStack();
                 return self.evalFailure(e);
             };
+            // TODO: move to all alloc calls instead
             self.gc_instr_counter +%= 1;
-            if ((self.gc_instr_counter & 63) == 0) self.maybeCollectGarbage();
-            if (self.debug.trace) self.trace(instr);
-            if (self.debug.each_stack) self.printStack();
-            if (self.debug.dump) self.dumpStack();
+            if ((self.gc_instr_counter & 255) == 0) self.maybeCollectGarbage();
+            // if (self.debug.trace) self.trace(instr);
+            // if (self.debug.each_stack) self.printStack();
+            // if (self.debug.dump) self.dumpStack();
         }
 
         if (self.currentFiber().state == .ready) {
@@ -1516,6 +1517,19 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             return error.IncompatibleTypes;
         },
 
+        .mod_int => {
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
+            if (self.debug_assert_types) {
+                std.debug.assert(lhs == .number);
+                std.debug.assert(rhs == .number);
+            }
+            const li = @as(i64, @intFromFloat(lhs.number));
+            const ri = @as(i64, @intFromFloat(rhs.number));
+            if (ri == 0) return error.DivisionByZero;
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
+        },
+
         .negate => {
             const v = regRead(slots, base, instr.b);
             if (v == .number) {
@@ -1827,6 +1841,13 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         .load_global => {
             const value = self.globals.get(instr.bx) orelse {
                 try self.setRuntimeMessageFmt("undefined variable `{s}`", .{self.atomName(instr.bx)});
+                return error.UndefinedVariable;
+            };
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, value);
+        },
+        .load_stdlib_global => {
+            const value = self.stdlib_globals.get(instr.bx) orelse {
+                try self.setRuntimeMessageFmt("undefined stdlib variable `{s}`", .{self.atomName(instr.bx)});
                 return error.UndefinedVariable;
             };
             try regWriteFiber(&fiber.slots, alloc, base, instr.a, value);

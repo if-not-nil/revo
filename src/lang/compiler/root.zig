@@ -349,6 +349,7 @@ pub const Compiler = struct {
                     for (call.args) |arg| try self.compile(arg, true);
                     try emit.emit(self, .call, @intCast(call.args.len + @intFromBool(call.implicit_self)));
                 } else {
+                    if (try self.tryCompileBoundMethodCall(field, call.args)) return;
                     try self.compile(field.object, true);
                     try emit.@"const"(self, Data{ .atom = try self.vm.internAtom(field.name) });
                     for (call.args) |arg| try self.compile(arg, true);
@@ -375,6 +376,33 @@ pub const Compiler = struct {
                 try emit.emit(self, .call, @intCast(call.args.len + @intFromBool(call.implicit_self)));
             },
         }
+    }
+
+    fn tryCompileBoundMethodCall(self: *Compiler, field: anytype, args: []const *Node) InternalLowerError!bool {
+        const module_name = switch (type_check.inferExprType(self, field.object)) {
+            .string => "string",
+            .tuple => "tuple",
+            .struct_type => |name| if (std.mem.eql(u8, name, "table")) "table" else return false,
+            else => return false,
+        };
+
+        const module_atom = try self.vm.internAtom(module_name);
+        const module = self.vm.stdlib_globals.get(module_atom) orelse return false;
+        const module_table_id = switch (module) {
+            .table => |id| id,
+            else => return false,
+        };
+        const module_table = self.vm.tables.get(module_table_id) catch return false;
+        const method_atom = try self.vm.internAtom(field.name);
+        const method = module_table.getRaw(.{ .atom = method_atom }) orelse return false;
+        if (method != .function) return false;
+
+        try emit.emit(self, .load_stdlib_global, module_atom);
+        try emit.emit(self, .table_get_atom, method_atom);
+        try self.compile(field.object, true);
+        for (args) |arg| try self.compile(arg, true);
+        try emit.emit(self, .call, @intCast(args.len + 1));
+        return true;
     }
 
     fn validateCallArgs(self: *Compiler, fn_name: []const u8, args: []const *Node) !void {

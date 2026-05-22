@@ -60,6 +60,31 @@ test "typed struct field access emits fast opcodes" {
     try std.testing.expect(saw_set);
 }
 
+test "builtin table methods prebind through stdlib tables" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ const t = {1, 2, 3}
+        \\ t:len()
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer alloc.free(built.ok.instructions);
+    defer alloc.free(built.ok.spans);
+
+    var saw_stdlib_load = false;
+    var saw_call_field = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .load_stdlib_global) saw_stdlib_load = true;
+        if (inst.op == .call_field) saw_call_field = true;
+    }
+
+    try std.testing.expect(saw_stdlib_load);
+    try std.testing.expect(!saw_call_field);
+}
+
 test {
     _ = @import("expander.zig").testing;
     _ = std.testing.refAllDecls(@import("compiler/root.zig"));

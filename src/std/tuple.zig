@@ -9,18 +9,25 @@ const NativeResult = root.NativeResult;
 const iter = @import("iter.zig");
 
 pub fn register(vm: *VM) !void {
+    try root.registerTableFunctions(vm, "tuple", &[_]root.FuncDef{
+        .{ .name = "len", .f = root.define(&[_]root.TypeSpec{.tuple}, len) },
+        .{ .name = "unwrap", .f = root.define(&[_]root.TypeSpec{.tuple}, root.try_) },
+        .{ .name = "unwrap_err", .f = root.define(&[_]root.TypeSpec{.tuple}, root.unwrap_err_) },
+        .{ .name = "map", .f = root.define(&.{ .any, .function }, iter.map_fn) },
+        .{ .name = "filter", .f = root.define(&.{ .any, .function }, iter.filter_fn) },
+        .{ .name = "reduce", .f = root.define(&.{ .any, .function, .any }, iter.reduce_fn) },
+        .{ .name = "each", .f = root.define(&.{ .any, .function }, iter.each_fn) },
+        .{ .name = "find", .f = root.define(&.{ .any, .function }, iter.find_fn) },
+        .{ .name = "all?", .f = root.define(&.{ .any, .function }, iter.all_fn) },
+        .{ .name = "any?", .f = root.define(&.{ .any, .function }, iter.any_fn) },
+        .{ .name = "add", .f = root.define(&[_]root.TypeSpec{ .tuple, .tuple }, add) },
+        .{ .name = "mul", .f = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul) },
+    });
+
     try root.registerMetatable(vm, &[_]root.MethodDef{
         .{ .key = .{ .named = "len" }, .func = root.define(&[_]root.TypeSpec{.tuple}, len) },
         .{ .key = .{ .named = "unwrap" }, .func = root.define(&[_]root.TypeSpec{.tuple}, root.try_) },
         .{ .key = .{ .named = "unwrap_err" }, .func = root.define(&[_]root.TypeSpec{.tuple}, root.unwrap_err_) },
-        .{ .key = .{ .named = "map" }, .func = root.define(&.{ .any, .function }, iter.map_fn) },
-        .{ .key = .{ .named = "filter" }, .func = root.define(&.{ .any, .function }, iter.filter_fn) },
-        .{ .key = .{ .named = "reduce" }, .func = root.define(&.{ .any, .function, .any }, iter.reduce_fn) },
-        .{ .key = .{ .named = "each" }, .func = root.define(&.{ .any, .function }, iter.each_fn) },
-        .{ .key = .{ .named = "find" }, .func = root.define(&.{ .any, .function }, iter.find_fn) },
-        .{ .key = .{ .named = "all?" }, .func = root.define(&.{ .any, .function }, iter.all_fn) },
-        .{ .key = .{ .named = "any?" }, .func = root.define(&.{ .any, .function }, iter.any_fn) },
-        .{ .key = .{ .named = "len" }, .func = root.define(&[_]root.TypeSpec{.tuple}, len) },
         .{ .key = .{ .core = .__index }, .func = root.define(&[_]root.TypeSpec{ .tuple, .number }, index) },
         .{ .key = .{ .named = "add" }, .func = root.define(&[_]root.TypeSpec{ .tuple, .tuple }, add) },
         .{ .key = .{ .named = "mul" }, .func = root.define(&[_]root.TypeSpec{ .tuple, .number }, mul) },

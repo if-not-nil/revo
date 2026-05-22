@@ -26,6 +26,7 @@ const specs = &[_]Spec{
     .{ .op = .mul, .t = .float, .spec = .mul_float },
     .{ .op = .div, .t = .int, .spec = .div_int },
     .{ .op = .div, .t = .float, .spec = .div_float },
+    .{ .op = .mod, .t = .int, .spec = .mod_int },
     // comparison
     .{ .op = .eq, .t = .int, .spec = .eq_int },
     .{ .op = .eq, .t = .float, .spec = .eq_float },
@@ -55,6 +56,7 @@ pub fn selectBinaryOpcode(op: Opcode, left: ?[]const u8, right: ?[]const u8) Opc
         .sub_int, .sub_float => .sub,
         .mul_int, .mul_float => .mul,
         .div_int, .div_float => .div,
+        .mod_int => .mod,
         else => op,
     };
     const lt = toTag(left);
@@ -94,6 +96,7 @@ test "selects properly" {
     try std.testing.expectEqual(.mul_int, selectBinaryOpcode(.mul, "int", "int"));
     try std.testing.expectEqual(.add_float, selectBinaryOpcode(.add, "float", "float"));
     try std.testing.expectEqual(.div_float, selectBinaryOpcode(.div, "float", "float"));
+    try std.testing.expectEqual(.mod_int, selectBinaryOpcode(.mod, "int", "int"));
     try std.testing.expectEqual(.add, selectBinaryOpcode(.add, "int", "float"));
     try std.testing.expectEqual(.add, selectBinaryOpcode(.add, null, "int"));
     try std.testing.expectEqual(.eq_int, selectComparisonOpcode(.eq, "int", "int"));

@@ -175,6 +175,7 @@ pub fn verifyIrBytecode(ctx: *IrContext, emitted: []const Instruction, alloc: st
 pub const IrOp = enum {
     move,
     load_const,
+    load_stdlib_global,
     load_nil,
     load_int,
     add,
@@ -291,9 +292,10 @@ fn selectOpcode(op: IrOp, t: types_mod.TypeInfo) Opcode {
             .float => .div_float,
             else => .div,
         },
-        // TODO dont do this
-        //      make a use a src/root::enumCast with adequate comptime safety everywhere
-        .mod => .mod,
+        .mod => switch (t) {
+            .int => .mod_int,
+            else => .mod,
+        },
         .eq => .eq,
         .neq => .neq,
         .lt => .lt,
@@ -305,6 +307,7 @@ fn selectOpcode(op: IrOp, t: types_mod.TypeInfo) Opcode {
         .not => .not,
         .load_int => .load_small_int,
         .load_const => .load_const,
+        .load_stdlib_global => .load_stdlib_global,
         .load_nil => .load_nil,
         .table_get => .table_get,
         .table_set => .table_set,

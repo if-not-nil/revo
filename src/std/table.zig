@@ -9,12 +9,42 @@ const NativeResult = root.NativeResult;
 const dataToString = root.dataToString;
 
 pub fn register(vm: *VM) !void {
+    const iter = @import("iter.zig");
     try root.registerTableFunctions(vm, "table", &[_]root.FuncDef{
         .{ .name = "rawget", .f = root.define(&.{ .table, .any }, rawget) },
         .{ .name = "rawset", .f = root.define(&.{ .table, .any, .any }, rawset) },
+        .{ .name = "set_meta", .f = root.define(&.{.table}, @import("meta.zig").set_metatable_) },
+        .{ .name = "unwrap", .f = root.define(&.{.table}, @"try") },
+        .{ .name = "insert", .f = root.define(&.{ .table, .number, .any }, insert) },
+        .{ .name = "push", .f = root.defineVariadic(&.{.table}, push) },
+        .{ .name = "as_tuple", .f = root.define(&.{.table}, as_tuple) },
+        .{ .name = "remove", .f = root.define(&.{ .table, .number }, remove) },
+        .{ .name = "concat", .f = root.define(&.{ .table, .string }, concat) },
+        .{ .name = "keys", .f = root.define(&.{.table}, keys) },
+        .{ .name = "values", .f = root.define(&.{.table}, values) },
+        .{ .name = "has?", .f = root.define(&.{ .table, .any }, has) },
+        .{ .name = "copy", .f = root.define(&.{.table}, copy) },
+        .{ .name = "merge", .f = root.define(&.{ .table, .table }, merge) },
+        .{ .name = "sort", .f = root.define(&.{.table}, sort) },
+        .{ .name = "sort_by", .f = root.define(&.{ .table, .function }, sort_by) },
+        .{ .name = "first", .f = root.define(&.{.table}, first) },
+        .{ .name = "last", .f = root.define(&.{.table}, last) },
+        .{ .name = "reverse", .f = root.define(&.{.table}, reverse) },
+        .{ .name = "flatten", .f = root.define(&.{.table}, flatten) },
+        .{ .name = "index_of", .f = root.define(&.{ .table, .any }, index_of) },
+        .{ .name = "contains?", .f = root.define(&.{ .table, .any }, contains) },
+        .{ .name = "unique", .f = root.define(&.{.table}, unique) },
+        .{ .name = "sum", .f = root.define(&.{.table}, sum) },
+        .{ .name = "len", .f = root.define(&.{.table}, len) },
+        .{ .name = "add", .f = root.define(&.{ .table, .table }, tableAdd) },
+        .{ .name = "map", .f = root.define(&.{ .any, .function }, iter.map_fn) },
+        .{ .name = "filter", .f = root.define(&.{ .any, .function }, iter.filter_fn) },
+        .{ .name = "reduce", .f = root.define(&.{ .any, .function, .any }, iter.reduce_fn) },
+        .{ .name = "each", .f = root.define(&.{ .any, .function }, iter.each_fn) },
+        .{ .name = "find", .f = root.define(&.{ .any, .function }, iter.find_fn) },
+        .{ .name = "all?", .f = root.define(&.{ .any, .function }, iter.all_fn) },
+        .{ .name = "any?", .f = root.define(&.{ .any, .function }, iter.any_fn) },
     });
-
-    const iter = @import("iter.zig");
 
     try root.registerMetatable(vm, &[_]root.MethodDef{
         .{ .key = .{ .named = "set_meta" }, .func = root.define(&.{.table}, @import("meta.zig").set_metatable_) },
