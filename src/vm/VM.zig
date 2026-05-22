@@ -459,6 +459,64 @@ pub inline fn writeRegisterUnsafe(self: *VM, slot: usize, value: Data) void {
     self.currentFiber().slots.items[slot] = value;
 }
 
+/// register read using a cached slots pointer (avoids currentFiber call)
+pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Data {
+    const slot = base + reg;
+    if (slot >= slots.len) return revo.core_atoms.data(.missing);
+    return slots[slot];
+}
+
+/// register write using a cached slots pointer (avoids currentFiber call)
+/// caller must ensure slot < slots.len
+pub inline fn regWrite(slots: []Data, base: usize, reg: opcode.Register, value: Data) void {
+    slots[base + reg] = value;
+}
+
+/// register write with bounds check + grow using ArrayList (no currentFiber call)
+/// slot is automatically grown if needed
+pub fn regWriteFiber(
+    slots: *std.ArrayList(Data),
+    alloc: std.mem.Allocator,
+    base: usize,
+    reg: opcode.Register,
+    value: Data,
+) !void {
+    const slot = base + reg;
+    if (slot >= slots.items.len) {
+        const old_len = slots.items.len;
+        try slots.resize(alloc, slot + 1);
+        @memset(slots.items[old_len..slot], revo.core_atoms.data(.missing));
+    }
+    slots.items[slot] = value;
+}
+
+/// copy register with bounds check + grow using ArrayList (no currentFiber call)
+inline fn regCopyFiber(
+    slots: *std.ArrayList(Data),
+    alloc: std.mem.Allocator,
+    base: usize,
+    dst: opcode.Register,
+    src: opcode.Register,
+) !void {
+    const dst_slot = base + dst;
+    const src_slot = base + src;
+    if (src_slot < slots.items.len) {
+        if (dst_slot >= slots.items.len) {
+            const old_len = slots.items.len;
+            try slots.resize(alloc, dst_slot + 1);
+            @memset(slots.items[old_len..dst_slot], revo.core_atoms.data(.missing));
+        }
+        slots.items[dst_slot] = slots.items[src_slot];
+    } else {
+        if (dst_slot >= slots.items.len) {
+            const old_len = slots.items.len;
+            try slots.resize(alloc, dst_slot + 1);
+            @memset(slots.items[old_len..dst_slot], revo.core_atoms.data(.missing));
+        }
+        slots.items[dst_slot] = revo.core_atoms.data(.missing);
+    }
+}
+
 /// avoid recomputing currentFrame() repeatedly
 /// callers should cache `base = frame.base`
 pub inline fn readRegisterFast(self: *VM, base: usize, reg: opcode.Register) Data {
@@ -471,7 +529,6 @@ pub inline fn readRegisterFast(self: *VM, base: usize, reg: opcode.Register) Dat
 /// callers should cache `base = frame.base`
 pub inline fn writeRegisterFast(self: *VM, base: usize, reg: opcode.Register, value: Data) !void {
     const slot = base + reg;
-    try self.ensureAbsoluteSlot(slot);
     self.writeRegisterUnsafe(slot, value);
 }
 
@@ -936,8 +993,6 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     return failure;
 }
 
-
-
 pub fn getMetamethodByAtom(self: *VM, val: Data, atom: mem.AtomID) !?Data {
     const mt_id = try self.getMetatableId(val) orelse return null;
     const mt = try self.tables.get(mt_id);
@@ -1338,32 +1393,33 @@ fn spawnRegister(self: *VM, instr: Instruction) EvalError!void {
 }
 
 fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
-    // std.debug.print("{any}\n", .{instr});
-    const cur_frame = try self.currentFrame();
-    const base = cur_frame.base;
+    const fiber = self.currentFiber();
+    const base = fiber.frames.items[fiber.frames.items.len - 1].base;
+    const slots = fiber.slots.items;
+    const alloc = self.runtime.alloc;
     switch (instr.op) {
-        .move => try self.copyRegister(instr.a, instr.b),
-        .load_const => try self.writeRegisterFast(base, instr.a, try self.getConstant(instr.bx)),
-        .load_nil => try self.writeRegisterFast(base, instr.a, revo.core_atoms.data(.nil)),
-        .load_small_int => try self.writeRegisterFast(base, instr.a, Data.new.num(@as(i64, @intCast(instr.bx)))),
+        .move => try regCopyFiber(&fiber.slots, alloc, base, instr.a, instr.b),
+        .load_const => try regWriteFiber(&fiber.slots, alloc, base, instr.a, try self.getConstant(instr.bx)),
+        .load_nil => try regWriteFiber(&fiber.slots, alloc, base, instr.a, revo.core_atoms.data(.nil)),
+        .load_small_int => try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(@as(i64, @intCast(instr.bx)))),
         .add => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             const lnum = lhs.as_number() catch null;
             const rnum = rhs.as_number() catch null;
             if (lnum != null and rnum != null) {
-                try self.writeRegisterFast(base, instr.a, Data.new.num(lnum.? + rnum.?));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lnum.? + rnum.?));
                 return;
             }
             if (lhs == .string and rhs == .string) {
                 const lstr = self.stringValue(lhs.string);
                 const rstr = self.stringValue(rhs.string);
-                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, lstr.len + rstr.len);
-                errdefer buf.deinit(self.runtime.alloc);
-                try buf.appendSlice(self.runtime.alloc, lstr);
-                try buf.appendSlice(self.runtime.alloc, rstr);
-                const result_str = try self.adoptDataString(try buf.toOwnedSlice(self.runtime.alloc));
-                try self.writeRegisterFast(base, instr.a, result_str);
+                var buf = try std.ArrayList(u8).initCapacity(alloc, lstr.len + rstr.len);
+                errdefer buf.deinit(alloc);
+                try buf.appendSlice(alloc, lstr);
+                try buf.appendSlice(alloc, rstr);
+                const result_str = try self.adoptDataString(try buf.toOwnedSlice(alloc));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, result_str);
                 return;
             }
             try self.setRuntimeMessageFmt("cannot add {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
@@ -1371,12 +1427,12 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         },
 
         .sub => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             const lnum = lhs.as_number() catch null;
             const rnum = rhs.as_number() catch null;
             if (lnum != null and rnum != null) {
-                try self.writeRegisterFast(base, instr.a, Data.new.num(lnum.? - rnum.?));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lnum.? - rnum.?));
                 return;
             }
             try self.setRuntimeMessageFmt("cannot subtract {s} from {s}", .{ revo.std_lib.dataToString(rhs), revo.std_lib.dataToString(lhs) });
@@ -1384,38 +1440,38 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         },
 
         .mul => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             const lnum = lhs.as_number() catch null;
             const rnum = rhs.as_number() catch null;
             if (lnum != null and rnum != null) {
-                try self.writeRegisterFast(base, instr.a, Data.new.num(lnum.? * rnum.?));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lnum.? * rnum.?));
                 return;
             }
             if (lhs == .string and rnum != null) {
                 const str = self.stringValue(lhs.string);
                 const count: usize = @intCast(std.math.clamp(@as(i64, @intFromFloat(rnum.?)), 0, std.math.maxInt(i32)));
                 const cap = std.math.mul(usize, str.len, count) catch return error.OutOfMemory;
-                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, cap);
-                errdefer buf.deinit(self.runtime.alloc);
+                var buf = try std.ArrayList(u8).initCapacity(alloc, cap);
+                errdefer buf.deinit(alloc);
                 for (0..count) |_| {
-                    try buf.appendSlice(self.runtime.alloc, str);
+                    try buf.appendSlice(alloc, str);
                 }
-                const result_str = try self.adoptDataString(try buf.toOwnedSlice(self.runtime.alloc));
-                try self.writeRegisterFast(base, instr.a, result_str);
+                const result_str = try self.adoptDataString(try buf.toOwnedSlice(alloc));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, result_str);
                 return;
             }
             if (rhs == .string and lnum != null) {
                 const str = self.stringValue(rhs.string);
                 const count: usize = @intCast(std.math.clamp(@as(i64, @intFromFloat(lnum.?)), 0, std.math.maxInt(i32)));
                 const cap = std.math.mul(usize, str.len, count) catch return error.OutOfMemory;
-                var buf = try std.ArrayList(u8).initCapacity(self.runtime.alloc, cap);
-                errdefer buf.deinit(self.runtime.alloc);
+                var buf = try std.ArrayList(u8).initCapacity(alloc, cap);
+                errdefer buf.deinit(alloc);
                 for (0..count) |_| {
-                    try buf.appendSlice(self.runtime.alloc, str);
+                    try buf.appendSlice(alloc, str);
                 }
-                const result_str = try self.adoptDataString(try buf.toOwnedSlice(self.runtime.alloc));
-                try self.writeRegisterFast(base, instr.a, result_str);
+                const result_str = try self.adoptDataString(try buf.toOwnedSlice(alloc));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, result_str);
                 return;
             }
             try self.setRuntimeMessageFmt("cannot multiply {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
@@ -1423,14 +1479,14 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         },
 
         .div => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             const lnum = lhs.as_number() catch null;
             const rnum = rhs.as_number() catch null;
             if (lnum != null and rnum != null) {
                 const rv = rnum.?;
                 if (rv == 0) return error.DivisionByZero;
-                try self.writeRegisterFast(base, instr.a, Data.new.num(lnum.? / rv));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lnum.? / rv));
                 return;
             }
             try self.setRuntimeMessageFmt("cannot divide {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
@@ -1438,14 +1494,14 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         },
 
         .mod => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             const lnum = lhs.as_number() catch null;
             const rnum = rhs.as_number() catch null;
             if (lnum != null and rnum != null) {
                 const rv = rnum.?;
                 if (rv == 0) return error.DivisionByZero;
-                try self.writeRegisterFast(base, instr.a, Data.new.num(@mod(lnum.?, rv)));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(@mod(lnum.?, rv)));
                 return;
             }
             try self.setRuntimeMessageFmt("cannot mod {s} by {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
@@ -1453,118 +1509,117 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         },
 
         .negate => {
-            const v = self.readRegisterFast(base, instr.b);
+            const v = regRead(slots, base, instr.b);
             if (v == .number) {
-                try self.writeRegisterFast(base, instr.a, Data.new.num(-v.number));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(-v.number));
                 return;
             }
             try self.setRuntimeMessageFmt("cannot negate {s}", .{revo.std_lib.dataToString(v)});
             return error.IncompatibleTypes;
         },
 
-        // specialized unary opcodes (no tag checks)
         .negate_int => {
-            const v = self.readRegisterFast(base, instr.b);
+            const v = regRead(slots, base, instr.b);
             if (self.debug_assert_types) std.debug.assert(v == .number);
             const v_int = @as(i64, @intFromFloat(v.number));
-            try self.writeRegisterFast(base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
         },
 
         .negate_float => {
-            const v = self.readRegisterFast(base, instr.b);
+            const v = regRead(slots, base, instr.b);
             if (self.debug_assert_types) std.debug.assert(v == .number);
-            try self.writeRegisterFast(base, instr.a, Data.new.num(-v.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(-v.number));
         },
 
         // specialized arith opcodes for typed int/float (no tag checks)
         .add_int => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number + rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number + rhs.number));
         },
 
         .sub_int => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number - rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number - rhs.number));
         },
 
         .mul_int => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number * rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number * rhs.number));
         },
 
         .div_int => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
             if (rhs.number == 0) return error.DivisionByZero;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(@divTrunc(@as(i64, @intFromFloat(lhs.number)), @as(i64, @intFromFloat(rhs.number)))));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(@divTrunc(@as(i64, @intFromFloat(lhs.number)), @as(i64, @intFromFloat(rhs.number)))));
         },
 
         .add_float => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number + rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number + rhs.number));
         },
 
         .sub_float => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number - rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number - rhs.number));
         },
 
         .mul_float => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number * rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number * rhs.number));
         },
 
         .div_float => {
-            const lhs = self.readRegisterFast(base, instr.b);
-            const rhs = self.readRegisterFast(base, instr.c);
+            const lhs = regRead(slots, base, instr.b);
+            const rhs = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs == .number);
                 std.debug.assert(rhs == .number);
             }
             if (rhs.number == 0) return error.DivisionByZero;
-            try self.writeRegisterFast(base, instr.a, Data.new.num(lhs.number / rhs.number));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(lhs.number / rhs.number));
         },
 
-        inline .eq, .neq, .lt, .gt, .lte, .gte => |op| try compare_impl.eval(self, instr, op),
+        inline .eq, .neq, .lt, .gt, .lte, .gte => |op| try compare_impl.evalCached(slots, base, self, instr, op),
 
         // specialized comparison opcodes for int (no metamethods, no type conversion)
         inline .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => |op| {
-            const lhs_val = self.readRegisterFast(base, instr.b);
-            const rhs_val = self.readRegisterFast(base, instr.c);
+            const lhs_val = regRead(slots, base, instr.b);
+            const rhs_val = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs_val == .number);
                 std.debug.assert(rhs_val == .number);
@@ -1583,13 +1638,13 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 .gte_int => lhs_int >= rhs_int,
                 else => unreachable,
             };
-            try self.writeRegisterFast(base, instr.a, Data.new.boolean(result));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.boolean(result));
         },
 
         // specialized comparison opcodes for float (no metamethods)
         inline .eq_float, .neq_float, .lt_float, .gt_float, .lte_float, .gte_float => |op| {
-            const lhs_val = self.readRegisterFast(base, instr.b);
-            const rhs_val = self.readRegisterFast(base, instr.c);
+            const lhs_val = regRead(slots, base, instr.b);
+            const rhs_val = regRead(slots, base, instr.c);
             if (self.debug_assert_types) {
                 std.debug.assert(lhs_val == .number);
                 std.debug.assert(rhs_val == .number);
@@ -1605,26 +1660,28 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 .gte_float => lhs >= rhs,
                 else => unreachable,
             };
-            try self.writeRegisterFast(base, instr.a, Data.new.boolean(result));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.boolean(result));
         },
 
-        .@"and" => try self.writeRegisterFast(
+        .@"and" => regWrite(
+            slots,
             base,
             instr.a,
-            Data.new.boolean(!revo.isFalse(self.readRegisterFast(base, instr.b)) and !revo.isFalse(self.readRegisterFast(base, instr.c))),
+            Data.new.boolean(!revo.isFalse(regRead(slots, base, instr.b)) and !revo.isFalse(regRead(slots, base, instr.c))),
         ),
 
-        .@"or" => try self.writeRegisterFast(
+        .@"or" => regWrite(
+            slots,
             base,
             instr.a,
-            Data.new.boolean(!revo.isFalse(self.readRegisterFast(base, instr.b)) or !revo.isFalse(self.readRegisterFast(base, instr.c))),
+            Data.new.boolean(!revo.isFalse(regRead(slots, base, instr.b)) or !revo.isFalse(regRead(slots, base, instr.c))),
         ),
 
-        .not => try self.writeRegisterFast(base, instr.a, Data.new.boolean(revo.isFalse(self.readRegisterFast(base, instr.b)))),
+        .not => try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.boolean(revo.isFalse(regRead(slots, base, instr.b)))),
 
         .table_new => {
             self.noteGCPressure(64);
-            try self.writeRegisterFast(base, instr.a, .{ .table = try self.tables.create() });
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, .{ .table = try self.tables.create() });
         },
         .table_set => {
             self.perf.table_set_ops += 1;
@@ -1634,12 +1691,12 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 else => return error.TypeError,
             };
             const t = try self.tables.get(t_id);
-            try t.put(t_id, self, self.readRegisterFast(base, instr.b), self.readRegisterFast(base, instr.c));
+            try t.put(t_id, self, regRead(slots, base, instr.b), regRead(slots, base, instr.c));
         },
         .table_get => {
             self.perf.table_get_ops += 1;
             const object = try self.readRegister(instr.b);
-            const key = self.readRegisterFast(base, instr.c);
+            const key = regRead(slots, base, instr.c);
             if (try self.resolveField(object, key)) |resolved| {
                 try self.writeRegister(instr.a, resolved.value);
             } else try self.writeRegister(instr.a, revo.core_atoms.data(.undef));
@@ -1653,8 +1710,8 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             };
             const t = try self.tables.get(t_id);
             const key = Data.new.atom(instr.bx);
-            try t.put(t_id, self, key, self.readRegisterFast(base, instr.c));
-            try self.writeRegisterFast(base, instr.a, .{ .table = t_id });
+            try t.put(t_id, self, key, regRead(slots, base, instr.c));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, .{ .table = t_id });
         },
         .table_get_atom => {
             self.perf.table_get_ops += 1;
@@ -1671,7 +1728,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             try self.writeRegister(
                 instr.a,
                 .{ .tuple = try self.tuples.create(
-                    self.currentFiber().slots.items[start .. start + count],
+                    slots[start .. start + count],
                 ) },
             );
         },
@@ -1680,7 +1737,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 .tuple => |id| id,
                 else => return error.TypeError,
             };
-            const idx_val = self.readRegisterFast(base, instr.c);
+            const idx_val = regRead(slots, base, instr.c);
 
             // happy path: small non-negative number index
             if (idx_val == .number and idx_val.number >= 0 and @floor(idx_val.number) == idx_val.number) {
@@ -1735,7 +1792,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 else => return error.TypeError,
             };
             const table = try self.tables.get(table_id);
-            const value = self.readRegisterFast(base, instr.c);
+            const value = regRead(slots, base, instr.c);
             if (table.metatable) |mt_id| {
                 const mt = try self.tables.get(mt_id);
                 if (mt.getRaw(.{ .atom = revo.core_atoms.atom_id(.__fields) })) |fields_data| {
@@ -1744,7 +1801,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                         if (instr.bx < fields.hash_order.items.len) {
                             const field_key = fields.hash_order.items[instr.bx];
                             try table.put(table_id, self, field_key, value);
-                            try self.writeRegisterFast(base, instr.a, .{ .table = table_id });
+                            try regWriteFiber(&fiber.slots, alloc, base, instr.a, .{ .table = table_id });
                             return;
                         }
                     }
@@ -1752,19 +1809,19 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             }
             return error.TypeError;
         },
-        .jump => self.currentFiber().pc = instr.bx,
+        .jump => fiber.pc = instr.bx,
         .jump_if_false => {
-            if (revo.isFalse(self.readRegisterFast(base, instr.a))) self.currentFiber().pc = instr.bx;
+            if (revo.isFalse(regRead(slots, base, instr.a))) fiber.pc = instr.bx;
         },
         .jump_if_true => {
-            if (!revo.isFalse(self.readRegisterFast(base, instr.a))) self.currentFiber().pc = instr.bx;
+            if (!revo.isFalse(regRead(slots, base, instr.a))) fiber.pc = instr.bx;
         },
         .load_global => {
             const value = self.globals.get(instr.bx) orelse {
                 try self.setRuntimeMessageFmt("undefined variable `{s}`", .{self.atomName(instr.bx)});
                 return error.UndefinedVariable;
             };
-            try self.writeRegisterFast(base, instr.a, value);
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, value);
         },
         .store_global => {
             if (self.const_globals.contains(instr.bx)) {
@@ -1781,11 +1838,11 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             try self.globals.put(instr.bx, try self.readRegister(instr.a));
             try self.const_globals.put(instr.bx, {});
         },
-        .load_local => try self.copyRegister(instr.a, instr.b),
-        .bind_local => try self.copyRegister(instr.a, instr.b),
+        .load_local => try regCopyFiber(&fiber.slots, alloc, base, instr.a, instr.b),
+        .bind_local => try regCopyFiber(&fiber.slots, alloc, base, instr.a, instr.b),
         .store_local => {
             if (try self.localIsConst(instr.a)) return error.ConstantReassignment;
-            try self.copyRegister(instr.a, instr.b);
+            try regCopyFiber(&fiber.slots, alloc, base, instr.a, instr.b);
         },
         .closure => {
             self.noteGCPressure(48);
@@ -1794,22 +1851,22 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             defer upvalues.deinit(self.runtime.alloc);
             for (proto.upvalue_specs) |spec| {
                 if (spec.is_local) {
-                    const frame = try self.currentFrame();
+                    const frame = fiber.frames.items[fiber.frames.items.len - 1];
                     try upvalues.append(self.runtime.alloc, try self.captureUpvalue(frame.base + spec.index));
                 } else {
                     const closure = (try self.currentClosure()) orelse return error.TypeError;
                     try upvalues.append(self.runtime.alloc, closure.upvalues[spec.index]);
                 }
             }
-            try self.writeRegisterFast(base, instr.a, .{ .function = try self.functions.createClosure(instr.bx, upvalues.items) });
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, .{ .function = try self.functions.createClosure(instr.bx, upvalues.items) });
         },
         .load_upval => {
             const closure = (try self.currentClosure()) orelse return error.InvalidLocal;
-            try self.writeRegisterFast(base, instr.a, try self.loadUpvalueData(closure.upvalues[instr.bx]));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, try self.loadUpvalueData(closure.upvalues[instr.bx]));
         },
         .store_upval => {
             const closure = (try self.currentClosure()) orelse return error.InvalidLocal;
-            try self.storeUpvalueData(closure.upvalues[instr.bx], self.readRegisterFast(base, instr.a));
+            try self.storeUpvalueData(closure.upvalues[instr.bx], regRead(slots, base, instr.a));
         },
         .call => try self.callRegister(instr),
         .call_field => try self.callFieldRegister(instr),
@@ -1835,56 +1892,56 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
         },
         .yield => {
             self.sched.setFiberState(self.sched.current_fiber, .ready);
-            self.currentFiber().running = false;
+            fiber.running = false;
         },
         .halt => {
             const result = try self.readRegister(instr.a);
-            self.currentFiber().slots.items.len = 0;
+            fiber.slots.items.len = 0;
             try self.push(result);
-            self.currentFiber().running = false;
+            fiber.running = false;
             self.sched.setFiberState(self.sched.current_fiber, .dead);
         },
         .range_init => {
-            const start = try self.readRegister(instr.b);
-            const limit = try self.readRegister(instr.c);
-            const step = try self.readRegister(@intCast(instr.bx));
+            const start = regRead(slots, base, instr.b);
+            const limit = regRead(slots, base, instr.c);
+            const step = regRead(slots, base, @intCast(instr.bx));
 
             // state layout in consecutive registers starting at a:
             // R[a]   = current (start initially)
             // R[a+1] = step
             // R[a+2] = limit
-            try self.writeRegister(instr.a, start);
-            try self.writeRegister(instr.a + 1, step);
-            try self.writeRegister(instr.a + 2, limit);
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, start);
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a + 1, step);
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a + 2, limit);
         },
         .range_next => {
             // loop state in consecutive registers starting at b:
             // R[b]   = current
             // R[b+1] = step
             // R[b+2] = limit
-            const current = (self.readRegisterFast(base, instr.b)).as_number() catch return error.TypeError;
-            const step = (self.readRegisterFast(base, instr.b + 1)).as_number() catch return error.TypeError;
-            const limit = (self.readRegisterFast(base, instr.b + 2)).as_number() catch return error.TypeError;
+            const current = (regRead(slots, base, instr.b)).as_number() catch return error.TypeError;
+            const step = (regRead(slots, base, instr.b + 1)).as_number() catch return error.TypeError;
+            const limit = (regRead(slots, base, instr.b + 2)).as_number() catch return error.TypeError;
 
             const has_next = (step > 0 and current < limit) or (step < 0 and current > limit);
 
             // out: r[a]=value, r[c]=index (if c!=0), r[bx]=has_next
-            try self.writeRegisterFast(base, instr.a, Data.new.num(current));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(current));
 
             if (instr.c != 0) {
-                const index_reg = self.readRegisterFast(base, instr.c);
+                const index_reg = regRead(slots, base, instr.c);
                 const index = if (index_reg == .number) index_reg.number else 0.0;
-                try self.writeRegisterFast(base, instr.c, Data.new.num(index));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.c, Data.new.num(index));
             }
-            try self.writeRegister(@intCast(instr.bx), Data.new.boolean(has_next));
+            try regWriteFiber(&fiber.slots, alloc, base, @intCast(instr.bx), Data.new.boolean(has_next));
 
             // advance state if there is a next iteration
             if (has_next) {
-                try self.writeRegisterFast(base, instr.b, Data.new.num(current + step));
+                try regWriteFiber(&fiber.slots, alloc, base, instr.b, Data.new.num(current + step));
                 if (instr.c != 0) {
-                    const index_reg = self.readRegisterFast(base, instr.c);
+                    const index_reg = regRead(slots, base, instr.c);
                     const index = if (index_reg == .number) index_reg.number else 0.0;
-                    try self.writeRegisterFast(base, instr.c, Data.new.num(index + 1));
+                    try regWriteFiber(&fiber.slots, alloc, base, instr.c, Data.new.num(index + 1));
                 }
             }
         },
@@ -1893,9 +1950,9 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             // R[b] = step
             // R[c] = limit
             // bx = max iterations
-            var current = (try self.readRegister(instr.a)).as_number() catch return error.TypeError;
-            const step = (try self.readRegister(instr.b)).as_number() catch return error.TypeError;
-            const limit = (try self.readRegister(instr.c)).as_number() catch return error.TypeError;
+            var current = (regRead(slots, base, instr.a)).as_number() catch return error.TypeError;
+            const step = (regRead(slots, base, instr.b)).as_number() catch return error.TypeError;
+            const limit = (regRead(slots, base, instr.c)).as_number() catch return error.TypeError;
             const max_iter: f64 = @floatFromInt(instr.bx);
 
             var i: f64 = 0;
@@ -1906,7 +1963,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 i += 1;
             }
 
-            try self.writeRegister(instr.a, Data.new.num(current));
+            try regWriteFiber(&fiber.slots, alloc, base, instr.a, Data.new.num(current));
         },
         .unwrap_result => {
             const val = try self.readRegister(instr.a);
@@ -1923,7 +1980,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
             // branch (:err, e)
             if (tag == .atom and tag.atom == revo.core_atoms.atom_id(.err)) {
                 if (propagate_errors) {
-                    if (self.currentFiber().frames.items.len == 2) {
+                    if (fiber.frames.items.len == 2) {
                         if (tuple.items.len > 1) {
                             var buf = std.Io.Writer.Allocating.init(self.runtime.alloc);
                             defer buf.deinit();
@@ -1934,7 +1991,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                             self.setPanicMessageOwned(try buf.toOwnedSlice());
                         }
                         self.panic_span = if (self.currentDebugInfo()) |debug|
-                            self.spanAtPc(debug, if (self.currentFiber().pc > 0) self.currentFiber().pc - 1 else 0)
+                            self.spanAtPc(debug, if (fiber.pc > 0) fiber.pc - 1 else 0)
                         else
                             null;
                         return error.Panic;
@@ -1969,7 +2026,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 break :blk false;
             } else false;
             if (!is_nil and !is_err) {
-                self.currentFiber().pc = instr.bx;
+                fiber.pc = instr.bx;
             }
         },
         .jump_if_err => {
@@ -1983,7 +2040,7 @@ fn evalRegister(self: *VM, instr: Instruction) EvalError!void {
                 break :blk false;
             } else false;
             if (is_err) {
-                self.currentFiber().pc = instr.bx;
+                fiber.pc = instr.bx;
             }
         },
     }

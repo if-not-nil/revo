@@ -1,9 +1,9 @@
 /// comparison spec
 ///
-/// 1. type check — if tags differ:
+/// when tags differ:
 ///    - eq/neq return false/true respectively
 ///    - ordered ops (< > <= >=) throw typeerror with message
-/// 2. same-type:
+/// when same-type:
 ///    - atoms/functions/tables: identity only, eq/neq compare ids, ordered ops crash
 ///    - numbers
 ///    - strings: lexicographic byte-order comparison
@@ -55,15 +55,19 @@ pub fn compare(vm: *VM, lh: Data, rh: Data) std.math.Order {
 }
 
 pub inline fn eval(vm: *VM, instr: Instruction, comptime op: Opcode) VM.EvalError!void {
-    comptime {
-        switch (op) {
-            .eq, .neq, .lt, .gt, .lte, .gte => {},
-            else => @compileError("evalCompare called with non-comparison opcode: " ++ @tagName(op)),
-        }
-    }
-
     const lhs = try vm.readRegister(instr.b);
     const rhs = try vm.readRegister(instr.c);
+    return evalImpl(vm, lhs, rhs, instr, op);
+}
+
+/// cached version; takes pre-fetched slots and base (no currentFiber calls)
+pub inline fn evalCached(slots: []Data, base: usize, vm: *VM, instr: Instruction, comptime op: Opcode) VM.EvalError!void {
+    const lhs = VM.regRead(slots, base, instr.b);
+    const rhs = VM.regRead(slots, base, instr.c);
+    return evalImpl(vm, lhs, rhs, instr, op);
+}
+
+fn evalImpl(vm: *VM, lhs: Data, rhs: Data, instr: Instruction, comptime op: Opcode) VM.EvalError!void {
 
     // type check
     const l_tag = std.meta.activeTag(lhs);
