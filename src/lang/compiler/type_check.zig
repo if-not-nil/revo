@@ -21,10 +21,13 @@ pub fn typeInfoFromName(type_name: []const u8) TypeInfo {
     if (std.mem.eql(u8, type_name, "bool")) return .bool;
     if (std.mem.eql(u8, type_name, "void")) return .void;
     if (std.mem.eql(u8, type_name, "any")) return .any;
+    if (type_name[0] == ':') return .{ .atom = type_name };
+
     return .{ .struct_type = type_name };
 }
 
 pub fn checkType(alloc: std.mem.Allocator, expected: TypeInfo, actual: TypeInfo, span: ast.Span) !void {
+    // std.debug.print("this {any} other {any}", .{ expected, actual });
     if (expected == .any or actual == .any) return;
     if (expected.eql(actual)) return;
     if (types_mod.canCoerce(actual, expected)) return;

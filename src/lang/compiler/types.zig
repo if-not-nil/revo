@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const TypeInfo = union(enum) {
+    // TODO: remove
     void,
     bool,
     // TODO: maybe unify here maybe split at vm
@@ -21,7 +22,7 @@ pub const TypeInfo = union(enum) {
             .int => other == .int,
             .float => other == .float,
             .string => other == .string,
-            .atom => |a| if (other == .atom) std.mem.eql(u8, a, other.atom) else false,
+            .atom => |a| if (other == .atom) std.mem.eql(u8, a[1..], other.atom) else false,
             .struct_type => |s| if (other == .struct_type) std.mem.eql(u8, s, other.struct_type) else false,
             .tuple => |ts| if (other == .tuple) blk: {
                 if (ts.len != other.tuple.len) break :blk false;
@@ -40,6 +41,7 @@ pub const FunctionSignature = struct { params: []const TypeInfo, return_type: Ty
 pub fn typeName(t: TypeInfo) []const u8 {
     return switch (t) {
         .struct_type => |s| s,
+        .atom => |a| a,
         else => @tagName(t),
     };
 }

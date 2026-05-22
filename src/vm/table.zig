@@ -447,3 +447,28 @@ test "table push appends positional values" {
     try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1)).?);
     try std.testing.expectEqual(Data.new.num(30), table.getRaw(Data.new.num(2)).?);
 }
+
+const tt = revo.lang.testing;
+
+test "table lookup order" {
+    try tt.top_string(
+        \\ const mt = {metafield = "second-", __index = fn(self) "last"}
+        \\ const t = set_metatable({normal = "first-"}, mt)
+        \\ t.normal + t.metafield + t.something
+    , "first-second-last");
+}
+
+test "computed table keys use runtime values" {
+    try tt.top_number(
+        \\ const key = "answer"
+        \\ const t = {[key] = 41}
+        \\ t["answer"]
+    , 41);
+
+    try tt.top_number(
+        \\ const k = :x
+        \\ const t = {[k] = 9}
+        \\ t.x
+    , 9);
+}
+

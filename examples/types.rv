@@ -11,6 +11,12 @@
 
 # scalar binds & coercion
 
+fn hi() -> :true do
+  :false
+end
+
+hi(1, "hi")
+
 # typed bindings: int literal inferred as int
 let x: int = 42
 # let bad_int: int = "hello"      # type mismatch: expected int, got string

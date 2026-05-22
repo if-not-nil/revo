@@ -374,7 +374,7 @@ const Parser = struct {
                 _ = try self.expect(.lparen);
                 const params = try self.parseParamList(.rparen);
                 _ = try self.expect(.rparen);
-                const return_type = if (self.match(.arrow)) (try self.expectIdent()).text else null;
+                const return_type = if (self.match(.arrow)) (self.advance()).text else null;
                 const body = try self.parseStatementExpression(body_min_bp);
 
                 var new_params = try self.alloc.alloc(ast.FnParam, params.len + 1);
@@ -401,7 +401,7 @@ const Parser = struct {
                 _ = try self.expect(.lparen);
                 const params = try self.parseParamList(.rparen);
                 _ = try self.expect(.rparen);
-                const return_type = if (self.match(.arrow)) (try self.expectIdent()).text else null;
+                const return_type = if (self.match(.arrow)) (self.advance()).text else null;
                 const body = try self.parseStatementExpression(body_min_bp);
 
                 const fn_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
@@ -422,7 +422,7 @@ const Parser = struct {
                 _ = try self.expect(.lparen);
                 const params = try self.parseParamList(.rparen);
                 _ = try self.expect(.rparen);
-                const return_type = if (self.match(.arrow)) (try self.expectIdent()).text else null;
+                const return_type = if (self.match(.arrow)) (self.advance()).text else null;
                 const body = try self.parseStatementExpression(body_min_bp);
 
                 const fn_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
@@ -440,7 +440,7 @@ const Parser = struct {
         _ = try self.expect(.lparen);
         const params = try self.parseParamList(.rparen);
         _ = try self.expect(.rparen);
-        const return_type = if (self.match(.arrow)) (try self.expectIdent()).text else null;
+        const return_type = if (self.match(.arrow)) (self.advance()).text else null;
         const body = try self.parseStatementExpression(body_min_bp);
         return self.allocExpr(Span.merge(start.span(), body.span), .{
             .fn_expr = .{ .params = params, .return_type = return_type, .body = body },
