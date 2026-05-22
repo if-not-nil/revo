@@ -1047,17 +1047,19 @@ pub const EvalError = error{
 
 fn writeAbsoluteSlot(self: *VM, slot: usize, value: Data) !void {
     try self.ensureAbsoluteSlot(slot);
-    self.currentFiber().slots.items[slot] = value;
+    const fiber = self.currentFiber();
+    fiber.slots.items[slot] = value;
 }
 
 fn callRegister(self: *VM, instr: Instruction) EvalError!void {
     self.perf.call_ops += 1;
+    const fiber = self.currentFiber();
     const frame = try self.currentFrame();
     const base = frame.base;
     const callee_slot = base + instr.a;
     const argc: usize = instr.b;
-    const callee = if (callee_slot < self.currentFiber().slots.items.len)
-        self.currentFiber().slots.items[callee_slot]
+    const callee = if (callee_slot < fiber.slots.items.len)
+        fiber.slots.items[callee_slot]
     else
         revo.core_atoms.data(.missing);
 
@@ -1069,7 +1071,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
-            const args = self.currentFiber().slots.items[args_start..args_end];
+            const args = fiber.slots.items[args_start..args_end];
             const result = try self.callFunctionParts(mm, callee, args);
             try self.writeRegisterFast(base, instr.c, result);
             return;
@@ -1084,7 +1086,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
                 const args_start = callee_slot + 1;
                 const args_end = args_start + argc;
                 try self.ensureAbsoluteSlot(args_end);
-                const args = self.currentFiber().slots.items[args_start..args_end];
+                const args = fiber.slots.items[args_start..args_end];
                 const result = try self.callFunctionParts(struct_new_fn, callee, args);
                 try self.writeRegisterFast(base, instr.c, result);
                 return;
@@ -1111,7 +1113,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
-            const args = self.currentFiber().slots.items[args_start..args_end];
+            const args = fiber.slots.items[args_start..args_end];
 
             var c_args = try self.runtime.alloc.alloc(revo.ffi.CRevoData, args.len);
             defer self.runtime.alloc.free(c_args);
@@ -1134,7 +1136,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
-            const args = self.currentFiber().slots.items[args_start..args_end];
+            const args = fiber.slots.items[args_start..args_end];
 
             if ((!f.variadic and argc != f.arity) or (f.variadic and argc < f.arity)) {
                 var params = try std.ArrayList(u8).initCapacity(self.runtime.alloc, 8);
@@ -1203,8 +1205,8 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
                 return error.WrongArity;
             }
             if (self.host_call_depth == 0 and
-                self.currentFiber().pc < self.currentFiber().program.len and
-                self.currentFiber().program[self.currentFiber().pc].op == .ret)
+                fiber.pc < fiber.program.len and
+                fiber.program[fiber.pc].op == .ret)
             {
                 const tail_frame = try self.currentFrame();
                 if (tail_frame.closure_id != null and tail_frame.base > 0) {
@@ -1214,42 +1216,42 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
                     if (callee_slot != caller_fn_slot) {
                         std.mem.copyForwards(
                             Data,
-                            self.currentFiber().slots.items[caller_fn_slot .. caller_fn_slot + moved_len],
-                            self.currentFiber().slots.items[callee_slot .. callee_slot + moved_len],
+                            fiber.slots.items[caller_fn_slot .. caller_fn_slot + moved_len],
+                            fiber.slots.items[callee_slot .. callee_slot + moved_len],
                         );
                     }
                     tail_frame.base = caller_fn_slot + 1;
-                    tail_frame.call_site_pc = self.currentFiber().pc - 1;
+                    tail_frame.call_site_pc = fiber.pc - 1;
                     tail_frame.closure_id = callee.function;
                     tail_frame.register_count = proto.register_count;
                     if (proto.register_count > 0) {
                         try self.ensureAbsoluteSlot(tail_frame.base + proto.register_count - 1);
                         for (argc..proto.register_count) |idx| {
-                            self.currentFiber().slots.items[tail_frame.base + idx] = revo.core_atoms.data(.missing);
+                            fiber.slots.items[tail_frame.base + idx] = revo.core_atoms.data(.missing);
                         }
                     }
-                    self.currentFiber().pc = proto.addr;
+                    fiber.pc = proto.addr;
                     return;
                 }
             }
-            if (self.currentFiber().frames.items.len >= 256) return error.StackOverflow;
+            if (fiber.frames.items.len >= 256) return error.StackOverflow;
 
             const new_base = callee_slot + 1;
             if (proto.register_count > 0) {
                 try self.ensureAbsoluteSlot(new_base + proto.register_count - 1);
                 for (argc..proto.register_count) |idx| {
-                    self.currentFiber().slots.items[new_base + idx] = revo.core_atoms.data(.missing);
+                    fiber.slots.items[new_base + idx] = revo.core_atoms.data(.missing);
                 }
             }
-            try self.currentFiber().frames.append(self.runtime.alloc, .{
-                .return_addr = self.currentFiber().pc,
-                .call_site_pc = self.currentFiber().pc - 1,
+            try fiber.frames.append(self.runtime.alloc, .{
+                .return_addr = fiber.pc,
+                .call_site_pc = fiber.pc - 1,
                 .base = new_base,
                 .result_register = instr.c,
                 .register_count = proto.register_count,
                 .closure_id = callee.function,
             });
-            self.currentFiber().pc = proto.addr;
+            fiber.pc = proto.addr;
         },
     }
 }
@@ -1257,6 +1259,7 @@ fn callRegister(self: *VM, instr: Instruction) EvalError!void {
 fn callFieldRegister(self: *VM, instr: Instruction) EvalError!void {
     const colon = (instr.b & @as(opcode.Register, 1 << 15)) != 0;
     const explicit_argc: usize = @intCast(instr.b & ~@as(opcode.Register, 1 << 15));
+    const fiber = self.currentFiber();
 
     const object = try self.readRegister(instr.a);
     const key = try self.readRegister(instr.a + 1);
@@ -1285,21 +1288,22 @@ fn callFieldRegister(self: *VM, instr: Instruction) EvalError!void {
     if (explicit_argc > 0) {
         std.mem.copyForwards(
             Data,
-            self.currentFiber().slots.items[base + 1 .. base + 1 + explicit_argc],
-            self.currentFiber().slots.items[base + 2 .. base + 2 + explicit_argc],
+            fiber.slots.items[base + 1 .. base + 1 + explicit_argc],
+            fiber.slots.items[base + 2 .. base + 2 + explicit_argc],
         );
     }
     try self.callRegister(.{ .op = .call, .a = instr.a, .b = @intCast(explicit_argc), .c = instr.c });
 }
 
 fn returnRegister(self: *VM, instr: Instruction) EvalError!void {
+    const fiber = self.currentFiber();
     const result = try self.readRegister(instr.a);
-    const frame = self.currentFiber().frames.pop() orelse unreachable;
+    const frame = fiber.frames.pop() orelse unreachable;
     try self.closeUpvalues(frame.base);
-    self.currentFiber().pc = frame.return_addr;
+    fiber.pc = frame.return_addr;
 
     // check if returning to the exit frame (only one frame left after pop)
-    const returning_to_exit = self.sched.current_fiber == 0 and self.currentFiber().frames.items.len == 1;
+    const returning_to_exit = self.sched.current_fiber == 0 and fiber.frames.items.len == 1;
 
     // toplevel :err tuple should panic
     if (returning_to_exit and result == .tuple) {
@@ -1308,7 +1312,7 @@ fn returnRegister(self: *VM, instr: Instruction) EvalError!void {
             const tag = tuple.items[0];
             if (tag == .atom and tag.atom == revo.core_atoms.atom_id(.err)) {
                 self.panic_span = if (self.currentDebugInfo()) |debug|
-                    self.spanAtPc(debug, if (self.currentFiber().pc > 0) self.currentFiber().pc - 1 else 0)
+                    self.spanAtPc(debug, if (fiber.pc > 0) fiber.pc - 1 else 0)
                 else
                     null;
                 if (tuple.items.len >= 2) {
@@ -1325,11 +1329,11 @@ fn returnRegister(self: *VM, instr: Instruction) EvalError!void {
         }
     }
 
-    if (self.currentFiber().frames.items.len == 0 or self.currentFiber().pc >= self.currentFiber().program.len) {
+    if (fiber.frames.items.len == 0 or fiber.pc >= fiber.program.len) {
         const finished_id = self.sched.current_fiber;
         try self.sched.finishFiber(self.runtime.alloc, finished_id, result);
         if (finished_id == 0) {
-            self.currentFiber().slots.items.len = 0;
+            fiber.slots.items.len = 0;
             try self.push(result);
         }
         return;
@@ -1337,12 +1341,13 @@ fn returnRegister(self: *VM, instr: Instruction) EvalError!void {
 
     const parent = try self.currentFrame();
     const result_slot = parent.base + frame.result_register;
-    self.currentFiber().slots.items.len = result_slot + 1;
+    fiber.slots.items.len = result_slot + 1;
     try self.writeAbsoluteSlot(result_slot, result);
 }
 
 fn spawnRegister(self: *VM, instr: Instruction) EvalError!void {
     const argc: usize = instr.b;
+    const fiber = self.currentFiber();
     const callee = try self.readRegister(instr.a);
     const closure_id = switch (callee) {
         .function => |id| id,
@@ -1366,9 +1371,9 @@ fn spawnRegister(self: *VM, instr: Instruction) EvalError!void {
     }
 
     const child_id: FiberID = self.sched.fibers.items.len;
-    var child = try Fiber.init(self.runtime.alloc, child_id, self.currentFiber().program);
+    var child = try Fiber.init(self.runtime.alloc, child_id, fiber.program);
     errdefer child.deinit(self.runtime.alloc);
-    child.debug_info_id = self.currentFiber().debug_info_id;
+    child.debug_info_id = fiber.debug_info_id;
     child.state = .ready;
     const child_slot_count: usize = @max(@as(usize, proto.register_count), argc);
     if (child_slot_count > 0) {
