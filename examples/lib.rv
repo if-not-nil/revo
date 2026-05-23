@@ -12,5 +12,5 @@ struct Version {
 	fn to_string(self) fmt("%v.%v", self.major, self.minor)
 }
 
-const v = Version.of_string("a.1.0")
+const v = Version.of_string("1.2.3")
 print(v)

@@ -1,54 +1,5 @@
-# mod.rv
-const MOD = fn() do
-  let M = {}
-
-  fn helper() do
-  end
-
-  fn M.public() match M
-    | x when do
-      x.GL_VERSION == "0.0.1a"
-      and x.VERSION == "1"
-    end do 
-      
-    end
-    | "0.0.1b"
-  end
-
-  return M
-end
-
-# portal.rv
-let mutator = do
-  const apply = fn(m) do
-    m.GL_VERSION = "0.0.1a"
-  end
-
-  fn(m) match m
-    | x when tuple?(x) do
-      apply(x)
-    end
-    | x when table?(x) do
-      let all = {}
-      for key in x:keys()
-        all:push(apply(key))
-
-      all
-    end
-end
-
-# main.rv
-{mod, mod2} = (MOD(), MOD2())
-  |> mutator
-
-const mod = match MOD()
-  | v v
-  | (:err, e) panic(e)
-
-
-const {fast_hash, slow_hash} =
-  import(" folder/hashes.rv")
-
-
-fn do_this(what)
-  import("huh.rv")(what)
+# module import and caching
+const mod = import("mod/counter")
+mod.count = 41
+const same = import("mod/counter")
+print(same.count)

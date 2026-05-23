@@ -12,10 +12,15 @@
 # scalar binds & coercion
 
 fn hi() -> :true do
-  :false
+  :true
 end
 
-hi(1, "hi")
+# error: return type mismatch: wanted :true, got false
+# fn hi() -> :true do
+#   :false
+# end
+
+hi()
 
 # typed bindings: int literal inferred as int
 let x: int = 42

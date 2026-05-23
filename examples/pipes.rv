@@ -19,7 +19,9 @@ fn or_else_msg(trolley, track) match trolley
   | x x
 
 fn bind_http(trolley, track) match trolley
-  | (:ok, ok) when ok.status >= 400 and ok.stats < 500 track(ok)
+  | (:ok, ok) when ok.status >= 400 do
+      track(ok)
+    end
   | (:ok, ok) (:ok, ok)
   | (:err, e) (:err, e)
 

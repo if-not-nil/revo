@@ -157,11 +157,11 @@ fn pipes() do
   print(p1)
 
   # value |> :method is shorthand for value:method()
-  const p2 = "hello" |> :upper
+  const p2 = "hello" |> _:upper
   print(p2)
 
   # with arguments
-  const p3 = "hello" |> :sub(1, 2)
+  const p3 = "hello" |> _:sub(1, 2)
   print(p3)
 
   # _ placeholder gets the left-hand value
@@ -255,7 +255,7 @@ fn methods() do
 
   # method chaining works nicely with pipes
   const result = c
-    |> :get
+    |> _:get()
     |> fn(x) x * 2
 
   print(result)
@@ -328,51 +328,6 @@ fn nonblocking() do
   join(producer)
   join(consumer)
   print("producer/consumer done")
-end
-
-# metatables: customize table behavior with metamethods
-fn metatables() do
-  print("\nmetatables")
-
-  # set a metable on a table to customize behavior
-  const VecMT = {
-    # __tostring controls how the table displays
-    __tostring = fn(self) fmt("(%v, %v)", self.x, self.y),
-    # __add defines what + means for the table
-    __add = fn(a, b) set_metatable({x = a.x + b.x, y = a.y + b.y}, VecMT),
-    # __sub for subtraction
-    __sub = fn(a, b) set_metatable({x = a.x - b.x, y = a.y - b.y}, VecMT),
-    # __mul for multiplication
-    __mul = fn(a, n) set_metatable({x = a.x * n, y = a.y * n}, VecMT),
-    # __len controls what len() returns
-    __len = fn(self) 2,
-  }
-
-  const v1 = set_metatable({x = 1, y = 2}, VecMT)
-  const v2 = set_metatable({x = 3, y = 4}, VecMT)
-  const v3 = v1 + v2
-  const v4 = v1 - v2
-  const v5 = v1 * 3
-
-  print(tostring(v1))
-  print(tostring(v3))
-  print(tostring(v4))
-  print(tostring(v5))
-  print(len(v1))
-
-  # __index is called when accessing a missing field
-  const CustomMT = {
-    __index = fn(self, k) if k == "double" self.x * 2 else :nil,
-  }
-  const obj = set_metatable({x = 10}, CustomMT)
-  print(obj.double)
-
-  # __call lets you call a table like a function
-  const CallableMT = {
-    __call = fn(self, x) self.value * x,
-  }
-  const twice = set_metatable({value = 2}, CallableMT)
-  print(twice(21))
 end
 
 # macros: compile-time code transformation
@@ -514,7 +469,6 @@ fn main() do
   methods()
   fibers()
   nonblocking()
-  metatables()
   macros()
   proc_macros()
   comp_time()
