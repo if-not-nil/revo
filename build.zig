@@ -23,13 +23,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const erevo_mod = b.addModule("erevo", .{
-        .root_source_file = b.path("src/erevo.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const all_mods = [_]*std.Build.Module{ vm_mod, revo_mod, erevo_mod };
+    const all_mods = [_]*std.Build.Module{ vm_mod, revo_mod };
     const imports = [_]struct { []const u8, *std.Build.Module }{
         .{ "revo", revo_mod },
         .{ "vm", vm_mod },
@@ -101,9 +95,7 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run_cmd.addArgs(args);
     b.step("run", "run the cli").dependOn(&run_cmd.step);
 
-    const check_modules = [_]*std.Build.Module{
-        revo_mod, vm_mod, erevo_mod, exe_root,
-    };
+    const check_modules = [_]*std.Build.Module{ revo_mod, vm_mod, exe_root };
 
     const test_step = b.step("test", "run all tests");
     for (check_modules) |mod| {
@@ -162,6 +154,13 @@ pub fn build(b: *std.Build) void {
         const install = b.addInstallArtifact(release_exe, .{});
         release_step.dependOn(&install.step);
     }
+
+    const erevo_mod = b.addModule("erevo", .{
+        .root_source_file = b.path("src/erevo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    for (imports) |imp| erevo_mod.addImport(imp[0], imp[1]);
 
     const lib = b.addLibrary(.{
         .name = "erevo",
