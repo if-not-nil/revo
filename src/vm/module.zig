@@ -77,6 +77,8 @@ pub fn runCompiledSessionReport(
     vm.module_dir = module_dir;
     defer vm.module_dir = previous_module_dir;
 
+    try vm.seedBootstrapGlobals(&vm.globals);
+
     const module_state = try revo.VM.Fiber.init(vm.runtime.alloc, vm.currentFiber().id, program);
     var module_state_with_debug = module_state;
     module_state_with_debug.debug_info_id = vm.pending_debug_info_id;
