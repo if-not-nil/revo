@@ -344,6 +344,10 @@ const Parser = struct {
             .kw_join => self.parseJoin(token),
             .kw_yield => self.parseYield(token),
             .lsquiggly => self.parseTable(token),
+            .kw_type => {
+                if (self.check(.ident)) return self.parseTypeAlias(token);
+                return self.allocExpr(token.span(), .{ .ident = token.text });
+            },
             .eof => return error.UnexpectedToken,
             else => return error.UnexpectedToken,
         };
@@ -510,6 +514,45 @@ const Parser = struct {
             .matchers = try matchers.toOwnedSlice(self.alloc),
             .guard = if (self.match(.kw_when)) try self.parseScoped(null, false, 25) else null,
             .then = try self.parseExpression(0),
+        };
+    }
+
+    /// type Name = TypeExpr
+    fn parseTypeAlias(self: *Parser, start: Token) anyerror!*Node {
+        const name = try self.expectIdent();
+        _ = try self.expect(.assign);
+        const type_expr = try self.parseTypeExpr();
+        return self.allocExpr(Span.merge(start.span(), type_expr.span), .{
+            .type_alias = .{ .name = name.text, .type_expr = type_expr },
+        });
+    }
+
+    fn parseTypeExpr(self: *Parser) anyerror!*Node {
+        var left = try self.parseTypeExprAtom();
+        while (self.match(.pipe)) {
+            const right = try self.parseTypeExprAtom();
+            left = try self.allocExpr(Span.merge(left.span, right.span), .{
+                .binary = .{ .op = .@"union", .left = left, .right = right },
+            });
+        }
+        return left;
+    }
+
+    fn parseTypeExprAtom(self: *Parser) anyerror!*Node {
+        return switch (self.peek().type) {
+            .ident => blk: {
+                const tok = self.advance();
+                break :blk try self.allocExpr(tok.span(), .{ .ident = tok.text });
+            },
+            .hash => blk: {
+                const tok = self.advance();
+                break :blk try self.allocExpr(tok.span(), .{ .hash = tok.text });
+            },
+            .lparen => blk: {
+                const start = self.advance();
+                break :blk try self.parseParenExpr(start);
+            },
+            else => return error.UnexpectedToken,
         };
     }
 
@@ -1275,6 +1318,7 @@ const expr_start_tokens = makeTokenSet(&.{
     .kw_not,    .pipe_forward, .lparen,           .kw_fn,     .kw_if,
     .kw_match,  .kw_do,        .kw_loop,          .kw_break,  .kw_return,
     .kw_import, .kw_spawn,     .kw_join,          .kw_yield,  .lsquiggly,
+    .kw_type,
     .eof,
 });
 

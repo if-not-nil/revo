@@ -35,6 +35,7 @@ pub const BinOp = enum {
     gt,
     lte,
     gte,
+    @"union",
 };
 
 pub const UnOp = enum {
@@ -201,6 +202,7 @@ pub const Expr = union(enum) {
     proc_macro: struct { name: []const u8, param: FnParam, body: *Node },
     try_expr: *Node, // expr?
     orelse_expr: struct { left: *Node, right: *Node }, // expr orelse 42
+    type_alias: struct { name: []const u8, type_expr: *Node },
 };
 
 pub const Node = struct {
@@ -501,6 +503,12 @@ pub const Node = struct {
                 try binary.right.printAt(writer, child(depth));
                 try close(writer, depth);
             },
+            .type_alias => |t| {
+                try writer.print("(type {s}", .{t.name});
+                try sep(writer, depth, 1);
+                try t.type_expr.printAt(writer, child(depth));
+                try close(writer, depth);
+            },
         }
     }
 };
@@ -585,6 +593,7 @@ fn binOpName(op: BinOp) []const u8 {
         .gt => ">",
         .lte => "<=",
         .gte => ">=",
+        .@"union" => "|",
     };
 }
 

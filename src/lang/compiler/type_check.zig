@@ -58,13 +58,14 @@ pub fn inferExprType(self: *Compiler, expr: *const Node) TypeInfo {
             },
             inferExprType(self, u.expr),
         ),
-        .binary => |b| types_mod.inferBinaryOp(
-            switch (b.op) {
-                inline else => |tag| @field(types_mod.BinaryOp, @tagName(tag)),
-            },
-            inferExprType(self, b.left),
-            inferExprType(self, b.right),
-        ),
+        .binary => |b| switch (b.op) {
+            .@"union" => .any,
+            inline else => |tag| types_mod.inferBinaryOp(
+                @field(types_mod.BinaryOp, @tagName(tag)),
+                inferExprType(self, b.left),
+                inferExprType(self, b.right),
+            ),
+        },
         .and_expr, .or_expr => .bool,
         .if_expr => |v| inferIfType(self, v),
         .tuple => |items| inferTupleType(self, items),
@@ -84,6 +85,7 @@ pub fn inferExprType(self: *Compiler, expr: *const Node) TypeInfo {
         .con_expr, .let_expr, .global => .void,
         .tuple_pattern => .any,
         .struct_def => |def| .{ .struct_type = def.name },
+        .type_alias => .void,
     };
 }
 
@@ -198,6 +200,96 @@ pub fn validateBindingType(self: *Compiler, type_name: []const u8, value: *const
     const expected = typeInfoFromName(type_name);
     const actual = inferExprType(self, value);
     try checkType(self.alloc, expected, actual, value.span);
+}
+
+pub const TypeExprError = error{
+    UnexpectedToken,
+    OutOfMemory,
+    TypeError,
+    UnsupportedSyntax,
+};
+
+pub fn resolveTypeName(self: *Compiler, name: []const u8) ?TypeInfo {
+    if (std.mem.eql(u8, name, "int")) return .int;
+    if (std.mem.eql(u8, name, "float")) return .float;
+    if (std.mem.eql(u8, name, "string")) return .string;
+    if (std.mem.eql(u8, name, "bool")) return .bool;
+    if (std.mem.eql(u8, name, "void")) return .void;
+    if (std.mem.eql(u8, name, "any")) return .any;
+    if (name.len > 0 and name[0] == ':') return .{ .atom = name };
+    if (self.type_aliases.get(name)) |aliased| return aliased;
+    return .{ .struct_type = name };
+}
+
+pub fn evalTypeExpr(self: *Compiler, node: *const Node) TypeExprError!TypeInfo {
+    return switch (node.expr) {
+        .ident => |name| resolveTypeName(self, name) orelse return error.UnsupportedSyntax,
+        .hash => |name| TypeInfo{ .atom = name },
+        .tuple => |items| blk: {
+            var types = std.ArrayList(TypeInfo).initCapacity(self.alloc, items.len) catch return error.OutOfMemory;
+            errdefer types.deinit(self.alloc);
+            for (items) |item| {
+                try types.append(self.alloc, try evalTypeExpr(self, item));
+            }
+            break :blk TypeInfo{ .tuple = try types.toOwnedSlice(self.alloc) };
+        },
+        .binary => |b| switch (b.op) {
+            .@"union" => blk: {
+                const left = try evalTypeExpr(self, b.left);
+                const right = try evalTypeExpr(self, b.right);
+                var variants = std.ArrayList(types_mod.UnionVariant).initCapacity(self.alloc, 4) catch return error.OutOfMemory;
+                errdefer variants.deinit(self.alloc);
+                try collectVariants(self, left, &variants);
+                try collectVariants(self, right, &variants);
+                break :blk TypeInfo{ .@"union" = try variants.toOwnedSlice(self.alloc) };
+            },
+            else => return error.UnsupportedSyntax,
+        },
+        else => return error.UnsupportedSyntax,
+    };
+}
+
+fn collectVariants(self: *Compiler, ti: TypeInfo, variants: *std.ArrayList(types_mod.UnionVariant)) TypeExprError!void {
+    switch (ti) {
+        .@"union" => |us| {
+            for (us) |u| try variants.append(self.alloc, u);
+        },
+        .tuple => |types| {
+            try variants.append(self.alloc, .{
+                .name = "",
+                .types = types,
+            });
+        },
+        else => {
+            try variants.append(self.alloc, .{
+                .name = "",
+                .types = &.{ti},
+            });
+        },
+    }
+}
+
+pub fn evalUnionVariant(self: *Compiler, node: *const Node) TypeExprError!types_mod.UnionVariant {
+    switch (node.expr) {
+        .tuple => |items| {
+            if (items.len == 0) return error.UnsupportedSyntax;
+            const name_type = try evalTypeExpr(self, items[0]);
+            const name_str = switch (name_type) {
+                .atom => |a| a,
+                else => return error.UnsupportedSyntax,
+            };
+            var types = std.ArrayList(TypeInfo).initCapacity(self.alloc, items.len - 1) catch return error.OutOfMemory;
+            errdefer types.deinit(self.alloc);
+            for (items[1..]) |item| {
+                try types.append(self.alloc, try evalTypeExpr(self, item));
+            }
+            return types_mod.UnionVariant{
+                .name = name_str,
+                .types = try types.toOwnedSlice(self.alloc),
+            };
+        },
+        else => return error.UnsupportedSyntax,
+    }
 }
 
 pub fn validateAssignmentType(self: *Compiler, target: *const Node, value: *const Node) !void {

@@ -1,5 +1,10 @@
 const std = @import("std");
 
+pub const UnionVariant = struct {
+    name: []const u8,
+    types: []const TypeInfo,
+};
+
 pub const TypeInfo = union(enum) {
     // TODO: remove
     void,
@@ -10,7 +15,7 @@ pub const TypeInfo = union(enum) {
     string,
     atom: []const u8,
     tuple: []const TypeInfo,
-    @"union": []const TypeInfo,
+    @"union": []const UnionVariant,
     struct_type: []const u8,
     function: *const FunctionSignature,
     any,
@@ -29,7 +34,15 @@ pub const TypeInfo = union(enum) {
                 for (ts, other.tuple) |a, b| if (!eql(a, b)) break :blk false;
                 break :blk true;
             } else false,
-            .@"union" => false,
+            .@"union" => |us| if (other == .@"union") blk: {
+                if (us.len != other.@"union".len) break :blk false;
+                for (us, other.@"union") |a, b| {
+                    if (!std.mem.eql(u8, a.name, b.name)) break :blk false;
+                    if (a.types.len != b.types.len) break :blk false;
+                    for (a.types, b.types) |at, bt| if (!eql(at, bt)) break :blk false;
+                }
+                break :blk true;
+            } else false,
             .function => |f| if (other == .function) f == other.function else false,
             .any => true,
         };

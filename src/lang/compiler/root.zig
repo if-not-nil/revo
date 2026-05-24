@@ -88,6 +88,7 @@ pub const Compiler = struct {
     ir_ctx: ?ir.IrContext = null,
     use_ir_first: bool = false,
     upvalue_cache: std.AutoHashMap(usize, usize) = undefined,
+    type_aliases: std.StringHashMap(types.TypeInfo),
 
     pub fn init(vm: *VM, test_mode: bool, arena: std.mem.Allocator, runtime_alloc: std.mem.Allocator) !Compiler {
         return .{
@@ -107,6 +108,7 @@ pub const Compiler = struct {
             .struct_layouter = struct_layout.StructLayouter.init(arena),
             .ir_ctx = try ir.IrContext.init(arena),
             .upvalue_cache = std.AutoHashMap(usize, usize).init(arena),
+            .type_aliases = std.StringHashMap(types.TypeInfo).init(arena),
         };
     }
 
@@ -240,15 +242,18 @@ pub const Compiler = struct {
                 },
             },
             .binary => |b| {
+                if (b.op == .@"union") return self.fail(.UnsupportedSyntax, expr, "union type expression used as a value");
                 if (try fold.maybeFoldConstBinary(self, b)) return;
                 try self.compile(b.left, true);
                 try self.compile(b.right, true);
                 const left_type = type_check.inferExprType(self, b.left);
                 const right_type = type_check.inferExprType(self, b.right);
                 const generic_op = switch (b.op) {
+                    .@"union" => unreachable,
                     inline else => |tag| @field(Opcode, @tagName(tag)),
                 };
                 const specialized_op = switch (b.op) {
+                    .@"union" => unreachable,
                     .eq, .neq, .lt, .gt, .lte, .gte => opcode_select.selectComparisonOpcode(generic_op, left_type, right_type),
                     else => opcode_select.selectBinaryOpcode(generic_op, left_type, right_type),
                 };
@@ -338,6 +343,16 @@ pub const Compiler = struct {
                     try emit.emit(self, .call, 2);
                     try emit.regRelease(self);
                 }
+                try emit.nil(self);
+            },
+            .type_alias => |t| {
+                const type_info = type_check.evalTypeExpr(self, t.type_expr) catch |err| switch (err) {
+                    error.TypeError => return self.fail(.UnsupportedSyntax, t.type_expr, "invalid type expression"),
+                    error.UnexpectedToken => return self.fail(.ParseError, t.type_expr, "unexpected token in type expression"),
+                    error.UnsupportedSyntax => return self.fail(.UnsupportedSyntax, t.type_expr, "unsupported type expression syntax"),
+                    error.OutOfMemory => return error.OutOfMemory,
+                };
+                try self.type_aliases.put(t.name, type_info);
                 try emit.nil(self);
             },
             .macro_expr => return self.fail(.UnsupportedSyntax, expr, "syntax must be expanded before compilation"),
