@@ -1,3 +1,6 @@
 [submodule "vendor"]
-	path = vendor
+	path = deps/bestline
 	url = https://github.com/jart/bestline
+[submodule "deps/isocline"]
+	path = deps/isocline
+	url = https://github.com/daanx/isocline

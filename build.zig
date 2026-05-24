@@ -6,8 +6,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const ReplBackend = enum { libedit, readline, bestline, none };
-    const repl_backend = b.option(ReplBackend, "repl", "which repl backend to use") orelse .bestline;
+    const ReplBackend = enum { libedit, readline, isocline, none };
+    const repl_backend = b.option(ReplBackend, "repl", "which repl backend to use") orelse .isocline;
 
     const build_options = b.addOptions();
     build_options.addOption(ReplBackend, "repl_backend", repl_backend);
@@ -39,6 +39,7 @@ pub fn build(b: *std.Build) void {
     ) orelse &.{};
 
     const is_freestanding = target.result.os.tag == .freestanding;
+
     const exe_root = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -46,24 +47,17 @@ pub fn build(b: *std.Build) void {
         .link_libc = !is_freestanding,
     });
 
-    // even without the if stmt it costs nothing when compiled in when a different backend is avaliable
-    // i genuinely dont know why
     if (!is_freestanding) {
-        if (repl_backend == .bestline) {
-            exe_root.addCSourceFile(.{
-                .file = b.path("vendor/bestline.c"),
-                .flags = &.{},
-            });
-            exe_root.addIncludePath(b.path("vendor"));
+        if (repl_backend == .isocline) {
+            add_isocline(exe_root, b);
         }
 
-        // get via @import("build_options").
         exe_root.addOptions("build_options", build_options);
 
         switch (repl_backend) {
             .libedit => exe_root.linkSystemLibrary("edit", .{ .preferred_link_mode = .dynamic }),
             .readline => exe_root.linkSystemLibrary("readline", .{ .preferred_link_mode = .dynamic }),
-            .bestline => {},
+            .isocline => {},
             .none => {},
         }
     }
@@ -73,19 +67,22 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_root });
     b.installArtifact(exe);
 
-    // run exe code is duped to make it not link with a line editor even explicitly
-    // TODO make it link with a line editor when specified explicitly
     const run_exe_root = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = !is_freestanding,
     });
+
     const run_build_options = b.addOptions();
-    run_build_options.addOption(ReplBackend, "repl_backend", .none);
+    run_build_options.addOption(ReplBackend, "repl_backend", .isocline);
     run_build_options.addOption([]const u8, "version", VERSION);
+
     if (!is_freestanding) {
+        add_isocline(run_exe_root, b);
         run_exe_root.addOptions("build_options", run_build_options);
     }
+
     for (imports) |imp| run_exe_root.addImport(imp[0], imp[1]);
 
     const run_exe = b.addExecutable(.{ .name = "revo-run", .root_module = run_exe_root });
@@ -137,11 +134,8 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         });
 
-        release_mod.addCSourceFile(.{
-            .file = b.path("vendor/bestline.c"),
-            .flags = &.{},
-        });
-        release_mod.addIncludePath(b.path("vendor"));
+        add_isocline(release_mod, b);
+
         release_mod.addOptions("build_options", build_options);
         for (imports) |imp| release_mod.addImport(imp[0], imp[1]);
 
@@ -181,4 +175,12 @@ pub fn build(b: *std.Build) void {
     const install_header_file = b.addInstallHeaderFile(header_path, "revo.h");
     install_header_file.step.dependOn(&write_files.step);
     lib_step.dependOn(&install_header_file.step);
+}
+
+fn add_isocline(mod: *std.Build.Module, b: *std.Build) void {
+    mod.addCSourceFile(.{
+        .file = b.path("deps/isocline/src/isocline.c"),
+        .flags = &.{},
+    });
+    mod.addIncludePath(b.path("deps/isocline/include"));
 }

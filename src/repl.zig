@@ -16,8 +16,8 @@ const readline_c = if (backend == .readline) @cImport({
     @cInclude("readline/history.h");
 }) else struct {};
 
-const bestline_c = if (backend == .bestline) @cImport({
-    @cInclude("bestline.h");
+const isocline_c = if (backend == .isocline) @cImport({
+    @cInclude("isocline.h");
 }) else struct {};
 
 const signal_c = if (backend != .none) @cImport(@cInclude("signal.h")) else struct {};
@@ -39,8 +39,13 @@ fn readLine(init: std.process.Init) ![]u8 {
             libc.free(line);
             return duped;
         },
-        .bestline => {
-            const line = bestline_c.bestlineWithHistory(">> ", "revo_history") orelse return error.EndOfStream;
+        .isocline => {
+            const line = isocline_c.ic_readline("rεvo") orelse return error.EndOfStream;
+            // isocline_c.ic_set_history(isocline_c.NULL, -1);
+
+            if (line[0] != 0)
+                _ = isocline_c.ic_history_add(line);
+
             const duped = try init.gpa.dupe(u8, std.mem.span(line));
             libc.free(line);
             return duped;

@@ -20,6 +20,11 @@ fn pick(how: A) -> any do
   | (:err, e) print("err: ", e)
 end
 
+fn is_len(what: (int, string)) -> :true | :false do
+  const length, str = what
+  len(str) == length
+end
+
 let pred1: A = (:err, :UhOh)
 pick(pred1)
 
