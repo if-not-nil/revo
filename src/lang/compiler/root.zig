@@ -709,6 +709,10 @@ pub const Compiler = struct {
         try self.compile(body, true);
         if (return_type) |rt| {
             try validateImplicitReturnType(self, body, rt);
+        } else {
+            const inferred_type = type_check.inferExprType(self, body);
+            const inferred_type_str = try self.alloc.dupe(u8, types.typeName(inferred_type));
+            sig.return_type = inferred_type_str;
         }
         if (loop_sym) |sym| try flow.emitLoopRecurse(self, params.len, sym) else try emit.emit(self, .ret, 1);
 

@@ -30,7 +30,7 @@ pub const FunctionState = struct {
     scope_starts: std.ArrayList(usize),
     return_type: ?[]const u8 = null,
     var_types: std.StringHashMap(?[]const u8),
-    fn_signatures: std.StringHashMap(*const FnSig),
+    fn_signatures: std.StringHashMap(*FnSig),
 
     pub const FnSig = struct {
         param_types: []const ?[]const u8,
@@ -45,7 +45,7 @@ pub const FunctionState = struct {
             .upvalues = try std.ArrayList(UpvalueSpec).initCapacity(alloc, 4),
             .scope_starts = try std.ArrayList(usize).initCapacity(alloc, 8),
             .var_types = std.StringHashMap(?[]const u8).init(alloc),
-            .fn_signatures = std.StringHashMap(*const FnSig).init(alloc),
+            .fn_signatures = std.StringHashMap(*FnSig).init(alloc),
         };
     }
 
@@ -351,7 +351,7 @@ pub fn collectConstLocals(self: *Compiler, locals: []const LocalVar) ![]LocalSlo
     return out.toOwnedSlice(self.alloc);
 }
 
-pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?[]const u8) !*const FunctionState.FnSig {
+pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?[]const u8) !*FunctionState.FnSig {
     const sig = try self.alloc.create(FunctionState.FnSig);
     errdefer self.alloc.destroy(sig);
 
@@ -378,7 +378,7 @@ pub fn declareFnSignature(self: *Compiler, name: []const u8, params: []const ast
     try state.fn_signatures.put(name, sig);
 }
 
-pub fn findFnSignature(self: *const Compiler, name: []const u8) ?*const FunctionState.FnSig {
+pub fn findFnSignature(self: *const Compiler, name: []const u8) ?*FunctionState.FnSig {
     var i = self.functions.items.len;
     while (i > 0) {
         i -= 1;
