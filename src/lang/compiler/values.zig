@@ -275,7 +275,7 @@ pub fn compileStruct(self: *Compiler, expr: *const Node, name: []const u8, items
         if (item == .field) {
             const fname = item.field.name;
             if (seen.get(fname) != null) {
-                const msg = try std.fmt.allocPrint(self.alloc, "duplicate field `{s}` in struct `{s}`", .{fname, name});
+                const msg = try std.fmt.allocPrint(self.alloc, "duplicate field `{s}` in struct `{s}`", .{ fname, name });
                 var tmp_node: Node = .{ .span = item.field.name_span, .expr = .nil };
                 return self.fail(.ParseError, &tmp_node, msg);
             } else {
@@ -383,12 +383,8 @@ fn evalConstNode(self: *Compiler, node: *const Node) ?Data {
     switch (node.expr) {
         // TODO: the rest of them
         .number => |n| return Data.new.num(n.value),
-        .string => |s| {
-            // intern string into vm and return owned Data; just skip if interning fails
-            const vm = self.vm;
-            const ds = vm.ownDataString(s) catch return null;
-            return ds;
-        },
+        .string => |s| return self.vm.ownDataString(s) catch return null,
+        .hash => |h| return self.vm.dataAtom(h) catch return null,
         .ident => |name| {
             if (std.mem.eql(u8, name, "nil")) return revo.core_atoms.data(.nil);
             return null;

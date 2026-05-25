@@ -21,10 +21,8 @@ let x = Asdf{}
 
 let acc = 0
 
-for y in 0..1000 do
+for y in 0..1000
   acc += x:get_age()
-  print(x.name)
-end
 
 print(acc)
 
