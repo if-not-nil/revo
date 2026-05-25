@@ -311,6 +311,9 @@ pub inline fn noteGCPressure(self: *VM, bytes: usize) void {
     } else if (self.gc_bytes_allocated >= self.gc_threshold) {
         self.gc_pending = true;
     }
+
+    self.gc_instr_counter += 1;
+    if ((self.gc_instr_counter & 16) == 0) self.maybeCollectGarbage();
 }
 
 pub fn maybeCollectGarbage(self: *VM) void {
@@ -728,23 +731,13 @@ inline fn runReadyFibers(self: *VM) !?EvalFailure {
             const instr = self.fetch() catch |e| switch (e) {
                 error.ProgramEnd => return null,
             };
-            // self.perf.instructions += 1;
-            // if (self.debug.each_instr) std.debug.print("+ {}\n", .{instr});
             self.evalRegister(instr) catch |e| {
                 if (e == error.Parked) {
                     @branchHint(.unlikely);
                     break;
                 }
-                // if (self.debug.trace) self.trace(instr);
-                // if (self.debug.dump) self.dumpStack();
                 return self.evalFailure(e);
             };
-            // TODO: move to all alloc calls instead
-            self.gc_instr_counter +%= 1;
-            if ((self.gc_instr_counter & 255) == 0) self.maybeCollectGarbage();
-            // if (self.debug.trace) self.trace(instr);
-            // if (self.debug.each_stack) self.printStack();
-            // if (self.debug.dump) self.dumpStack();
         }
 
         if (self.currentFiber().state == .ready) {
