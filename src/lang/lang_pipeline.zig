@@ -14,7 +14,11 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         .include_default_macros = opts.include_default_macros,
     })) {
         .ok => |ok| ok,
-        .err => |failure| return .{ .err = .{ .parse = failure } },
+        .err => |failure| {
+            var diag = failure;
+            if (source.name) |name| diag.source_name = name;
+            return .{ .err = .{ .parse = diag } };
+        },
     };
     const expanded = switch (try expandWithVm(vm, arena.allocator(), parsed)) {
         .ok => |ok| ok,
@@ -114,27 +118,37 @@ pub fn lower(vm: *VM, expanded: Expanded, opts: LowerOptions) !LowerResult {
             }
             break :blk .{ .ok = artifact };
         },
-        .err => |failure| .{ .err = failure },
+        .err => |failure| blk: {
+            var diag = failure;
+            if (opts.source) |source| {
+                if (source.name) |name| diag.source_name = name;
+            }
+            break :blk .{ .err = diag };
+        },
     };
 }
 
 pub fn renderError(allocator: std.mem.Allocator, writer: *std.Io.Writer, source: Source, err: Error) !void {
     return switch (err) {
-        .parse => |failure| revo.renderFailureAt(
+        .parse => |failure| diagnostic.renderAt(
             allocator,
             writer,
-            source.name orelse "<source>",
+            failure.source_name orelse source.name orelse "<source>",
             source.text,
             failure.span,
             failure.message,
+            failure.labels,
+            failure.notes,
         ),
-        .lower => |failure| revo.renderFailureAt(
+        .lower => |failure| diagnostic.renderAt(
             allocator,
             writer,
-            source.name orelse "<source>",
+            failure.source_name orelse source.name orelse "<source>",
             source.text,
             failure.span,
             failure.message,
+            failure.labels,
+            failure.notes,
         ),
     };
 }
@@ -166,7 +180,7 @@ pub fn parseSourceReport(allocator: std.mem.Allocator, source: []const u8) !pars
     const tokens = switch (lexed) {
         .ok => |items| items,
         .err => |failure| {
-            const kind: parser.ParseFailure.Kind = switch (failure.kind) {
+            const kind: parser.Kind = switch (failure.kind) {
                 .UnexpectedCharacter => .LexUnexpectedCharacter,
                 .UnterminatedComment => .LexUnterminatedComment,
                 .UnterminatedString => .LexUnterminatedString,
@@ -208,6 +222,7 @@ const expander = lang.expander;
 const proc = lang.proc;
 const lexer = lang.lexer;
 const parser = lang.parser;
+const diagnostic = lang.diagnostic;
 
 const revo = @import("revo");
 const VM = revo.VM;

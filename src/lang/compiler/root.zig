@@ -27,6 +27,7 @@ pub const struct_layout = @import("struct_layout.zig");
 pub const types = @import("types.zig");
 pub const type_check = @import("type_check.zig");
 const values = @import("values.zig");
+const diagnostic = @import("../diagnostic.zig");
 
 pub const LowerErrorKind = enum { ParseError, UnsupportedSyntax, InvalidAssignmentTarget, IntegerOutOfRange };
 pub const LowerResult = union(enum) { ok: []Instruction, err: LowerFailure };
@@ -35,17 +36,7 @@ pub const ArtifactResult = union(enum) { ok: Artifact, err: LowerFailure };
 pub const LowerError = error{ ParseError, UnsupportedSyntax, InvalidAssignmentTarget, IntegerOutOfRange } || std.mem.Allocator.Error || expander.ExpandError;
 const InternalLowerError = LowerError || error{LoweringFailed};
 
-pub const LowerFailure = struct {
-    kind: LowerErrorKind,
-    span: ast.Span,
-    message: []const u8,
-    owned: bool = false,
-    source_name: ?[]const u8 = null,
-
-    pub fn deinit(self: LowerFailure, alloc: std.mem.Allocator) void {
-        if (self.owned) alloc.free(self.message);
-    }
-};
+pub const LowerFailure = diagnostic.Diagnostic(LowerErrorKind);
 
 pub fn lowerExprArtifactReport(vm: *VM, expr: *const Node, test_mode: bool) !ArtifactResult {
     var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);

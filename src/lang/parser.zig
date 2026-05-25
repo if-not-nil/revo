@@ -22,6 +22,8 @@ const BP: struct {
     suffix: i = 90, // . [] () :()
 } = .{};
 
+const diagnostic = @import("./diagnostic.zig");
+
 // left < right = left-assoc (a + b + c = (a + b) + c)
 // left > right = right-assoc (a = b = c = a = (b = c))
 const BindingPower = struct {
@@ -36,20 +38,16 @@ const LogicalBinding = struct {
     right: u8,
 };
 
-pub const ParseFailure = struct {
-    kind: Kind,
-    span: Span,
-    message: []const u8,
+pub const ParseFailure = diagnostic.Diagnostic(Kind);
 
-    pub const Kind = enum {
-        LexUnexpectedCharacter,
-        LexUnterminatedComment,
-        LexUnterminatedString,
-        LexUnknown,
-        UnexpectedToken,
-        ExpectedIdentifier,
-        ExpectedMatchArm,
-    };
+pub const Kind = enum {
+    LexUnexpectedCharacter,
+    LexUnterminatedComment,
+    LexUnterminatedString,
+    LexUnknown,
+    UnexpectedToken,
+    ExpectedIdentifier,
+    ExpectedMatchArm,
 };
 
 pub const ParseResult = union(enum) {
