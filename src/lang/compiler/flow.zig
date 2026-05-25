@@ -30,7 +30,7 @@ pub fn compileLoop(self: *Compiler, body: *const Node) !void {
     try self.compile(body, true);
     try emit.regRelease(self);
     try emit.emit(self, .jump, loop_start);
-    // sync stack to loop result so bindings see the correct value
+    // result visible to next binding
     self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
 }
 
@@ -51,7 +51,7 @@ pub fn compileWhile(
     try emit.emit(self, .jump, loop_start);
 
     emit.patchJump(self, exit_jump);
-    // sync stack to loop result so bindings see the correct value
+    // same as compileLoop
     self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
 }
 
@@ -67,7 +67,7 @@ pub fn compileForRange(
     var loop = try LoopScopeT.init(self);
     defer loop.deinit();
 
-    try self.compile(start_expr, true);
+    try self.compile(start_expr, true); // contiguous triple for range_init
     try self.compile(step_expr, true);
     try self.compile(end_expr, true);
 
@@ -84,7 +84,7 @@ pub fn compileForRange(
     const needs_index = params.len == 2 and !ast.isDiscardName(params[1].name);
 
     try compileRangeLoopBody(self, params, body, base_reg, needs_index);
-    // after loop body is done, only loop_result is left on stack
+    // collapse to result
     self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
 }
 
@@ -98,6 +98,7 @@ pub fn compileRangeLoopBody(
     var value_slot: ?LocalSlot = null;
     var index_slot: ?LocalSlot = null;
 
+    // declare before loop_check so range_next can fill them each iteration
     if (params.len >= 1 and !ast.isDiscardName(params[0].name)) {
         value_slot = try state.declareLocal(self, params[0].name, false);
         state.setLocalType(self, value_slot.?, "int");
@@ -112,6 +113,7 @@ pub fn compileRangeLoopBody(
     const loop_check: ProgramCounter = @intCast(self.instructions.items.len);
 
     const value_reg = try toRegister(self.active_registers);
+    // 0 is sentinel - ignored by range_next
     const index_reg = if (needs_index) try toRegister(self.active_registers + 1) else 0;
     const has_next_reg = try toRegister(self.active_registers + @as(usize, if (needs_index) 2 else 1));
 
@@ -129,11 +131,7 @@ pub fn compileRangeLoopBody(
 
     if (value_slot) |slot| {
         const temp_reg = try toRegister(self.active_registers);
-        const move_val: Instruction = .{
-            .op = .move,
-            .a = temp_reg,
-            .b = value_reg,
-        };
+        const move_val: Instruction = .{ .op = .move, .a = temp_reg, .b = value_reg };
         try emit.appendRecorded(self, move_val);
         self.active_registers += 1;
         state.markLocalInitialized(self, slot);
@@ -142,11 +140,7 @@ pub fn compileRangeLoopBody(
 
     if (index_slot) |slot| {
         const temp_reg = try toRegister(self.active_registers);
-        const move_idx: Instruction = .{
-            .op = .move,
-            .a = temp_reg,
-            .b = index_reg,
-        };
+        const move_idx: Instruction = .{ .op = .move, .a = temp_reg, .b = index_reg };
         try emit.appendRecorded(self, move_idx);
         self.active_registers += 1;
         state.markLocalInitialized(self, slot);
@@ -157,18 +151,15 @@ pub fn compileRangeLoopBody(
     try emit.regRelease(self);
 
     const loop_state_end = try toRegister(state_reg + 3);
-    reserveRegisters(self, loop_state_end);
+    reserveRegisters(self, loop_state_end); // pin range state so body can't clobber it
 
     try self.compile(body, true);
 
+    // normalise into loop result slot so break and natural exit agree
     const body_result_reg: Register = @intCast(self.active_registers - 1);
     const loop_result_reg: Register = @intCast(self.loop_result_regs.items[self.loop_result_regs.items.len - 1]);
     if (body_result_reg != loop_result_reg) {
-        const move_res: Instruction = .{
-            .op = .move,
-            .a = loop_result_reg,
-            .b = body_result_reg,
-        };
+        const move_res: Instruction = .{ .op = .move, .a = loop_result_reg, .b = body_result_reg };
         try emit.appendRecorded(self, move_res);
     }
     try emit.regRelease(self);
@@ -176,6 +167,7 @@ pub fn compileRangeLoopBody(
     try emit.emit(self, .jump, loop_check);
     emit.patchJump(self, end_jump);
 
+    // reverse order: has_next, index (if used), value, range state (3 regs)
     try emit.regRelease(self);
     if (needs_index) try emit.regRelease(self);
     try emit.regRelease(self);
@@ -198,22 +190,16 @@ pub fn compileFor(
         return self.fail(.UnsupportedSyntax, iter, msg);
     }
 
-    if (iter.expr == .range_literal) {
+    if (iter.expr == .range_literal) { // fast path - no runtime type dispatch
         const range_info = iter.expr.range_literal;
-        return compileForRange(
-            self,
-            params,
-            body,
-            range_info.start,
-            range_info.step,
-            range_info.end,
-        );
+        return compileForRange(self, params, body, range_info.start, range_info.step, range_info.end);
     }
 
     const LoopScopeT = state.LoopScope(@TypeOf(self.*));
     var loop = try LoopScopeT.init(self);
     defer loop.deinit();
 
+    // hidden slots - not visible to user code
     const iter_slot: Operand = @intCast(self.slot_allocators.items[self.slot_allocators.items.len - 1]);
     self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
     const iter_storage: VarStorage = .{ .local = iter_slot };
@@ -222,7 +208,6 @@ pub fn compileFor(
     self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
     const idx_storage: VarStorage = .{ .local = idx_slot };
 
-    // Pre-declare loop variables as locals before loop starts
     var value_storage: VarStorage = undefined;
     var index_storage: VarStorage = undefined;
     if (!ast.isDiscardName(params[0].name)) {
@@ -243,7 +228,7 @@ pub fn compileFor(
 
     const loop_check: ProgramCounter = @intCast(self.instructions.items.len);
 
-    try emitStorageLoad(self, idx_storage);
+    try emitStorageLoad(self, idx_storage); // idx < iter.len
     try emitStorageLoad(self, iter_storage);
     try emit.@"const"(self, Data.new.atom(try self.vm.internAtom("len")));
     try emit.emit(self, .call_field, 0);
@@ -264,53 +249,39 @@ pub fn compileFor(
         try emit.regRelease(self);
     }
 
-    if (iter_storage == .local) {
-        reserveRegisters(self, @intCast(iter_storage.local + 1));
-    }
-    if (idx_storage == .local) {
-        reserveRegisters(self, @intCast(idx_storage.local + 1));
-    }
+    if (iter_storage == .local) reserveRegisters(self, @intCast(iter_storage.local + 1)); // pin iter
+    if (idx_storage == .local) reserveRegisters(self, @intCast(idx_storage.local + 1)); // pin idx
 
     try self.compile(body, true);
 
+    // normalise result -- mirrors range loop body
     const body_result_reg: Register = @intCast(self.active_registers - 1);
     const loop_result_reg: Register = @intCast(self.loop_result_regs.items[self.loop_result_regs.items.len - 1]);
     if (body_result_reg != loop_result_reg) {
-        const move_res: Instruction = .{
-            .op = .move,
-            .a = loop_result_reg,
-            .b = body_result_reg,
-        };
+        const move_res: Instruction = .{ .op = .move, .a = loop_result_reg, .b = body_result_reg };
         try emit.appendRecorded(self, move_res);
     }
     try emit.regRelease(self);
 
-    try emitStorageLoad(self, idx_storage);
+    try emitStorageLoad(self, idx_storage); // idx += 1
     try emit.@"const"(self, Data.new.num(1));
     try emit.emit(self, .add, 0);
     try emitStorageStore(self, idx_storage, false);
     try emit.emit(self, .jump, loop_check);
 
     emit.patchJump(self, end_jump);
-    // sync stack pointer to loop result register so next binding sees the value
+    // collapse to result
     self.active_registers = self.loop_result_regs.items[self.loop_result_regs.items.len - 1] + 1;
 }
 
-pub fn emitStorageLoad(
-    self: *Compiler,
-    storage: VarStorage,
-) !void {
+pub fn emitStorageLoad(self: *Compiler, storage: VarStorage) !void {
     switch (storage) {
         .local => |slot| try emit.emit(self, .load_local, slot),
         .global => |sym| try emit.emit(self, .load_global, sym),
     }
 }
 
-pub fn emitStorageStore(
-    self: *Compiler,
-    storage: VarStorage,
-    is_const: bool,
-) !void {
+pub fn emitStorageStore(self: *Compiler, storage: VarStorage, is_const: bool) !void {
     switch (storage) {
         .local => |slot| try emit.emit(self, .store_local, slot),
         .global => |sym| try emit.emit(self, if (is_const) .store_global_const else .store_global, sym),
@@ -322,6 +293,8 @@ pub fn emitForValueLoad(
     iter_storage: VarStorage,
     idx_storage: VarStorage,
 ) !void {
+    // type dispatch: tuple, string, table each have a different get opcode;
+    // anything else calls `__iter` so user types can define iteration
     const base_depth = self.active_registers;
     const tuple_check = try emitForTypeCheck(self, iter_storage, "tuple");
     try emitStorageLoad(self, iter_storage);
@@ -347,7 +320,7 @@ pub fn emitForValueLoad(
 
     self.active_registers = base_depth;
     emit.patchJump(self, table_check);
-    try emitStorageLoad(self, iter_storage);
+    try emitStorageLoad(self, iter_storage); // fallback: __iter(idx)
     try emit.@"const"(self, Data.new.atom(try self.vm.internAtom("__iter")));
     try emitStorageLoad(self, idx_storage);
     try emit.emit(self, .call_field, 1);
@@ -363,6 +336,7 @@ pub fn emitForTypeCheck(
     iter_storage: VarStorage,
     type_name: []const u8,
 ) !usize {
+    // emits `type(iter) == :type_name`, returns index of jump_if_false
     try emit.emit(self, .load_global, try self.vm.internAtom("type"));
     try emitStorageLoad(self, iter_storage);
     try emit.emit(self, .call, 1);
@@ -377,6 +351,7 @@ pub fn emitLoopRecurse(
     param_count: usize,
     loop_sym: revo.AtomID,
 ) !void {
+    // `loop foo` tail-recurses, load args from result tuple, call, ret -- avoids stack growth
     const result_slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
     self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
     if (self.max_registers < result_slot + 1) self.max_registers = result_slot + 1;
@@ -391,7 +366,7 @@ pub fn emitLoopRecurse(
     if (param_count == 1) {
         try emit.emit(self, .load_local, result_slot);
     } else if (param_count > 1) {
-        for (0..param_count) |idx| {
+        for (0..param_count) |idx| { // unpack result tuple into args
             try emit.emit(self, .load_local, result_slot);
             try emit.emit(self, .tuple_get_const, idx);
         }
@@ -420,6 +395,7 @@ pub fn compileMatch(
         self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
     }
 
+    // evaluated once, loaded per arm
     const subject_slot = try state.declareLocal(self, "__match_subject", false);
     try self.compile(subject, true);
     state.markLocalInitialized(self, subject_slot);
@@ -459,6 +435,7 @@ pub fn compileMatch(
 
         try self.compile(arm.then, true);
 
+        // move arm result to arm_base_registers, all arms must leave stack at same depth
         const arm_result_reg: Register = @intCast(self.active_registers - 1);
         if (arm_result_reg != arm_base_registers) {
             const move_instr: Instruction = .{
@@ -477,19 +454,16 @@ pub fn compileMatch(
         state.popScope(self);
 
         const next_arm = self.instructions.items.len;
-        for (fail_list.items) |jump_idx| {
-            patchJumpToLabel(self, jump_idx, next_arm);
-        }
+        for (fail_list.items) |jump_idx| patchJumpToLabel(self, jump_idx, next_arm);
     }
     state.popScope(self);
 
+    // reclaim subject slot
     self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
 
     self.active_registers = arm_base_registers;
-    try emit.nil(self);
-    for (end_jumps.items) |jump_idx| {
-        emit.patchJump(self, jump_idx);
-    }
+    try emit.nil(self); // fallthrough when no arm matched
+    for (end_jumps.items) |jump_idx| emit.patchJump(self, jump_idx);
 
     self.active_registers = arm_base_registers + 1;
 }
@@ -499,6 +473,7 @@ pub fn patchJumpToLabel(self: *Compiler, jump_idx: usize, target: usize) void {
 }
 
 pub fn reserveRegisters(self: *Compiler, min_register: Register) void {
+    // bumps slot allocator and active/max, no reuse of live register
     const min_slot: LocalSlot = @intCast(min_register);
     if (self.slot_allocators.items.len > 0) {
         if (self.slot_allocators.items[self.slot_allocators.items.len - 1] < min_slot) {
@@ -557,6 +532,7 @@ pub fn bindMatchTuplePattern(
                     .tuple_pattern => {
                         try emitStorageLoad(self, source);
                         try emit.emit(self, .tuple_get_const, idx);
+                        // temp for nested pattern
                         const nested_slot = try state.declareLocal(self, "__bind_tmp", false);
                         state.markLocalInitialized(self, nested_slot);
                         try emit.emit(self, .bind_local, nested_slot);
@@ -580,8 +556,9 @@ pub fn compilePatternChecks(
     const expr = matcher orelse return fail_jumps.toOwnedSlice(self.alloc);
 
     switch (expr.expr) {
-        .ident => {},
+        .ident => {}, // always matches
         .tuple_pattern => |items| {
+            // type check, then length, then each element
             try emit.emit(self, .load_global, try self.vm.internAtom("type"));
             try emitStorageLoad(self, subject);
             try emit.emit(self, .call, 1);
@@ -604,6 +581,7 @@ pub fn compilePatternChecks(
                 const depth_before = self.active_registers;
                 try emitStorageLoad(self, subject);
                 try emit.emit(self, .tuple_get_const, idx);
+                // avoids re-indexing in nested checks
                 const nested_slot = try state.declareLocal(self, "__match_tmp", false);
                 state.markLocalInitialized(self, nested_slot);
                 try emit.emit(self, .bind_local, nested_slot);
@@ -615,6 +593,7 @@ pub fn compilePatternChecks(
             }
         },
         else => {
+            // literal or expression; evaluate and compare
             try emitStorageLoad(self, subject);
             try self.compile(expr, true);
             try emit.emit(self, .eq, 0);
@@ -654,7 +633,7 @@ pub fn compileIf(
     const then_type = type_check.inferExprType(self, then_expr);
     const end_jump = try emit.jump(self, .jump);
     emit.patchJump(self, else_jump);
-    self.active_registers = branch_base_registers;
+    self.active_registers = branch_base_registers; // reset before else so both branches start at same depth
     self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
 
     try state.pushScope(self);
@@ -672,6 +651,7 @@ pub fn compileIf(
     self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
 }
 
+// disabled until type system matures
 fn validateIfBranchTypes(self: *Compiler, then_type: type_check.TypeInfo, else_type: type_check.TypeInfo, then_expr: *const Node, else_expr: *const Node) !void {
     _ = then_expr;
     if (then_type == .any or else_type == .any) return;
@@ -683,11 +663,8 @@ fn validateIfBranchTypes(self: *Compiler, then_type: type_check.TypeInfo, else_t
 
 const types_mod = @import("types.zig");
 
-pub fn compileAnd(
-    self: *Compiler,
-    left: *const Node,
-    right: *const Node,
-) !void {
+pub fn compileAnd(self: *Compiler, left: *const Node, right: *const Node) !void {
+    // short-circuit: false left skips right, returns left
     try self.compile(left, true);
     try emit.regDupe(self);
     const short = try emit.jump(self, .jump_if_false);
@@ -699,6 +676,7 @@ pub fn compileAnd(
 }
 
 pub fn compileOr(self: *Compiler, left: *const Node, right: *const Node) !void {
+    // short-circuit: true left skips right, returns left
     try self.compile(left, true);
     try emit.regDupe(self);
     const short = try emit.jump(self, .jump_if_true);
@@ -719,8 +697,8 @@ pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node) !vo
 
     const r = self.active_registers - 1;
     const loop_res = self.loop_result_regs.items[self.loop_result_regs.items.len - 1];
+    // round-trip: value must be in both the result slot and the stack top callers expect
     const move_to_res: Instruction = .{ .op = .move, .a = try toRegister(loop_res), .b = try toRegister(r) };
-
     try emit.appendRecorded(self, move_to_res);
     const move_back: Instruction = .{ .op = .move, .a = try toRegister(r), .b = try toRegister(loop_res) };
     try emit.appendRecorded(self, move_back);
