@@ -1,9 +1,3 @@
-const std = @import("std");
-const builtin = @import("builtin");
-const diagnostic = @import("./lang/diagnostic.zig");
-pub const pretty = @import("./pretty.zig");
-pub const std_net = @import("./std/net.zig");
-pub const async_backend = @import("./runtime/async_backend.zig");
 pub const async_backend_impl = if (builtin.target.os.tag == .windows)
     @import("./runtime/async_backend_none.zig")
 else
@@ -180,17 +174,20 @@ pub fn renderFailureAt(
     try diagnostic.renderAt(alloc, writer, source_name, source, span, message, &.{}, &.{});
 }
 
-pub const lang = @import("./lang/root.zig");
-pub const vm = @import("vm");
-pub const std_lib = @import("./std/root.zig");
+test {
+    _ = @import("./lang/tests.zig");
+}
 
+const std = @import("std");
+const builtin = @import("builtin");
+
+pub const vm = @import("vm");
 pub const memory = vm.memory;
 pub const ffi = vm.ffi;
 pub const table = vm.table;
 pub const tuple = vm.tuple;
 pub const functions = vm.functions;
 pub const module = vm.module;
-pub const namespace = vm.namespace;
 pub const opcode = vm.opcode;
 pub const bytecode = vm.bytecode;
 pub const Data = memory.Data;
@@ -214,6 +211,9 @@ pub const EvalErrorKind = vm.EvalErrorKind;
 pub const EvalFailure = vm.EvalFailure;
 pub const EvalResult = vm.EvalResult;
 
-test {
-    _ = @import("./lang/tests.zig");
-}
+const diagnostic = @import("./lang/diagnostic.zig");
+pub const lang = @import("./lang/root.zig");
+pub const pretty = @import("./pretty.zig");
+pub const async_backend = @import("./runtime/async_backend.zig");
+pub const std_net = @import("./std/net.zig");
+pub const std_lib = @import("./std/root.zig");

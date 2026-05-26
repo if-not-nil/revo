@@ -134,7 +134,7 @@ tuples: TuplePool,
 functions: FunctionPool,
 struct_types: struct_mod.StructTypePool,
 struct_instances: struct_mod.StructInstancePool,
-namespaces: revo.namespace.NamespacePool,
+modules: revo.module.NamespacePool,
 strings: Interner,
 atoms: std.StringHashMap(mem.AtomID),
 debug: DebugOptions = .{},
@@ -188,7 +188,7 @@ gc_sweep_state: struct {
         functions,
         upvalues,
         structs,
-        namespaces,
+        modules,
         strings,
         done,
     } = .idle,
@@ -202,7 +202,7 @@ const MarkItem = union(enum) {
     function: mem.FunctionID,
     upvalue: root.functions.UpvalueID,
     struct_instance: struct_mod.StructInstanceID,
-    namespace: mem.NamespaceID,
+    module: mem.NamespaceID,
 };
 
 pub fn init(runtime: revo.Runtime) !VM {
@@ -216,7 +216,7 @@ pub fn init(runtime: revo.Runtime) !VM {
         .functions = try FunctionPool.init(runtime.alloc),
         .struct_types = struct_mod.StructTypePool.init(runtime.alloc),
         .struct_instances = try struct_mod.StructInstancePool.init(runtime.alloc),
-        .namespaces = try revo.namespace.NamespacePool.init(runtime.alloc),
+        .modules = try revo.module.NamespacePool.init(runtime.alloc),
         .strings = try Interner.init(runtime.alloc),
         .atoms = std.StringHashMap(mem.AtomID).init(runtime.alloc),
         .module_cache = ModuleCache.init(runtime.alloc),
@@ -361,7 +361,7 @@ pub fn deinit(self: *VM) void {
     self.functions.deinit();
     self.struct_types.deinit();
     self.struct_instances.deinit();
-    self.namespaces.deinit();
+    self.modules.deinit();
     self.strings.deinit();
     self.atoms.deinit();
 
@@ -412,19 +412,19 @@ pub fn clearModuleCache(self: *VM) void {
 }
 
 pub fn createNamespace(self: *VM, path: []const u8, exports_table: mem.TableID) !Data {
-    const id = try self.namespaces.create(path, exports_table);
-    return Data.new.namespace(id);
+    const id = try self.modules.create(path, exports_table);
+    return Data.new.module(id);
 }
 
-pub fn namespaceExportsTable(self: *VM, value: Data) !mem.TableID {
+pub fn moduleExportsTable(self: *VM, value: Data) !mem.TableID {
     if (value.asTable()) |table_id| return table_id;
     const ns_id = value.asNamespace() orelse return error.TypeError;
-    const ns = self.namespaces.get(ns_id) catch return error.TypeError;
+    const ns = self.modules.get(ns_id) catch return error.TypeError;
     return ns.exports;
 }
 
 pub fn setNamespaceExports(self: *VM, ns_id: mem.NamespaceID, exports_table: mem.TableID) !void {
-    const ns = self.namespaces.get(ns_id) catch return;
+    const ns = self.modules.get(ns_id) catch return;
     ns.exports = exports_table;
 }
 
@@ -2241,7 +2241,7 @@ pub inline fn evalRegister(
                     regRead(slots, base, instr.c),
                 )) return;
             }
-            const t_id = try self.namespaceExportsTable(table_value);
+            const t_id = try self.moduleExportsTable(table_value);
             const t = try self.tableFast(t_id);
             try t.put(
                 t_id,
@@ -2292,7 +2292,7 @@ pub inline fn evalRegister(
                 instr.bx,
                 regRead(slots, base, instr.c),
             )) return;
-            const t_id = try self.namespaceExportsTable(table_value);
+            const t_id = try self.moduleExportsTable(table_value);
             const t = try self.tableFast(t_id);
             const key = Data.new.atom(instr.bx);
             try t.put(

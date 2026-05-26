@@ -74,20 +74,20 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             try writer.writeAll("#");
             try writer.writeAll(desc.name);
         },
-        .namespace => {
+        .module => {
             const ns_id = self.asNamespace().?;
-            const ns = vm.namespaces.get(ns_id) catch {
-                try writer.writeAll("<dead-namespace>");
+            const ns = vm.modules.get(ns_id) catch {
+                try writer.writeAll("<dead-module>");
                 return;
             };
             const exports = vm.tables.get(ns.exports) catch {
-                try writer.writeAll("<dead-namespace-exports>");
+                try writer.writeAll("<dead-module-exports>");
                 return;
             };
             if (mode == .debug) {
                 try writer.print("#ns<{s}> ", .{ns.path});
             }
-            exports.write(writer, vm, mode) catch try writer.writeAll("<namespace-unprintable>");
+            exports.write(writer, vm, mode) catch try writer.writeAll("<module-unprintable>");
         },
     }
 }

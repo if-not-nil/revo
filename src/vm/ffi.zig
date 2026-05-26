@@ -31,7 +31,7 @@ pub const CRevoData = extern struct {
             .function => Data.new.function(@intCast(self.value)),
             .table => Data.new.table(@intCast(self.value)),
             .tuple => Data.new.tuple(@intCast(self.value)),
-            .struct_val, .struct_type, .namespace => unreachable,
+            .struct_val, .struct_type, .module => unreachable,
         };
     }
 
@@ -49,7 +49,7 @@ pub const CRevoData = extern struct {
             .function => data.asFunction().?,
             .table => data.asTable().?,
             .tuple => data.asTuple().?,
-            .struct_val, .struct_type, .namespace => unreachable,
+            .struct_val, .struct_type, .module => unreachable,
         };
         return .{ .tag = @intFromEnum(tag), .value = value };
     }
@@ -79,7 +79,7 @@ pub export fn revo_getglobal(vm: *anyopaque, name_ptr: u64, name_len: usize) cal
             .tuple => value.asTuple().?,
             .struct_val => value.asStructVal().?,
             .struct_type => value.asStructType().?,
-            .namespace => value.asNamespace().?,
+            .module => value.asNamespace().?,
         };
         return .{ .tag = @intFromEnum(tag), .value = c_value };
     }
@@ -115,7 +115,7 @@ pub export fn revo_table_get(vm: *anyopaque, table_id: u64, key: CRevoData) call
             .tuple => value.asTuple().?,
             .struct_val => value.asStructVal().?,
             .struct_type => value.asStructType().?,
-            .namespace => value.asNamespace().?,
+            .module => value.asNamespace().?,
         };
         return .{ .tag = @intFromEnum(tag), .value = c_value };
     }

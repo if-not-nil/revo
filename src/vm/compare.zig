@@ -103,7 +103,7 @@ pub fn evalCachedFast(slots: []Data, base: usize, vm: *VM, instr: Instruction, c
                     .table => lhs.asTable().? == rhs.asTable().?,
                     .struct_val => lhs.asStructVal().? == rhs.asStructVal().?,
                     .struct_type => lhs.asStructType().? == rhs.asStructType().?,
-                    .namespace => lhs.asNamespace().? == rhs.asNamespace().?,
+                    .module => lhs.asNamespace().? == rhs.asNamespace().?,
                     else => unreachable,
                 };
                 VM.regWrite(slots, base, instr.a, Data.new.boolean(if (op == .eq) is_eq else !is_eq));

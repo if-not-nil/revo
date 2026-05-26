@@ -399,7 +399,7 @@ pub fn len_(args: []const Data, vm: *VM) !NativeResult {
     return switch (args[0].tag()) {
         .string => .okData(Data.new.num(vm.stringValue(args[0].asString().?).len)),
         .table => .okData(Data.new.num((try vm.tables.get(args[0].asTable().?)).array.items.len)),
-        .namespace => .okData(Data.new.num((try vm.tables.get(try vm.namespaceExportsTable(args[0]))).array.items.len)),
+        .module => .okData(Data.new.num((try vm.tables.get(try vm.moduleExportsTable(args[0]))).array.items.len)),
         .tuple => .okData(Data.new.num((try vm.tuples.get(args[0].asTuple().?)).items.len)),
         else => .errType(1, "string, table, or tuple", typeof(args[0])),
     };
@@ -419,7 +419,7 @@ pub fn typeof(d: Data) []const u8 {
         .string => "string",
         .function => "function",
         .table => "table",
-        .namespace => "namespace",
+        .module => "module",
         .tuple => "tuple",
         .struct_val => "struct",
         .struct_type => "type",

@@ -2,6 +2,7 @@
 # module import and caching
 const mod = import("mod/counter")
 print("mod has", mod)
+print("mod is a distinct type (%s)", type(mod))
 mod.count = 41
 print("mod has", mod)
 # reloads now

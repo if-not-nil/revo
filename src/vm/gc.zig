@@ -27,7 +27,7 @@ pub fn maybeCollectGarbage(self: *VM) void {
             const live_bytes = self.tables.bytes() +
                 self.tuples.bytes() +
                 self.functions.bytes() +
-                self.namespaces.bytes() +
+                self.modules.bytes() +
                 self.strings.bytes();
 
             self.gc_threshold = @max(32 * 1024, live_bytes * self.gc_pause_factor);
@@ -40,7 +40,7 @@ pub fn maybeCollectGarbage(self: *VM) void {
     self.tuples.clearMarks();
     self.functions.clearMarks();
     self.struct_instances.clearMarks();
-    self.namespaces.clearMarks();
+    self.modules.clearMarks();
     self.strings.clearMarks();
 
     markRoots(self);
@@ -56,7 +56,7 @@ pub fn maybeCollectGarbage(self: *VM) void {
         const live_bytes = self.tables.bytes() +
             self.tuples.bytes() +
             self.functions.bytes() +
-            self.namespaces.bytes() +
+            self.modules.bytes() +
             self.strings.bytes();
         self.gc_threshold = @max(32 * 1024, live_bytes * self.gc_pause_factor);
     }
@@ -137,20 +137,20 @@ pub fn doIncrementalSweep(self: *VM) void {
                 if (count == 0 or
                     self.gc_sweep_state.cursor >= self.struct_instances.capacity())
                 {
-                    self.gc_sweep_state.phase = .namespaces;
+                    self.gc_sweep_state.phase = .modules;
                     self.gc_sweep_state.cursor = 0;
                 } else {
                     self.gc_sweep_state.cursor += count;
                     processed += count;
                 }
             },
-            .namespaces => {
-                const count = self.namespaces.sweepStep(
+            .modules => {
+                const count = self.modules.sweepStep(
                     self.gc_sweep_state.cursor,
                     step_limit - processed,
                 );
                 if (count == 0 or
-                    self.gc_sweep_state.cursor >= self.namespaces.capacity())
+                    self.gc_sweep_state.cursor >= self.modules.capacity())
                 {
                     self.gc_sweep_state.phase = .strings;
                     self.gc_sweep_state.cursor = 0;
@@ -234,10 +234,10 @@ pub fn processMarkStack(self: *VM) void {
                 for (instance.fields) |entry|
                     pushMark(self, entry);
             },
-            .namespace => |id| {
-                if (id >= self.namespaces.namespaces.items.len)
+            .module => |id| {
+                if (id >= self.modules.modules.items.len)
                     continue;
-                const ns = self.namespaces.namespaces.items[id] orelse continue;
+                const ns = self.modules.modules.items[id] orelse continue;
                 self.tables.mark(ns.exports, self);
             },
         }
@@ -293,7 +293,7 @@ pub inline fn markRoots(self: *VM) void {
 
 pub inline fn pushMark(self: *VM, data: revo.Data) void {
     switch (data.tag()) {
-        .string, .table, .tuple, .function, .struct_val, .namespace => {
+        .string, .table, .tuple, .function, .struct_val, .module => {
             self.gc_mark_stack.append(self.runtime.alloc, .{ .data = data }) catch return;
         },
         else => {},
@@ -321,7 +321,7 @@ pub inline fn pushMarkStructInstance(self: *VM, id: anytype) void {
 }
 
 pub inline fn pushMarkNamespace(self: *VM, id: anytype) void {
-    self.gc_mark_stack.append(self.runtime.alloc, .{ .namespace = id }) catch return;
+    self.gc_mark_stack.append(self.runtime.alloc, .{ .module = id }) catch return;
 }
 
 pub inline fn markDataImpl(self: *VM, data: revo.Data) void {
@@ -343,7 +343,7 @@ pub inline fn markDataImpl(self: *VM, data: revo.Data) void {
             data.asStructVal().?,
             self,
         ),
-        .namespace => self.namespaces.mark(
+        .module => self.modules.mark(
             data.asNamespace().?,
             self,
         ),
@@ -370,7 +370,7 @@ pub fn markData(self: *VM, data: revo.Data) void {
             data.asStructVal().?,
             self,
         ),
-        .namespace => self.namespaces.mark(
+        .module => self.modules.mark(
             data.asNamespace().?,
             self,
         ),

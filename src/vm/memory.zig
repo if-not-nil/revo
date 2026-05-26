@@ -22,7 +22,7 @@ pub const Type = enum(u4) {
     tuple = 5,
     struct_val = 6,
     struct_type = 7,
-    namespace = 8,
+    module = 8,
 };
 
 const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
@@ -70,8 +70,8 @@ pub const Data = struct {
         pub fn structType(id: StructTypeID) Data {
             return Data.boxed(.struct_type, id);
         }
-        pub fn namespace(id: NamespaceID) Data {
-            return Data.boxed(.namespace, id);
+        pub fn module(id: NamespaceID) Data {
+            return Data.boxed(.module, id);
         }
     };
 
@@ -94,7 +94,7 @@ pub const Data = struct {
     pub inline fn tag(self: Data) Type {
         if ((self.bits & BOX_MASK) != BOX_MASK) return .number;
         const raw = (self.bits >> TAG_SHIFT) & TAG_MASK;
-        if (raw > @intFromEnum(Type.namespace)) return .number;
+        if (raw > @intFromEnum(Type.module)) return .number;
         return @enumFromInt(raw);
     }
 
@@ -126,7 +126,7 @@ pub const Data = struct {
         return self.tag() == .struct_type;
     }
     pub inline fn isNamespace(self: Data) bool {
-        return self.tag() == .namespace;
+        return self.tag() == .module;
     }
 
     pub inline fn asStr(self: Data) ?StringID {

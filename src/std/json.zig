@@ -56,7 +56,7 @@ fn writeJsonValue(data: Data, vm: *VM, writer: *std.Io.Writer) anyerror!void {
         .function => return error.UnsupportedJsonValue,
         .struct_val => return error.UnsupportedJsonValue,
         .struct_type => return error.UnsupportedJsonValue,
-        .namespace => return error.UnsupportedJsonValue,
+        .module => return error.UnsupportedJsonValue,
     };
 }
 
