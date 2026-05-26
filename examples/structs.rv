@@ -11,6 +11,7 @@ struct Point {
         return Point{x = self.x + dx, y = self.y + dy}
 		end,
 }
+Point.__add = fn() :nil
 
 struct Counter {
 	count: number = 0,

@@ -341,6 +341,7 @@ const Parser = struct {
             .kw_return => self.parseExitExpr(.return_expr, token),
             .kw_comp => self.parseComp(token),
             .kw_import => self.parseImport(token),
+            .kw_mod => self.parseMod(token),
             .kw_spawn => self.parseSpawn(token),
             .kw_join => self.parseJoin(token),
             .kw_yield => self.parseYield(token),
@@ -702,6 +703,16 @@ const Parser = struct {
         return self.allocExpr(
             Span.merge(start.span(), path.span),
             .{ .import_expr = path },
+        );
+    }
+
+    /// mod name body_expr
+    fn parseMod(self: *Parser, start: Token) anyerror!*Node {
+        const name = try self.expectIdent();
+        const body = try self.parseExpression(0);
+        return self.allocExpr(
+            Span.merge(start.span(), body.span),
+            .{ .mod_expr = .{ .name = name.text, .body = body } },
         );
     }
 

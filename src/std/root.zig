@@ -42,6 +42,8 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         .{ .name = "cwd", .f = define(&[_]TypeSpec{}, cwd) },
         .{ .name = "system", .f = define(&[_]TypeSpec{.table}, system_) },
         .{ .name = "import", .f = define(&[_]TypeSpec{.string}, import) },
+        .{ .name = "module_path", .f = define(&[_]TypeSpec{.module}, module_path) },
+        .{ .name = "module_keys", .f = define(&[_]TypeSpec{.module}, module_keys) },
     });
     const argv_id = try vm.tables.create();
     const argv = try vm.tables.get(argv_id);
@@ -110,6 +112,7 @@ pub const TypeSpec = union(enum) {
     function,
     table,
     tuple,
+    module,
     bool,
     any,
 
@@ -123,6 +126,7 @@ pub const TypeSpec = union(enum) {
             .function => data.isFunction(),
             .table => data.isTable(),
             .tuple => data.isTuple(),
+            .module => data.isNamespace(),
         };
     }
 };
@@ -825,6 +829,32 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
 
     try vm.module_cache.put(cache_key, .{ .result = result, .stamp = current_stamp });
     return .{ .ok = result };
+}
+
+fn module_path(args: []const Data, vm: *VM) !NativeResult {
+    const path = vm.modulePath(args[0]) catch return .errType(0, "module", dataToString(args[0]));
+    return .okData(try vm.ownDataString(path));
+}
+
+fn module_keys(args: []const Data, vm: *VM) !NativeResult {
+    const exports_id = vm.moduleExportsTable(args[0]) catch return .errType(0, "module", dataToString(args[0]));
+    const exports = try vm.tables.get(exports_id);
+    var keys_list = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, exports.array.items.len + 10);
+    defer keys_list.deinit(vm.runtime.alloc);
+
+    for (0..exports.array.items.len) |idx| {
+        try keys_list.append(vm.runtime.alloc, Data.new.num(idx));
+    }
+    for (exports.hash_order.items) |key| {
+        try keys_list.append(vm.runtime.alloc, key);
+    }
+
+    const result_table = try vm.tables.create();
+    const result = try vm.tables.get(result_table);
+    for (keys_list.items, 0..) |key, idx| {
+        try result.putRaw(Data.new.num(idx), key);
+    }
+    return .okData(Data.new.table(result_table));
 }
 
 fn resolveOsPath(raw_path: []const u8, base_dir: ?[]const u8, vm: *VM) ![]const u8 {

@@ -1260,8 +1260,8 @@ test "import keeps module globals isolated from importer globals" {
 
     try t.top_number_in_dir(module_dir,
         \\ let x = 99
-        \\ const mod = import "answer"
-        \\ x + mod.answer
+        \\ const ns = import "answer"
+        \\ x + ns.answer
     , 140);
 }
 
@@ -1281,14 +1281,33 @@ test "import exposes only pub bindings" {
     defer alloc.free(module_dir);
 
     try t.top_number_in_dir(module_dir,
-        \\ const mod = import "vis"
-        \\ mod.shown
+        \\ const ns = import "vis"
+        \\ ns.shown
     , 9);
 
     try t.top_number_in_dir(module_dir,
-        \\ const mod = import "vis"
-        \\ if mod.hidden == :undef 1 else 0
+        \\ const ns = import "vis"
+        \\ if ns.hidden == :undef 1 else 0
     , 1);
+}
+
+test "mod defines nested namespace" {
+    try t.top_number(
+        \\ const ns = mod utils do
+        \\   pub const answer = 41
+        \\   const hidden = 7
+        \\ end
+        \\ ns.answer + if module_keys(ns):contains?(:answer) 1 else 0 + if module_keys(ns):contains?(:hidden) 100 else 0
+    , 42);
+}
+
+test "module introspection exposes nested path" {
+    try t.top_true(
+        \\ const ns = mod utils do
+        \\   pub const answer = 41
+        \\ end
+        \\ module_path(ns):contains?("::utils")
+    );
 }
 
 test "pub bindings must be top-level in modules" {

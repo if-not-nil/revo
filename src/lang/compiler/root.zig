@@ -397,6 +397,9 @@ pub const Compiler = struct {
                 try self.compile(path, true);
                 try emit.emit(self, .call, 1);
             },
+            .mod_expr => |m| {
+                try self.compileMod(m.name, m.body);
+            },
             .comp_block => |cb| try self.compileComp(cb.expr),
             .loop_expr => |v| try flow.compileLoop(self, v.body),
             .for_loop => |v| try flow.compileFor(self, v.params, v.body, v.iter),
@@ -999,6 +1002,51 @@ pub const Compiler = struct {
         try emit.@"const"(self, self.comp_vm.mainResult());
     }
 
+    pub fn compileMod(self: *Compiler, name: []const u8, expr: *Node) InternalLowerError!void {
+        var temp_compiler = try Compiler.init(
+            self.vm,
+            self.test_mode,
+            true,
+            self.alloc,
+            self.runtime_alloc,
+        );
+        defer temp_compiler.deinit();
+
+        temp_compiler.compileRoot(expr) catch |err| switch (err) {
+            error.LoweringFailed => {
+                if (temp_compiler.failure) |nested_failure| self.failure = nested_failure else unreachable;
+                return error.LoweringFailed;
+            },
+            else => return err,
+        };
+
+        const artifact = try temp_compiler.finishArtifact();
+        defer self.vm.runtime.alloc.free(artifact.instructions);
+        defer self.vm.runtime.alloc.free(artifact.spans);
+
+        const source_name = self.vm.currentDebugSourceName() orelse "<mod>";
+        const nested_source = try std.fmt.allocPrint(self.alloc, "{s}::{s}", .{ source_name, name });
+        defer self.alloc.free(nested_source);
+
+        const result = try VM.module.runCompiledImportedModuleReport(
+            self.comp_vm,
+            nested_source,
+            artifact.instructions,
+        );
+        if (result == .err) {
+            const eval_failure = result.err;
+            self.failure = .{
+                .kind = .ParseError,
+                .span = eval_failure.span orelse expr.span,
+                .message = eval_failure.message,
+                .owned = false,
+                .source_name = eval_failure.source_name,
+            };
+            return error.LoweringFailed;
+        }
+        try emit.@"const"(self, self.comp_vm.mainResult());
+    }
+
     pub fn compileBlock(self: *Compiler, exprs: []const *Node) InternalLowerError!void {
         if (exprs.len == 0) return emit.nil(self);
         var pushed_scope = false;
@@ -1049,8 +1097,10 @@ pub const Compiler = struct {
                 kind != .con,
                 binding.type_name,
             );
-            if (can_export_pub)
+            if (can_export_pub) {
                 try self.emitPubExport(binding.target.expr.ident);
+                try emit.nil(self);
+            }
             return;
         }
 
@@ -1073,8 +1123,10 @@ pub const Compiler = struct {
                 if (kind != .con) .store_global else .store_global_const,
                 try self.vm.internAtom(name),
             );
-            if (can_export_pub)
+            if (can_export_pub) {
                 try self.emitPubExport(name);
+                try emit.nil(self);
+            }
             return;
         }
 
@@ -1191,6 +1243,7 @@ pub const Compiler = struct {
             const inferred_type_str = try self.alloc.dupe(u8, types.typeName(inferred_type));
             sig.return_type = inferred_type_str;
         }
+        if (self.active_registers == 0) try emit.nil(self);
         if (loop_sym) |sym| try flow.emitLoopRecurse(self, params.len, sym) else try emit.emit(self, .ret, 1);
 
         const fn_register_count = self.max_registers;

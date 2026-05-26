@@ -221,8 +221,8 @@ test "module cache reloads changed files" {
     defer alloc.free(source_name);
 
     const code =
-        \\ const mod = import "hot"
-        \\ mod.value
+        \\ const ns = import "hot"
+        \\ ns.value
     ;
 
     var vm = try revo.VM.init(testing.runtime());

@@ -1,12 +1,11 @@
-# modules example
-# module import and caching behavior
-const mod = import("mod/counter")
-print("mod has", mod)
-print("mod is a distinct type (%s)", type(mod))
-mod.count = 41
-print("mod has", mod)
-# reimporting returns the same cached module (not reloaded, just same reference)
-const same = import("mod/counter")
-print("same has", same)
-print(same.count)
-print(same.hidden == :undef)  # private bindings stay hidden
+
+# nested modules
+mod utils do
+  pub const answer = 41
+  const hidden = 7
+end
+
+print("utils has", utils)
+print("utils.answer", utils.answer)
+print("utils keys", module_keys(utils))
+print("utils path", module_path(utils))

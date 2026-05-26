@@ -81,7 +81,7 @@ pub fn inferExprType(self: *Compiler, expr: *const Node) TypeInfo {
         .break_expr => .void,
         .try_expr => |inner| inferExprType(self, inner),
         .orelse_expr => |v| inferOrelseType(self, v),
-        .comp_block, .import_expr, .test_block, .test_suite, .macro_expr, .proc_macro => .any,
+        .comp_block, .import_expr, .mod_expr, .test_block, .test_suite, .macro_expr, .proc_macro => .any,
         .range_literal, .match_expr, .assign_expr => .any,
         .con_expr, .let_expr, .global => .void,
         .tuple_pattern => .any,

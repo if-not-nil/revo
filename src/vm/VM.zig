@@ -423,6 +423,12 @@ pub fn moduleExportsTable(self: *VM, value: Data) !mem.TableID {
     return ns.exports;
 }
 
+pub fn modulePath(self: *VM, value: Data) ![]const u8 {
+    const ns_id = value.asNamespace() orelse return error.TypeError;
+    const ns = self.modules.get(ns_id) catch return error.TypeError;
+    return ns.path;
+}
+
 pub fn setNamespaceExports(self: *VM, ns_id: mem.NamespaceID, exports_table: mem.TableID) !void {
     const ns = self.modules.get(ns_id) catch return;
     ns.exports = exports_table;
