@@ -153,11 +153,13 @@ fn walkExpr(
             .target = try ctx.walk(allocator, v.target, ctx),
             .type_name = v.type_name,
             .value = try ctx.walk(allocator, v.value, ctx),
+            .is_pub = v.is_pub,
         } }),
         .con_expr => |v| alloc(allocator, expr.span, .{ .con_expr = .{
             .target = try ctx.walk(allocator, v.target, ctx),
             .type_name = v.type_name,
             .value = try ctx.walk(allocator, v.value, ctx),
+            .is_pub = v.is_pub,
         } }),
         .tuple => |items| alloc(allocator, expr.span, .{
             .tuple = try ctx.walkSlice(allocator, items, ctx),
@@ -283,6 +285,7 @@ fn expandCon(allocator: std.mem.Allocator, span: Span, binding: ast.Binding, env
         .target = try expandInEnv(allocator, binding.target, env),
         .type_name = binding.type_name,
         .value = try expandInEnv(allocator, binding.value, env),
+        .is_pub = binding.is_pub,
     } });
 }
 
@@ -485,10 +488,20 @@ const AstSubstituter = struct {
                 .assign_expr = .{ .target = try self.substitute(a.target), .value = try self.substitute(a.value) },
             }),
             .let_expr => |l| try self.alloc(node.span, .{
-                .let_expr = .{ .target = try self.substitute(l.target), .type_name = l.type_name, .value = try self.substitute(l.value) },
+                .let_expr = .{
+                    .target = try self.substitute(l.target),
+                    .type_name = l.type_name,
+                    .value = try self.substitute(l.value),
+                    .is_pub = l.is_pub,
+                },
             }),
             .con_expr => |c| try self.alloc(node.span, .{
-                .con_expr = .{ .target = try self.substitute(c.target), .type_name = c.type_name, .value = try self.substitute(c.value) },
+                .con_expr = .{
+                    .target = try self.substitute(c.target),
+                    .type_name = c.type_name,
+                    .value = try self.substitute(c.value),
+                    .is_pub = c.is_pub,
+                },
             }),
             .import_expr => |i| try self.alloc(node.span, .{
                 .import_expr = try self.substitute(i),

@@ -131,9 +131,14 @@ pub const Binding = struct {
     target: *Node,
     type_name: ?[]const u8 = null,
     value: *Node,
+    is_pub: bool = false,
 
     fn printAt(self: *const Binding, writer: *std.Io.Writer, comptime tag: []const u8, depth: ?usize) anyerror!void {
-        try writer.print("({s}", .{tag});
+        if (self.is_pub) {
+            try writer.print("(pub {s}", .{tag});
+        } else {
+            try writer.print("({s}", .{tag});
+        }
         if (depth) |d| {
             try writer.writeByte('\n');
             try writeIndent(writer, d + 1);

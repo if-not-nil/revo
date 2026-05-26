@@ -319,6 +319,7 @@ const Parser = struct {
             .kw_const => self.parseBinding(.con_expr, token),
             .kw_global => self.parseBinding(.global, token),
             .kw_let => self.parseBinding(.let_expr, token),
+            .kw_pub => self.parsePub(token),
             .kw_macro => self.parseMacro(token),
             .kw_test => self.parseTest(token),
             .kw_suite => self.parseSuite(token),
@@ -592,6 +593,58 @@ const Parser = struct {
             Span.merge(start.span(), binding.value.span),
             @unionInit(Expr, @tagName(tag), binding),
         );
+    }
+
+    // `pub` only prefixes top-level bindings
+    fn parsePub(self: *Parser, start: Token) anyerror!*Node {
+        const binding_start = self.peek();
+        const pub_binding = switch (binding_start.type) {
+            .kw_const => blk: {
+                _ = self.advance();
+                break :blk try self.parseBinding(.con_expr, binding_start);
+            },
+            .kw_let => blk: {
+                _ = self.advance();
+                break :blk try self.parseBinding(.let_expr, binding_start);
+            },
+            .kw_global => blk: {
+                _ = self.advance();
+                break :blk try self.parseBinding(.global, binding_start);
+            },
+            else => return error.UnexpectedToken,
+        };
+
+        const with_pub = switch (pub_binding.expr) {
+            .con_expr => |binding| try self.allocExpr(
+                Span.merge(start.span(), pub_binding.span),
+                .{ .con_expr = .{
+                    .target = binding.target,
+                    .type_name = binding.type_name,
+                    .value = binding.value,
+                    .is_pub = true,
+                } },
+            ),
+            .let_expr => |binding| try self.allocExpr(
+                Span.merge(start.span(), pub_binding.span),
+                .{ .let_expr = .{
+                    .target = binding.target,
+                    .type_name = binding.type_name,
+                    .value = binding.value,
+                    .is_pub = true,
+                } },
+            ),
+            .global => |binding| try self.allocExpr(
+                Span.merge(start.span(), pub_binding.span),
+                .{ .global = .{
+                    .target = binding.target,
+                    .type_name = binding.type_name,
+                    .value = binding.value,
+                    .is_pub = true,
+                } },
+            ),
+            else => return error.UnexpectedToken,
+        };
+        return with_pub;
     }
 
     /// loop do expr end
@@ -1311,12 +1364,12 @@ const call_stmt_boundary_tokens = makeTokenSet(&.{
 });
 
 const expr_start_tokens = makeTokenSet(&.{
-    .number,    .string,       .multiline_string, .hash,      .ident,
-    .kw_const,  .kw_let,       .kw_macro,         .kw_struct, .minus,
-    .kw_not,    .pipe_forward, .lparen,           .kw_fn,     .kw_if,
-    .kw_match,  .kw_do,        .kw_loop,          .kw_break,  .kw_return,
-    .kw_import, .kw_spawn,     .kw_join,          .kw_yield,  .lsquiggly,
-    .kw_type,   .eof,
+    .number,    .string,    .multiline_string, .hash,     .ident,
+    .kw_const,  .kw_let,    .kw_pub,           .kw_macro, .kw_struct,
+    .minus,     .kw_not,    .pipe_forward,     .lparen,   .kw_fn,
+    .kw_if,     .kw_match,  .kw_do,            .kw_loop,  .kw_break,
+    .kw_return, .kw_import, .kw_spawn,         .kw_join,  .kw_yield,
+    .lsquiggly, .kw_type,   .eof,
 });
 
 /// expr allows bare call after it (ident, field, call, fn_expr)
