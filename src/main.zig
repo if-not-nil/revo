@@ -24,6 +24,7 @@ const USAGE =
     \\  --test           run test blocks
     \\  --bench[n]       run with performance counters ([n] iterations, 1 if not specified)
     \\  --dis            show bytecode disassembly instead of running
+    \\  --docs           statically extract @doc function docs from source
     \\  -h, --help       show this help message
     \\  --version        show version
     \\
@@ -36,9 +37,10 @@ const USAGE =
     \\  revo -b -o output.rvo script   compile script with custom output path
     \\  revo --bench script.rv         run with performance counters
     \\  revo --dis script.rv           show bytecode disassembly
+    \\  revo --docs script.rv          print extracted docs without running code
 ;
 
-const ExecutionMode = enum { run, bench, disassemble, compile };
+const ExecutionMode = enum { run, bench, disassemble, compile, docs };
 
 const Config = struct {
     mode: ExecutionMode = .run,
@@ -118,6 +120,7 @@ fn runMain(init: std.process.Init) !void {
                     .run => try runSource(init, init.gpa, "<stdin>", source, config),
                     .bench => try benchSource(init, init.gpa, "<stdin>", source, config),
                     .compile => try compileToBytecode(init, init.gpa, init.arena.allocator(), "<stdin>", source, config),
+                    .docs => try printDocs(init, init.gpa, "<stdin>", source),
                     .disassemble => {
                         var vm = try initVM(init, init.gpa, config.argv);
                         defer vm.deinit();
@@ -143,6 +146,7 @@ fn runMain(init: std.process.Init) !void {
                 .run => try runSource(init, init.gpa, "<stdin>", source, config),
                 .bench => try benchSource(init, init.gpa, "<stdin>", source, config),
                 .compile => try compileToBytecode(init, init.gpa, init.arena.allocator(), "<stdin>", source, config),
+                .docs => try printDocs(init, init.gpa, "<stdin>", source),
                 .disassemble => {
                     var vm = try initVM(init, init.gpa, config.argv);
                     defer vm.deinit();
@@ -188,12 +192,17 @@ fn runMain(init: std.process.Init) !void {
                     printError(init, "cannot compile bytecode files", .{});
                     return error.InvalidArgs;
                 },
+                .docs => {
+                    printError(init, "cannot extract docs from bytecode files", .{});
+                    return error.InvalidArgs;
+                },
             }
         } else {
             switch (config.mode) {
                 .run => try runSource(init, init.gpa, path, source, config),
                 .bench => try benchSource(init, init.gpa, path, source, config),
                 .compile => try compileToBytecode(init, init.gpa, arena, path, source, config),
+                .docs => try printDocs(init, init.gpa, path, source),
                 .disassemble => {
                     var vm = try initVM(init, init.gpa, config.argv);
                     defer vm.deinit();
@@ -337,12 +346,17 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             config.test_mode = true;
         } else if (std.mem.eql(u8, arg, "--dis")) {
             config.mode = .disassemble;
+        } else if (std.mem.eql(u8, arg, "--docs")) {
+            config.mode = .docs;
         } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             std.debug.print("{s}\n", .{USAGE});
             return error.HelpRequested;
         } else if (std.mem.eql(u8, arg, "--version")) {
             std.debug.print("revo " ++ @import("build_options").version ++ "\n", .{});
             return error.VersionRequested;
+        } else if (std.mem.eql(u8, arg, "-")) {
+            config.script_path = arg;
+            try argv.append(init.arena.allocator(), arg);
         } else if (std.mem.startsWith(u8, arg, "-")) {
             printError(init, "unknown option '{s}'", .{arg});
             std.debug.print("{s}\n", .{USAGE});
@@ -359,6 +373,31 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
     config.argv = try argv.toOwnedSlice(init.arena.allocator());
 
     return config;
+}
+
+fn printDocs(init: std.process.Init, gpa: Allocator, source_name: []const u8, source: []const u8) !void {
+    const res = revo.lang.docs.extractDocs(gpa, source) catch |err| switch (err) {
+        error.ParseFailed => {
+            printError(init, "parse error while extracting docs", .{});
+            return error.CompilationError;
+        },
+        else => |e| return e,
+    };
+    defer {
+        for (res.items) |it| gpa.free(it.name);
+        gpa.free(res.items);
+        res.arena.deinit();
+    }
+
+    std.debug.print("# docs for {s}\n", .{source_name});
+    if (res.items.len == 0) {
+        std.debug.print("(no @doc function docs found)\n", .{});
+        return;
+    }
+
+    for (res.items) |it| {
+        std.debug.print("\n- {s}/{d}\n{s}\n", .{ it.name, it.arity, it.doc });
+    }
 }
 
 fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, config: Config) !void {

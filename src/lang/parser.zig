@@ -317,7 +317,10 @@ const Parser = struct {
             .string => self.allocExpr(token.span(), .{ .string = token.text }),
             .multiline_string => self.allocExpr(token.span(), .{ .multiline_string = token.text }),
             .hash => self.allocExpr(token.span(), .{ .hash = token.text[1..] }),
-            .ident => self.allocExpr(token.span(), .{ .ident = token.text }),
+            .ident => if (std.mem.eql(u8, token.text, "@doc"))
+                self.parseDocAttr(token)
+            else
+                self.allocExpr(token.span(), .{ .ident = token.text }),
             .kw_const => self.parseBinding(.con_expr, token),
             .kw_global => self.parseBinding(.global, token),
             .kw_let => self.parseBinding(.let_expr, token),
@@ -359,6 +362,55 @@ const Parser = struct {
     fn parseUnary(self: *Parser, op: ast.UnOp, right_bp: u8, token: Token) anyerror!*Node {
         const expr = try self.parseExpression(right_bp);
         return self.allocExpr(Span.merge(token.span(), expr.span), .{ .unary = .{ .op = op, .expr = expr } });
+    }
+
+    fn parseDocAttr(self: *Parser, token: Token) anyerror!*Node {
+        const doc_token = self.advance();
+        const doc_text = switch (doc_token.type) {
+            .string, .multiline_string, .backtick_string => doc_token.text,
+            else => return error.UnexpectedToken,
+        };
+
+        const target = try self.parsePrefix();
+        return self.applyDocAttr(target, doc_text, token.span());
+    }
+
+    fn applyDocAttr(self: *Parser, node: *Node, doc_text: []const u8, doc_span: Span) anyerror!*Node {
+        _ = self;
+        switch (node.expr) {
+            .fn_expr => {
+                node.expr.fn_expr.doc = doc_text;
+                return node;
+            },
+            .con_expr => {
+                const value = node.expr.con_expr.value;
+                if (value.expr != .fn_expr) return error.UnexpectedToken;
+                value.expr.fn_expr.doc = doc_text;
+                return node;
+            },
+            .let_expr => {
+                const value = node.expr.let_expr.value;
+                if (value.expr != .fn_expr) return error.UnexpectedToken;
+                value.expr.fn_expr.doc = doc_text;
+                return node;
+            },
+            .global => {
+                const value = node.expr.global.value;
+                if (value.expr != .fn_expr) return error.UnexpectedToken;
+                value.expr.fn_expr.doc = doc_text;
+                return node;
+            },
+            .assign_expr => {
+                const value = node.expr.assign_expr.value;
+                if (value.expr != .fn_expr) return error.UnexpectedToken;
+                value.expr.fn_expr.doc = doc_text;
+                return node;
+            },
+            else => {
+                _ = doc_span;
+                return error.UnexpectedToken;
+            },
+        }
     }
 
     /// fn(params) body               - anonymous function
@@ -1444,3 +1496,20 @@ pub const testing = struct {
         try std.testing.expectEqualStrings(expected, rendered);
     }
 };
+
+test "parses @doc annotation on function declaration" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const src =
+        \\ @doc "adds"
+        \\ fn add(a, b) a + b
+    ;
+    const tokens = try lexer.lex(alloc, src);
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .con_expr);
+    const value = root.expr.con_expr.value;
+    try std.testing.expect(value.expr == .fn_expr);
+    try std.testing.expectEqualStrings("adds", value.expr.fn_expr.doc.?);
+}

@@ -54,6 +54,7 @@ pub const Diagnostic = diagnostic.Diagnostic;
 pub const Label = diagnostic.Label;
 pub const Note = diagnostic.Note;
 pub const Severity = diagnostic.Severity;
+pub const docs = @import("docs.zig");
 pub const Token = lexer.Token;
 pub const TokenType = lexer.TokenType;
 pub const LexError = lexer.LexError;
@@ -61,6 +62,7 @@ pub const LexResult = lexer.LexResult;
 
 test {
     _ = @import("ast.zig");
+    _ = @import("docs.zig");
     _ = @import("expander.zig");
     _ = @import("proc.zig");
     _ = @import("lexer.zig");

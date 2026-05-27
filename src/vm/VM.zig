@@ -168,12 +168,6 @@ gc_pause_factor: usize = 2,
 // 64kb nursery
 gc_nursery_threshold: usize = 64 * 1024,
 debug_assert_types: bool = false,
-type_atom_bool: ?mem.AtomID = null,
-type_atom_int: ?mem.AtomID = null,
-type_atom_integer: ?mem.AtomID = null,
-type_atom_float: ?mem.AtomID = null,
-type_atom_number: ?mem.AtomID = null,
-type_atom_num: ?mem.AtomID = null,
 
 /// for table lookups
 icache: [32]ICacheEntry = undefined,
@@ -276,12 +270,6 @@ pub fn init(runtime: revo.Runtime) !VM {
 
     // leave async backend nil unless explicitly configured
     vm.runtime.async_backend = null;
-    vm.type_atom_bool = vm.atoms.get("bool");
-    vm.type_atom_int = vm.atoms.get("int");
-    vm.type_atom_integer = vm.atoms.get("integer");
-    vm.type_atom_float = vm.atoms.get("float");
-    vm.type_atom_number = vm.atoms.get("number");
-    vm.type_atom_num = vm.atoms.get("num");
 
     return vm;
 }
@@ -1612,34 +1600,19 @@ fn structFieldValueMatches(
     expected_atom: revo.memory.AtomID,
     value: Data,
 ) bool {
-    if (self.type_atom_bool) |a| {
-        if (expected_atom == a) {
-            const true_id = revo.core_atoms.atom_id(.true);
-            const false_id = revo.core_atoms.atom_id(.false);
-            return if (value.asAtom()) |v|
-                v == true_id or v == false_id
-            else
-                false;
-        }
+    if (expected_atom == revo.core_atoms.bool.atom_id()) {
+        const true_id = revo.core_atoms.atom_id(.true);
+        const false_id = revo.core_atoms.atom_id(.false);
+        return if (value.asAtom()) |v|
+            v == true_id or v == false_id
+        else
+            false;
     }
-    if (self.type_atom_num) |a| {
-        if (expected_atom == a) return value.isNumber();
-    }
-    if (self.type_atom_int) |a| {
-        if (expected_atom == a) return value.isNumber();
-    }
-    if (self.type_atom_integer) |a| {
-        if (expected_atom == a) return value.isNumber();
-    }
-    if (self.type_atom_float) |a| {
-        if (expected_atom == a) return value.isNumber();
-    }
-    if (self.type_atom_number) |a| {
-        if (expected_atom == a) return value.isNumber();
-    }
+    if (expected_atom == revo.core_atoms.num.atom_id()) return value.isNumber();
+    if (expected_atom == revo.core_atoms.int.atom_id()) return value.isNumber();
+    if (expected_atom == revo.core_atoms.float.atom_id()) return value.isNumber();
 
-    const expected_name = self.atomName(expected_atom);
-    if (std.mem.eql(u8, expected_name, "bool")) {
+    if (expected_atom == revo.core_atoms.bool.atom_id()) {
         const true_id = revo.core_atoms.atom_id(.true);
         const false_id = revo.core_atoms.atom_id(.false);
         return if (value.asAtom()) |a|
@@ -1647,14 +1620,7 @@ fn structFieldValueMatches(
         else
             false;
     }
-    if (std.mem.eql(u8, expected_name, "num") or
-        std.mem.eql(u8, expected_name, "int") or
-        std.mem.eql(u8, expected_name, "integer") or
-        std.mem.eql(u8, expected_name, "float") or
-        std.mem.eql(u8, expected_name, "number"))
-    {
-        return value.isNumber();
-    }
+    const expected_name = self.atomName(expected_atom);
     return std.mem.eql(u8, expected_name, revo.std_lib.typeof(value));
 }
 

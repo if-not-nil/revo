@@ -140,6 +140,12 @@ pub const core_atoms = enum(AtomID) {
     SendFailed,
     CannotRecvOnServer,
     RecvFailed,
+    int,
+    bool,
+    integer,
+    float,
+    number,
+    num,
 
     pub const lastFalse = @intFromEnum(@This().false);
 

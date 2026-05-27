@@ -546,8 +546,10 @@ const Lexer = struct {
                 _ = self.advance();
                 _ = self.advance();
                 _ = self.advance();
-                const text = try buf.toOwnedSlice(self.alloc);
+                const raw = try buf.toOwnedSlice(self.alloc);
                 self.pending_error_span = null;
+                const text = try dedentMultiline(self.alloc, raw);
+                self.alloc.free(raw);
                 return .{
                     .type = .multiline_string,
                     .text = text,
@@ -560,6 +562,64 @@ const Lexer = struct {
             try buf.append(self.alloc, self.advance());
         }
         return error.UnterminatedString;
+    }
+
+    fn dedentMultiline(alloc: std.mem.Allocator, text: []const u8) ![]u8 {
+        if (text.len == 0 or text[0] != '\n') return alloc.dupe(u8, text);
+
+        const body = text[1..];
+        var lines = try std.ArrayList([]const u8).initCapacity(alloc, 8);
+        defer lines.deinit(alloc);
+
+        var min_indent: ?usize = null;
+        var iter = std.mem.splitScalar(u8, body, '\n');
+        while (iter.next()) |line| {
+            try lines.append(alloc, line);
+            if (line.len > 0) {
+                var count: usize = 0;
+                for (line) |ch| {
+                    if (ch == ' ' or ch == '\t') {
+                        count += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if (min_indent) |m| {
+                    if (count < m) min_indent = count;
+                } else {
+                    min_indent = count;
+                }
+            }
+        }
+
+        // strip trailing empty lines
+        while (lines.items.len > 0 and lines.items[lines.items.len - 1].len == 0) {
+            _ = lines.pop();
+        }
+
+        const strip = min_indent orelse 0;
+        // dedent each line in place
+        for (lines.items) |*line| {
+            if (line.len > strip) {
+                line.* = line.*[strip..];
+            } else {
+                line.* = "";
+            }
+        }
+        // strip trailing empty lines again after dedent
+        while (lines.items.len > 0 and lines.items[lines.items.len - 1].len == 0) {
+            _ = lines.pop();
+        }
+
+        var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
+        errdefer buf.deinit(alloc);
+
+        for (lines.items, 0..) |line, i| {
+            if (i > 0) try buf.append(alloc, '\n');
+            try buf.appendSlice(alloc, line);
+        }
+
+        return buf.toOwnedSlice(alloc);
     }
 
     fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token {

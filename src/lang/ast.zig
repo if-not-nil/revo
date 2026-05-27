@@ -176,7 +176,12 @@ pub const Expr = union(enum) {
     index: struct { object: *Node, key: *Node },
     if_expr: struct { condition: *Node, then_expr: *Node, else_expr: ?*Node },
     match_expr: struct { subject: *Node, arms: []MatchArm },
-    fn_expr: struct { params: []FnParam, return_type: ?[]const u8 = null, body: *Node },
+    fn_expr: struct {
+        params: []FnParam,
+        return_type: ?[]const u8 = null,
+        body: *Node,
+        doc: ?[]const u8 = null,
+    },
     con_expr: Binding,
     let_expr: Binding,
     global: Binding,

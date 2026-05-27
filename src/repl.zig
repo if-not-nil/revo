@@ -36,7 +36,7 @@ fn isoclineWordCompleter(cenv: ?*isocline_c.ic_completion_env_t, word: [*c]const
 
     var buf: [256]u8 = undefined;
 
-    const commands = &[_][]const u8{ ":q", ":quit", ":clear", ":backend" };
+    const commands = &[_][]const u8{ ":q", ":quit", ":clear", ":backend", ":h", ":help", ":doc", ":apropos", ":doctest" };
     for (commands) |cmd| {
         if (std.mem.startsWith(u8, cmd, wslice)) {
             const cmd_c = std.fmt.bufPrintZ(&buf, "{s}", .{cmd}) catch continue;
@@ -220,6 +220,29 @@ pub const Session = struct {
         try out.writeAll(buf.written());
     }
 
+    fn runDocBuiltin(self: *Session, out: *std.Io.Writer, builtin_name: []const u8, topic: ?[]const u8) !void {
+        const callee = self.vm.getGlobal(builtin_name) orelse {
+            try out.print("missing builtin: {s}\n", .{builtin_name});
+            return;
+        };
+        const result = if (topic) |t| blk: {
+            const arg = try self.vm.ownDataString(t);
+            break :blk self.vm.callFunction(callee, &[_]revo.Data{arg}) catch |err| {
+                try out.print("{s} failed: {}\n", .{ builtin_name, err });
+                return;
+            };
+        } else self.vm.callFunction(callee, &[_]revo.Data{}) catch |err| {
+            try out.print("{s} failed: {}\n", .{ builtin_name, err });
+            return;
+        };
+
+        var rendered = std.Io.Writer.Allocating.init(self.gpa);
+        defer rendered.deinit();
+        try result.write(&rendered.writer, self.vm, .display);
+        try out.writeAll(rendered.written());
+        try out.writeAll("\n");
+    }
+
     pub fn step(self: *Session, out: *std.Io.Writer, raw_line: []const u8) !bool {
         const line = std.mem.trim(u8, raw_line, " \t\r\n");
 
@@ -234,6 +257,46 @@ pub const Session = struct {
 
         if (std.mem.eql(u8, line, ":backend")) {
             try out.print("line editing: {s}\n", .{@tagName(backend)});
+            return true;
+        }
+
+        if (std.mem.eql(u8, line, ":h") or std.mem.eql(u8, line, ":help")) {
+            try self.runDocBuiltin(out, "help", null);
+            return true;
+        }
+
+        if (std.mem.startsWith(u8, line, ":help ")) {
+            try self.runDocBuiltin(out, "help", std.mem.trim(u8, line[6..], " \t"));
+            return true;
+        }
+
+        if (std.mem.startsWith(u8, line, ":doc ")) {
+            try self.runDocBuiltin(out, "doc", std.mem.trim(u8, line[5..], " \t"));
+            return true;
+        }
+
+        if (std.mem.eql(u8, line, ":doc")) {
+            try self.runDocBuiltin(out, "help", "doc");
+            return true;
+        }
+
+        if (std.mem.startsWith(u8, line, ":apropos ")) {
+            try self.runDocBuiltin(out, "apropos", std.mem.trim(u8, line[9..], " \t"));
+            return true;
+        }
+
+        if (std.mem.eql(u8, line, ":apropos")) {
+            try out.writeAll("usage: :apropos <term>\n");
+            return true;
+        }
+
+        if (std.mem.eql(u8, line, ":doctest")) {
+            try self.runDocBuiltin(out, "doctest", null);
+            return true;
+        }
+
+        if (std.mem.startsWith(u8, line, ":doctest ")) {
+            try self.runDocBuiltin(out, "doctest", std.mem.trim(u8, line[9..], " \t"));
             return true;
         }
 
@@ -434,6 +497,7 @@ test "repl handles commands" {
     try std.testing.expectEqual(@as(usize, 0), env.vm.const_globals.count());
     try std.testing.expectEqual(@as(usize, 0), env.session.source_acc.items.len);
     try std.testing.expect(std.mem.indexOf(u8, env.out.written(), "session cleared") != null);
+    try std.testing.expect(try env.session.step(&env.out.writer, ":help"));
     try std.testing.expect(!(try env.session.step(&env.out.writer, ":q")));
 }
 

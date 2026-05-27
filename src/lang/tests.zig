@@ -162,6 +162,15 @@ test "len" {
     try t.top_number("len(\"hi\")", 2);
 }
 
+// TODO: how would i even test it?
+test "@doc annotates functions without changing runtime behavior" {
+    try t.top_number(
+        \\ @doc "adds numbers"
+        \\ fn add(a, b) a + b
+        \\ add(20, 22)
+    , 42);
+}
+
 test "stdlib json time and string modules are exposed" {
     try t.top_string("json.encode((\"a\", \"b\", \"c\")):unwrap()", "[\"a\",\"b\",\"c\"]");
     try t.top_number("json.decode(\"{\\\"a\\\":1}\"):unwrap().a", 1);
