@@ -276,7 +276,7 @@ pub const NamespacePool = struct {
         return id;
     }
 
-    pub inline fn get(self: *NamespacePool, id: NamespaceID) !*Namespace {
+    pub fn get(self: *NamespacePool, id: NamespaceID) !*Namespace {
         if (id >= self.modules.items.len) return error.InvalidNamespace;
         if (self.modules.items[id]) |*ns| return ns;
         return error.InvalidNamespace;

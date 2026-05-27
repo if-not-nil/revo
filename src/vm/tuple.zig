@@ -63,7 +63,7 @@ pub const TuplePool = struct {
         return id;
     }
 
-    pub inline fn get(self: *TuplePool, id: memory.TupleID) !*Tuple {
+    pub fn get(self: *TuplePool, id: memory.TupleID) !*Tuple {
         if (id >= self.tuples.items.len) return error.InvalidTuple;
         if (self.tuples.items[id]) |*t| return t;
         return error.InvalidTuple;

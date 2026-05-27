@@ -61,7 +61,7 @@ pub const TablePool = struct {
         return id;
     }
 
-    pub inline fn get(self: *TablePool, id: memory.TableID) !*Table {
+    pub fn get(self: *TablePool, id: memory.TableID) !*Table {
         if (id >= self.tables.items.len) return error.InvalidTable;
         if (self.tables.items[id]) |*t| return t;
         return error.InvalidTable;

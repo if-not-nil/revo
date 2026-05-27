@@ -838,7 +838,7 @@ pub fn run(self: *VM) !void {
     };
 }
 
-fn callFunctionParts(self: *VM, callee: Data, args: []const Data) EvalError!Data {
+fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const Data) EvalError!Data {
     self.host_call_depth += 1;
     defer self.host_call_depth -= 1;
 
@@ -870,6 +870,9 @@ fn callFunctionParts(self: *VM, callee: Data, args: []const Data) EvalError!Data
     }
 
     try fiber.slots.append(self.runtime.alloc, callee);
+    if (maybe_first) |first| {
+        try fiber.slots.append(self.runtime.alloc, first);
+    }
     for (args) |arg| try fiber.slots.append(self.runtime.alloc, arg);
 
     const call_reg_usize = callee_slot - base;
@@ -877,7 +880,9 @@ fn callFunctionParts(self: *VM, callee: Data, args: []const Data) EvalError!Data
         return error.InvalidBytecode;
     const call_reg: opcode.Register = @intCast(call_reg_usize);
 
-    const argc: opcode.Register = @intCast(args.len);
+    const argc_usize: usize = args.len + @intFromBool(maybe_first != null);
+
+    const argc: opcode.Register = @intCast(argc_usize);
 
     try self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg });
 
@@ -895,63 +900,7 @@ fn callFunctionParts(self: *VM, callee: Data, args: []const Data) EvalError!Data
 
 // TODO inline everywhere
 pub inline fn callFunction(self: *VM, callee: Data, args: []const Data) EvalError!Data {
-    return self.callFunctionParts(callee, args);
-}
-
-pub inline fn callFunctionWithFirst(self: *VM, callee: Data, first: Data, args: []const Data) EvalError!Data {
-    self.host_call_depth += 1;
-    defer self.host_call_depth -= 1;
-
-    const fiber = self.currentFiber();
-    const initial_frame_depth = fiber.frames.items.len;
-    const initial_pc = fiber.pc;
-    const initial_slot_len = fiber.slots.items.len;
-
-    if (fiber.frames.items.len == 0) {
-        if (fiber.debug_info_id == null)
-            fiber.debug_info_id = self.pending_debug_info_id;
-
-        try fiber.frames.append(
-            self.runtime.alloc,
-            .{ .return_addr = @intCast(fiber.program.len), .base = 0 },
-        );
-    }
-
-    const caller_frame_depth = fiber.frames.items.len;
-    const base = (try self.currentFrame()).base;
-    const callee_slot = fiber.slots.items.len;
-
-    errdefer {
-        fiber.slots.items.len = initial_slot_len;
-        fiber.pc = initial_pc;
-        while (fiber.frames.items.len > initial_frame_depth) {
-            _ = fiber.frames.pop();
-        }
-    }
-
-    try fiber.slots.append(self.runtime.alloc, callee);
-    try fiber.slots.append(self.runtime.alloc, first);
-    for (args) |arg| try fiber.slots.append(self.runtime.alloc, arg);
-
-    const call_reg_usize = callee_slot - base;
-    if (call_reg_usize > std.math.maxInt(opcode.Register))
-        return error.InvalidBytecode;
-    const call_reg: opcode.Register = @intCast(call_reg_usize);
-
-    const argc: opcode.Register = @intCast(args.len + 1);
-
-    try self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg });
-
-    if (fiber.frames.items.len > caller_frame_depth) {
-        while (fiber.frames.items.len > caller_frame_depth) {
-            const instr = try self.fetch();
-            try self.evalRegister(instr);
-        }
-    }
-
-    const result = fiber.slots.items[callee_slot];
-    fiber.slots.items.len = callee_slot;
-    return result;
+    return self.callFunctionParts(callee, null, args);
 }
 
 pub fn compare(self: *VM, lh: Data, rh: Data) std.math.Order {
@@ -1479,7 +1428,11 @@ fn callRegister(
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
             const args = fiber.slots.items[args_start..args_end];
-            const result = try self.callFunctionWithFirst(mm, callee, args);
+            const result = try self.callFunctionParts(
+                mm,
+                callee,
+                args,
+            );
             try self.ensureAbsoluteSlot(base + instr.c);
             try self.writeRegisterFast(
                 base,

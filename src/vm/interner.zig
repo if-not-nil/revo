@@ -85,11 +85,11 @@ pub fn ownNoDedup(self: *Interner, value: []const u8) !memory.StringID {
     return self.insert(owned);
 }
 
-pub inline fn lookup(self: *const Interner, value: []const u8) ?memory.StringID {
+pub fn lookup(self: *const Interner, value: []const u8) ?memory.StringID {
     return self.by_name.get(value);
 }
 
-pub inline fn get(self: *const Interner, id: memory.StringID) ![]const u8 {
+pub fn get(self: *const Interner, id: memory.StringID) ![]const u8 {
     if (id >= self.slots.items.len) return error.InvalidString;
     return self.slots.items[id] orelse error.InvalidString;
 }
