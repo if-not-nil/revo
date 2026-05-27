@@ -1,10 +1,14 @@
-# nested modules
 mod utils do
-  pub const answer = 41
-  const hidden = 7
+  @doc"""
+  this does something
+  """
+  const answer = 111
+  pub fn get_ans() answer
+
+  fn private() 123
 end
+print(utils.get_ans())
 
 print("utils has", utils)
-print("utils.answer", utils.answer)
 print("utils keys", module_keys(utils))
 print("utils path", module_path(utils))

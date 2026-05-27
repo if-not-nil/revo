@@ -57,6 +57,9 @@ const DocVisitor = struct {
 
     pub fn visit(self: *DocVisitor, node: *const Node) void {
         switch (node.expr) {
+            .decl => |decl| {
+                self.visit(decl.inner);
+            },
             .con_expr => |binding| {
                 if (binding.value.expr == .fn_expr and binding.value.expr.fn_expr.doc != null) {
                     const key = @intFromPtr(binding.value);

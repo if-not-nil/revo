@@ -116,6 +116,22 @@ pub const StructItem = union(enum) {
     binding: Binding,
 };
 
+pub const DeclKind = enum {
+    con,
+    let,
+    global,
+    mod,
+    fn_decl,
+    struct_decl,
+    type_alias_decl,
+};
+
+pub const DeclNode = struct {
+    inner: *Node,
+    kind: DeclKind,
+    is_pub: bool = false,
+};
+
 pub const MatchMatcher = union(enum) {
     wildcard,
     expr: *Node,
@@ -160,6 +176,17 @@ pub const Binding = struct {
     }
 };
 
+pub fn setPub(expr: Expr, is_pub: bool) Expr {
+    if (!is_pub) return expr;
+    return switch (expr) {
+        .con_expr => |b| .{ .con_expr = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true } },
+        .let_expr => |b| .{ .let_expr = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true } },
+        .global => |b| .{ .global = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true } },
+        .mod_expr => |m| .{ .mod_expr = .{ .name = m.name, .body = m.body, .is_pub = true } },
+        else => expr,
+    };
+}
+
 pub const Expr = union(enum) {
     number: NumberLiteral, // (:number, 123) or (:number, 123.0)
     string: []const u8, // (:string, "asdf")
@@ -185,6 +212,7 @@ pub const Expr = union(enum) {
     con_expr: Binding,
     let_expr: Binding,
     global: Binding,
+    decl: DeclNode,
     // ill probably ignore node's span field for now just do its expr
     // (:assign_expr, (:ident, "aaa"), (:ident, "bbb"))
     assign_expr: struct { target: *Node, value: *Node },
@@ -256,6 +284,8 @@ pub const Node = struct {
             .nil => try writer.writeAll("nil"),
             .ident => |name| try writer.writeAll(name),
             .macro_expr => |m| try writer.print("(macro `{s}` `{s}`)", .{ m.pattern, m.template }),
+
+            .decl => |d| try d.inner.printAt(writer, depth),
 
             .range_literal => |r| {
                 try writer.writeAll("(range ");
@@ -1000,11 +1030,9 @@ pub fn walkExpr(
         .import_expr => |v| allocNode(allocator, expr.span, .{
             .import_expr = try ctx.walk(allocator, v, ctx),
         }),
-        .mod_expr => |v| allocNode(allocator, expr.span, .{ .mod_expr = .{
-            .name = v.name,
-            .body = try ctx.walk(allocator, v.body, ctx),
-            .is_pub = v.is_pub,
-        } }),
+        .decl => |d| allocNode(allocator, expr.span, .{ .decl = .{ .inner = try ctx.walk(allocator, d.inner, ctx), .kind = d.kind, .is_pub = d.is_pub } }),
+        .mod_expr => |v| allocNode(allocator, expr.span, setPub(.{ .mod_expr = .{ .name = v.name, .body = try ctx.walk(allocator, v.body, ctx) } }, v.is_pub)),
+
         .comp_block => |cb| allocNode(allocator, expr.span, .{ .comp_block = .{
             .expr = try ctx.walk(allocator, cb.expr, ctx),
             .is_macro = cb.is_macro,
@@ -1013,24 +1041,12 @@ pub fn walkExpr(
             .target = try ctx.walk(allocator, v.target, ctx),
             .value = try ctx.walk(allocator, v.value, ctx),
         } }),
-        .let_expr => |v| allocNode(allocator, expr.span, .{ .let_expr = .{
-            .target = try ctx.walk(allocator, v.target, ctx),
-            .type_name = v.type_name,
-            .value = try ctx.walk(allocator, v.value, ctx),
-            .is_pub = v.is_pub,
-        } }),
-        .con_expr => |v| allocNode(allocator, expr.span, .{ .con_expr = .{
-            .target = try ctx.walk(allocator, v.target, ctx),
-            .type_name = v.type_name,
-            .value = try ctx.walk(allocator, v.value, ctx),
-            .is_pub = v.is_pub,
-        } }),
-        .global => |v| allocNode(allocator, expr.span, .{ .global = .{
-            .target = try ctx.walk(allocator, v.target, ctx),
-            .type_name = v.type_name,
-            .value = try ctx.walk(allocator, v.value, ctx),
-            .is_pub = v.is_pub,
-        } }),
+        .let_expr => |v| allocNode(allocator, expr.span, setPub(.{ .let_expr = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx) } }, v.is_pub)),
+
+        .con_expr => |v| allocNode(allocator, expr.span, setPub(.{ .con_expr = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx) } }, v.is_pub)),
+
+        .global => |v| allocNode(allocator, expr.span, setPub(.{ .global = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx) } }, v.is_pub)),
+
         .tuple => |items| allocNode(allocator, expr.span, .{
             .tuple = try walkSliceWith(allocator, items, Transform, ctx),
         }),

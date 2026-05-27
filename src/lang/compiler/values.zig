@@ -75,7 +75,7 @@ pub fn compileLocalBinding(
         type_check.inferExprType(self, value);
 
     try state.setLocalTypeHint(self, name, inferred_type);
-    if (type_check.storedTypeName(inferred_type)) |stored_name| {
+    if (type_check.storedTypeName(self, inferred_type)) |stored_name| {
         state.setLocalType(self, slot, stored_name);
         if (state.currentFunctionState(self)) |fn_state|
             try fn_state.var_types.put(name, stored_name);
@@ -197,7 +197,7 @@ fn compileAssignSimple(
                 try syncLocalTableFields(self, slot, value);
                 const inferred_type = type_check.inferExprType(self, value);
                 try state.setLocalTypeHint(self, name, inferred_type);
-                if (type_check.storedTypeName(inferred_type)) |stored_name| {
+                if (type_check.storedTypeName(self, inferred_type)) |stored_name| {
                     state.setLocalType(self, slot, stored_name);
                     if (state.currentFunctionState(self)) |fn_state|
                         try fn_state.var_types.put(name, stored_name);

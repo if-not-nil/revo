@@ -14,23 +14,10 @@ pub const TypeError = struct {
     span: ast.Span,
 };
 
-pub fn typeInfoFromName(type_name: []const u8) TypeInfo {
-    if (std.mem.eql(u8, type_name, "int")) return .int;
-    if (std.mem.eql(u8, type_name, "float")) return .float;
-    if (std.mem.eql(u8, type_name, "number")) return numberType();
-    if (std.mem.eql(u8, type_name, "string")) return .string;
-    if (std.mem.eql(u8, type_name, "bool")) return .bool;
-    if (std.mem.eql(u8, type_name, "void")) return .void;
-    if (std.mem.eql(u8, type_name, "any")) return .any;
-    if (type_name[0] == ':') return .{ .atom = type_name };
-
-    return .{ .struct_type = type_name };
-}
-
-pub fn storedTypeName(t: TypeInfo) ?[]const u8 {
+pub fn storedTypeName(self: *Compiler, t: TypeInfo) ?[]const u8 {
     if (t == .any or t == .function or t == .tuple or t == .@"union") return null;
     const name = types_mod.typeName(t);
-    const roundtrip = typeInfoFromName(name);
+    const roundtrip = resolveTypeName(self, name);
     return if (roundtrip.eql(t)) name else null;
 }
 
@@ -69,7 +56,7 @@ pub fn inferExprType(self: *Compiler, expr: *const Node) TypeInfo {
         .orelse_expr => |v| inferOrelseType(self, v),
         .comp_block, .import_expr, .mod_expr, .test_block, .test_suite, .macro_expr, .proc_macro => .any,
         .range_literal, .match_expr, .assign_expr => .any,
-        .con_expr, .let_expr, .global => .void,
+        .con_expr, .let_expr, .global, .decl => .void,
         .tuple_pattern => .any,
         .struct_def => |def| .{ .struct_type = def.name },
         .type_alias => .void,

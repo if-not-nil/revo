@@ -321,19 +321,13 @@ const Parser = struct {
                 self.parseDocAttr(token)
             else
                 self.allocExpr(token.span(), .{ .ident = token.text }),
-            .kw_const => self.parseBinding(.con_expr, token),
-            .kw_global => self.parseBinding(.global, token),
-            .kw_let => self.parseBinding(.let_expr, token),
-            .kw_pub => self.parsePub(token),
+            .kw_const, .kw_global, .kw_let, .kw_mod, .kw_struct, .kw_test, .kw_suite, .kw_proc => self.parseDecl(token, false),
+            .kw_fn => self.parseFn(token),
             .kw_macro => self.parseMacro(token),
-            .kw_test => self.parseTest(token),
-            .kw_suite => self.parseSuite(token),
-            .kw_proc => self.parseProc(token),
-            .kw_struct => self.parseStruct(token),
+            .kw_pub => self.parsePub(),
             .minus => self.parseUnary(.negate, 60, token),
             .kw_not => self.parseUnary(.not, 35, token),
             .lparen => self.parseParenExpr(token),
-            .kw_fn => self.parseFn(token),
             .kw_if => self.parseIf(token),
             .kw_match => self.parseMatch(token, null),
             .kw_do => self.parseBlock(token),
@@ -344,7 +338,6 @@ const Parser = struct {
             .kw_return => self.parseExitExpr(.return_expr, token),
             .kw_comp => self.parseComp(token),
             .kw_import => self.parseImport(token),
-            .kw_mod => self.parseMod(token, false),
             .kw_spawn => self.parseSpawn(token),
             .kw_join => self.parseJoin(token),
             .kw_yield => self.parseYield(token),
@@ -376,8 +369,11 @@ const Parser = struct {
     }
 
     fn applyDocAttr(self: *Parser, node: *Node, doc_text: []const u8, doc_span: Span) anyerror!*Node {
-        _ = self;
         switch (node.expr) {
+            .decl => {
+                _ = try self.applyDocAttr(node.expr.decl.inner, doc_text, doc_span);
+                return node;
+            },
             .fn_expr => {
                 node.expr.fn_expr.doc = doc_text;
                 return node;
@@ -407,7 +403,6 @@ const Parser = struct {
                 return node;
             },
             else => {
-                _ = doc_span;
                 return error.UnexpectedToken;
             },
         }
@@ -487,9 +482,10 @@ const Parser = struct {
                     .fn_expr = .{ .params = params, .return_type = return_type, .body = body },
                 });
                 const target = try self.allocExpr(first_ident.span(), .{ .ident = first_ident.text });
-                return self.allocExpr(Span.merge(start.span(), body.span), .{
+                const con_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
                     .con_expr = .{ .target = target, .value = fn_node },
                 });
+                return self.allocExpr(Span.merge(start.span(), body.span), .{ .decl = .{ .inner = con_node, .kind = ast.DeclKind.con, .is_pub = false } });
             }
             return error.UnexpectedToken;
         }
@@ -647,74 +643,93 @@ const Parser = struct {
         }
         _ = try self.expect(.assign);
         binding.value = try self.parseStatementExpression(0);
-        return self.allocExpr(
-            Span.merge(start.span(), binding.value.span),
-            @unionInit(Expr, @tagName(tag), binding),
-        );
+
+        const span = Span.merge(start.span(), binding.value.span);
+        const binding_node = try self.allocExpr(span, @unionInit(Expr, @tagName(tag), binding));
+
+        comptime var kind: ast.DeclKind = undefined;
+        comptime {
+            const tn = @tagName(tag);
+            if (std.mem.eql(u8, tn, "con_expr")) {
+                kind = ast.DeclKind.con;
+            } else if (std.mem.eql(u8, tn, "let_expr")) {
+                kind = ast.DeclKind.let;
+            } else if (std.mem.eql(u8, tn, "global")) {
+                kind = ast.DeclKind.global;
+            } else {
+                @compileError("unsupported binding tag to DeclKind");
+            }
+        }
+        return self.allocExpr(span, .{ .decl = .{ .inner = binding_node, .kind = kind, .is_pub = false } });
+    }
+
+    fn parseDecl(self: *Parser, start: Token, is_pub: bool) anyerror!*Node {
+        return switch (start.type) {
+            .kw_const => {
+                const binding = try self.parseBinding(.con_expr, start);
+                if (is_pub) {
+                    const p: *Node = binding;
+                    p.expr.decl.is_pub = true;
+                }
+                return binding;
+            },
+            .kw_let => {
+                const binding = try self.parseBinding(.let_expr, start);
+                if (is_pub) {
+                    const p: *Node = binding;
+                    p.expr.decl.is_pub = true;
+                }
+                return binding;
+            },
+            .kw_global => {
+                const binding = try self.parseBinding(.global, start);
+                if (is_pub) {
+                    const p: *Node = binding;
+                    p.expr.decl.is_pub = true;
+                }
+                return binding;
+            },
+            .kw_fn => {
+                const fn_expr = try self.parseFn(start);
+                if (fn_expr.expr == .decl) {
+                    if (is_pub) fn_expr.expr.decl.is_pub = true;
+                    return fn_expr;
+                }
+                return self.allocExpr(start.span(), .{ .decl = .{ .inner = fn_expr, .kind = ast.DeclKind.fn_decl, .is_pub = is_pub } });
+            },
+            .kw_mod => {
+                return self.parseMod(start, is_pub);
+            },
+            .kw_struct => {
+                const struct_def = try self.parseStruct(start);
+                return self.allocExpr(start.span(), .{ .decl = .{ .inner = struct_def, .kind = ast.DeclKind.struct_decl, .is_pub = is_pub } });
+            },
+            .kw_test => {
+                const test_block = try self.parseTest(start);
+                return self.allocExpr(start.span(), .{ .decl = .{ .inner = test_block, .kind = ast.DeclKind.struct_decl, .is_pub = is_pub } });
+            },
+            .kw_suite => {
+                const suite = try self.parseSuite(start);
+                return self.allocExpr(start.span(), .{ .decl = .{ .inner = suite, .kind = ast.DeclKind.struct_decl, .is_pub = is_pub } });
+            },
+            .kw_proc => {
+                const proc_macro = try self.parseProc(start);
+                return self.allocExpr(start.span(), .{ .decl = .{ .inner = proc_macro, .kind = ast.DeclKind.fn_decl, .is_pub = is_pub } });
+            },
+            .kw_type => {
+                if (!self.check(.ident)) return error.UnexpectedToken;
+                const type_alias = try self.parseTypeAlias(start);
+                return self.allocExpr(start.span(), .{ .decl = .{ .inner = type_alias, .kind = ast.DeclKind.type_alias_decl, .is_pub = is_pub } });
+            },
+            else => return error.UnexpectedToken,
+        };
     }
 
     // `pub` only prefixes top-level bindings
-    fn parsePub(self: *Parser, start: Token) anyerror!*Node {
-        const binding_start = self.peek();
-        const pub_binding = switch (binding_start.type) {
-            .kw_const => blk: {
-                _ = self.advance();
-                break :blk try self.parseBinding(.con_expr, binding_start);
-            },
-            .kw_let => blk: {
-                _ = self.advance();
-                break :blk try self.parseBinding(.let_expr, binding_start);
-            },
-            .kw_global => blk: {
-                _ = self.advance();
-                break :blk try self.parseBinding(.global, binding_start);
-            },
-            .kw_mod => blk: {
-                _ = self.advance();
-                break :blk try self.parseMod(binding_start, true);
-            },
-            else => return error.UnexpectedToken,
-        };
-
-        const with_pub = switch (pub_binding.expr) {
-            .con_expr => |binding| try self.allocExpr(
-                Span.merge(start.span(), pub_binding.span),
-                .{ .con_expr = .{
-                    .target = binding.target,
-                    .type_name = binding.type_name,
-                    .value = binding.value,
-                    .is_pub = true,
-                } },
-            ),
-            .let_expr => |binding| try self.allocExpr(
-                Span.merge(start.span(), pub_binding.span),
-                .{ .let_expr = .{
-                    .target = binding.target,
-                    .type_name = binding.type_name,
-                    .value = binding.value,
-                    .is_pub = true,
-                } },
-            ),
-            .global => |binding| try self.allocExpr(
-                Span.merge(start.span(), pub_binding.span),
-                .{ .global = .{
-                    .target = binding.target,
-                    .type_name = binding.type_name,
-                    .value = binding.value,
-                    .is_pub = true,
-                } },
-            ),
-            .mod_expr => |m| try self.allocExpr(
-                Span.merge(start.span(), pub_binding.span),
-                .{ .mod_expr = .{
-                    .name = m.name,
-                    .body = m.body,
-                    .is_pub = true,
-                } },
-            ),
-            else => return error.UnexpectedToken,
-        };
-        return with_pub;
+    fn parsePub(self: *Parser) anyerror!*Node {
+        const decl_start = self.peek();
+        _ = self.advance();
+        return self.parseDecl(decl_start, true);
     }
 
     /// loop do expr end
@@ -777,10 +792,9 @@ const Parser = struct {
             try self.parseBlock(self.tokens[self.pos - 1])
         else
             try self.parseStatementExpression(0);
-        return self.allocExpr(
-            Span.merge(start.span(), body.span),
-            .{ .mod_expr = .{ .name = name.text, .body = body, .is_pub = is_pub } },
-        );
+        const span = Span.merge(start.span(), body.span);
+        const mod_node = try self.allocExpr(span, .{ .mod_expr = .{ .name = name.text, .body = body, .is_pub = false } });
+        return self.allocExpr(span, .{ .decl = .{ .inner = mod_node, .kind = ast.DeclKind.mod, .is_pub = is_pub } });
     }
 
     /// spawn expr
@@ -905,7 +919,10 @@ const Parser = struct {
                 };
                 end_span = binding_expr.span;
                 switch (binding_expr.expr) {
-                    .con_expr, .let_expr => |binding| try items.append(self.alloc, .{ .binding = binding }),
+                    .decl => |decl| switch (decl.inner.expr) {
+                        .con_expr, .let_expr => |binding| try items.append(self.alloc, .{ .binding = binding }),
+                        else => return error.UnexpectedToken,
+                    },
                     else => return error.UnexpectedToken,
                 }
                 if (!self.match(.comma)) break;
@@ -1241,6 +1258,7 @@ const Parser = struct {
     fn forcesStatementBoundary(self: *Parser, left: *const Node, next: TokenType) bool {
         return switch (left.expr) {
             .number => next == .lparen and !self.isTightSuffix(left),
+            .decl => expr_start_tokens.get(next),
             .con_expr, .let_expr, .assign_expr, .return_expr, .break_expr => expr_start_tokens.get(next),
             .call => call_stmt_boundary_tokens.get(next),
             else => false,
@@ -1488,8 +1506,9 @@ test "parses @doc annotation on function declaration" {
     ;
     const tokens = try lexer.lex(alloc, src);
     const root = try parseTokens(alloc, tokens);
-    try std.testing.expect(root.expr == .con_expr);
-    const value = root.expr.con_expr.value;
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.inner.expr == .con_expr);
+    const value = root.expr.decl.inner.expr.con_expr.value;
     try std.testing.expect(value.expr == .fn_expr);
     try std.testing.expectEqualStrings("adds", value.expr.fn_expr.doc.?);
 }

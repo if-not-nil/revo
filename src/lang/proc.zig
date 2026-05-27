@@ -145,12 +145,12 @@ fn expandBinding(
         return ast.allocNode(allocator, span, .nil);
     }
 
-    return ast.allocNode(allocator, span, .{ .con_expr = .{
+    const constructed: ast.Expr = .{ .con_expr = .{
         .target = try expandInEnv(vm, allocator, binding.target, env, mode),
         .type_name = binding.type_name,
         .value = try expandInEnv(vm, allocator, binding.value, env, mode),
-        .is_pub = binding.is_pub,
-    } });
+    } };
+    return ast.allocNode(allocator, span, ast.setPub(constructed, binding.is_pub));
 }
 
 fn maybeExpandCall(

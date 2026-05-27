@@ -1776,7 +1776,7 @@ test "match guard really prevents match" {
     try t.top_number(
         \\ let n = 0
         \\ for i in 0..7 do
-        \\   let status = if i == 5
+        \\   let status: any = if i == 5
         \\     :done
         \\   else i
         \\ 
@@ -1887,7 +1887,7 @@ test "typed function alias call is checked" {
         .ParseError,
         3,
         4,
-        "argument 1 to call expects int, got string\ngot: call(string)\nwant: call(int)",
+        "argument 1 to `call` expects int, got string\n  got: call(string)\n want: call(int)",
     );
 }
 

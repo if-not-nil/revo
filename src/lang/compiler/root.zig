@@ -380,6 +380,19 @@ pub const Compiler = struct {
             .con_expr => |binding| try self.compileBinding(binding, .con),
             .global => |binding| try self.compileBinding(binding, .global),
             .let_expr => |binding| try self.compileBinding(binding, .let),
+            .decl => |d| {
+                // check inner node reflects the decl's pub flag so existing
+                // compileBinding and mod handling can use .is_pub
+                var inner: *Node = d.inner;
+                switch (inner.expr) {
+                    .con_expr => inner.expr.con_expr.is_pub = d.is_pub,
+                    .let_expr => inner.expr.let_expr.is_pub = d.is_pub,
+                    .global => inner.expr.global.is_pub = d.is_pub,
+                    .mod_expr => inner.expr.mod_expr.is_pub = d.is_pub,
+                    else => {},
+                }
+                return self.compile(inner, true);
+            },
             .assign_expr => |assign| try values.compileAssign(self, assign.target, assign.value),
             .block => |exprs| try self.compileBlock(exprs),
             .tuple => |items| try values.compileTuple(self, items),
@@ -647,29 +660,37 @@ pub const Compiler = struct {
         if (callee_type != .function) return;
 
         const sig = callee_type.function;
+        const fn_sig = if (callee.expr == .ident)
+            state_mod.findFnSignature(self, callee.expr.ident)
+        else
+            null;
+        const fn_name = if (fn_sig != null and callee.expr == .ident) callee.expr.ident else "call";
         if (args.len != sig.params.len) {
             const expected_types = try self.buildTypesListFromInfo(sig.params);
             defer self.alloc.free(expected_types);
             const actual_types = try self.buildArgTypesList(args);
             defer self.alloc.free(actual_types);
 
-            const actual_sig = try formatCallSignatureTypesOnly(
+            const actual_sig = if (fn_sig) |named| try formatCallSignatureWithNames(
                 self.alloc,
-                "call",
+                fn_name,
+                named.param_names,
                 actual_types,
-            );
+            ) else try formatCallSignatureTypesOnly(self.alloc, fn_name, actual_types);
             defer self.alloc.free(actual_sig);
-            const expected_sig = try formatCallSignatureTypesOnly(
+            const expected_sig = if (fn_sig) |named| try formatCallSignatureWithNames(
                 self.alloc,
-                "call",
+                fn_name,
+                named.param_names,
                 expected_types,
-            );
+            ) else try formatCallSignatureTypesOnly(self.alloc, fn_name, expected_types);
             defer self.alloc.free(expected_sig);
 
             const msg = try std.fmt.allocPrint(
                 self.alloc,
-                "call expects {d} argument(s), got {d}\ngot: {s}\nwant: {s}",
+                "{s} expects {d} argument(s), got {d}\ngot: {s}\nwant: {s}",
                 .{
+                    fn_name,
                     sig.params.len,
                     args.len,
                     actual_sig,
@@ -692,30 +713,54 @@ pub const Compiler = struct {
                     const expected_types = try self.buildTypesListFromInfo(sig.params);
                     defer self.alloc.free(expected_types);
 
-                    const actual_sig = try formatCallSignatureTypesOnly(
+                    const actual_sig = if (fn_sig) |named| try formatCallSignatureWithNames(
                         self.alloc,
-                        "call",
+                        fn_name,
+                        named.param_names,
                         actual_types,
-                    );
+                    ) else try formatCallSignatureTypesOnly(self.alloc, fn_name, actual_types);
                     defer self.alloc.free(actual_sig);
-                    const expected_sig = try formatCallSignatureTypesOnly(
+                    const expected_sig = if (fn_sig) |named| try formatCallSignatureWithNames(
                         self.alloc,
-                        "call",
+                        fn_name,
+                        named.param_names,
                         expected_types,
-                    );
+                    ) else try formatCallSignatureTypesOnly(self.alloc, fn_name, expected_types);
                     defer self.alloc.free(expected_sig);
 
-                    const msg = try std.fmt.allocPrint(
-                        self.alloc,
-                        "argument {d} to call expects {s}, got {s}\ngot: {s}\nwant: {s}",
-                        .{
-                            idx + 1,
-                            types.typeName(expected_type),
-                            types.typeName(type_check.inferExprType(self, arg)),
-                            actual_sig,
-                            expected_sig,
-                        },
-                    );
+                    const display_name = if (fn_sig) |named| blk: {
+                        if (idx < named.param_names.len) break :blk named.param_names[idx];
+                        break :blk null;
+                    } else null;
+
+                    const msg = if (display_name) |name| blk: {
+                        break :blk try std.fmt.allocPrint(
+                            self.alloc,
+                            "argument {d} (`{s}`) to `{s}` expects {s}, got {s}\n  got: {s}\n want: {s}",
+                            .{
+                                idx + 1,
+                                name,
+                                fn_name,
+                                types.typeName(expected_type),
+                                types.typeName(type_check.inferExprType(self, arg)),
+                                actual_sig,
+                                expected_sig,
+                            },
+                        );
+                    } else blk: {
+                        break :blk try std.fmt.allocPrint(
+                            self.alloc,
+                            "argument {d} to `{s}` expects {s}, got {s}\n  got: {s}\n want: {s}",
+                            .{
+                                idx + 1,
+                                fn_name,
+                                types.typeName(expected_type),
+                                types.typeName(type_check.inferExprType(self, arg)),
+                                actual_sig,
+                                expected_sig,
+                            },
+                        );
+                    };
                     return self.fail(.ParseError, arg, msg);
                 },
             };
@@ -890,7 +935,7 @@ pub const Compiler = struct {
 
             const msg = try std.fmt.allocPrint(
                 self.alloc,
-                "call to `{s}` expects {d} argument(s), got {d}\ngot: {s}\nwant: {s}",
+                "call to `{s}` expects {d} argument(s), got {d}\n  got: {s}\n want: {s}",
                 .{
                     fn_name,
                     sig.param_types.len,
@@ -942,7 +987,7 @@ pub const Compiler = struct {
 
                         const msg = try std.fmt.allocPrint(
                             self.alloc,
-                            "argument {d} (`{s}`) to `{s}` expects {s}, got {s}\ngot: {s}\nwant: {s}",
+                            "argument {d} (`{s}`) to `{s}` expects {s}, got {s}\n  got: {s}\n want: {s}",
                             .{
                                 i + 1,
                                 sig.param_names[i],
@@ -959,29 +1004,6 @@ pub const Compiler = struct {
             }
         }
         return reordered_args;
-    }
-
-    fn formatCallSignatureWithNames(
-        alloc: std.mem.Allocator,
-        fn_name: []const u8,
-        names: []const []const u8,
-        types_list: []const []const u8,
-    ) ![]u8 {
-        var buf = try std.ArrayList(u8).initCapacity(
-            alloc,
-            fn_name.len + (names.len + types_list.len) * 12 + 4,
-        );
-        defer buf.deinit(alloc);
-        try buf.appendSlice(alloc, fn_name);
-        try buf.append(alloc, '(');
-        for (names, types_list, 0..) |name, type_name, idx| {
-            if (idx > 0) try buf.appendSlice(alloc, ", ");
-            try buf.appendSlice(alloc, name);
-            try buf.appendSlice(alloc, ": ");
-            try buf.appendSlice(alloc, type_name);
-        }
-        try buf.append(alloc, ')');
-        return try buf.toOwnedSlice(alloc);
     }
 
     fn buildTypesList(
@@ -1041,6 +1063,31 @@ pub const Compiler = struct {
         try buf.append(alloc, '(');
         for (types_list, 0..) |type_name, idx| {
             if (idx > 0) try buf.appendSlice(alloc, ", ");
+            try buf.appendSlice(alloc, type_name);
+        }
+        try buf.append(alloc, ')');
+        return try buf.toOwnedSlice(alloc);
+    }
+
+    fn formatCallSignatureWithNames(
+        alloc: std.mem.Allocator,
+        fn_name: []const u8,
+        param_names: []const []const u8,
+        types_list: []const []const u8,
+    ) ![]u8 {
+        var buf = try std.ArrayList(u8).initCapacity(
+            alloc,
+            fn_name.len + types_list.len * 16 + 4,
+        );
+        defer buf.deinit(alloc);
+        try buf.appendSlice(alloc, fn_name);
+        try buf.append(alloc, '(');
+        for (types_list, 0..) |type_name, idx| {
+            if (idx > 0) try buf.appendSlice(alloc, ", ");
+            if (idx < param_names.len and param_names[idx].len > 0) {
+                try buf.appendSlice(alloc, param_names[idx]);
+                try buf.appendSlice(alloc, ": ");
+            }
             try buf.appendSlice(alloc, type_name);
         }
         try buf.append(alloc, ')');
@@ -1195,8 +1242,9 @@ pub const Compiler = struct {
         }
         for (exprs, 0..) |expr, idx| {
             self.upvalue_cache.clearRetainingCapacity();
+            const before = self.active_registers;
             try self.compile(expr, true);
-            if (idx + 1 < exprs.len) try emit.regRelease(self);
+            if (idx + 1 < exprs.len and self.active_registers > before) try emit.regRelease(self);
         }
         if (pushed_scope) state_mod.popScope(self);
     }
@@ -1255,7 +1303,7 @@ pub const Compiler = struct {
 
             const inferred_type = type_check.inferExprType(self, binding.value);
             try state_mod.setLocalTypeHint(self, name, inferred_type);
-            if (type_check.storedTypeName(inferred_type)) |stored_name| {
+            if (type_check.storedTypeName(self, inferred_type)) |stored_name| {
                 if (state_mod.currentFunctionState(self)) |fn_state|
                     try fn_state.var_types.put(name, stored_name);
             }

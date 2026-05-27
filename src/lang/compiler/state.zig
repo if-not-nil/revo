@@ -311,6 +311,16 @@ pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
             _ = try reuseOrDeclareLocal(self, name, expr.expr == .let_expr);
             try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type);
         },
+        .decl => |decl| switch (decl.inner.expr) {
+            .con_expr, .let_expr => |binding| {
+                if (binding.target.expr != .ident or binding.value.expr != .fn_expr) continue;
+                const name = binding.target.expr.ident;
+                if (ast.isDiscardName(name)) continue;
+                _ = try reuseOrDeclareLocal(self, name, decl.inner.expr == .let_expr);
+                try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type);
+            },
+            else => {},
+        },
         else => {},
     };
 }
