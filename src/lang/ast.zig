@@ -148,6 +148,7 @@ pub const Binding = struct {
     type_name: ?[]const u8 = null,
     value: *Node,
     is_pub: bool = false,
+    mutable: bool = false,
 
     fn printAt(self: *const Binding, writer: *std.Io.Writer, comptime tag: []const u8, depth: ?usize) anyerror!void {
         if (self.is_pub) {
@@ -179,10 +180,8 @@ pub const Binding = struct {
 pub fn setPub(expr: Expr, is_pub: bool) Expr {
     if (!is_pub) return expr;
     return switch (expr) {
-        .con_expr => |b| .{ .con_expr = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true } },
-        .let_expr => |b| .{ .let_expr = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true } },
-        .global => |b| .{ .global = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true } },
-        .mod_expr => |m| .{ .mod_expr = .{ .name = m.name, .body = m.body, .is_pub = true } },
+        .binding => |b| .{ .binding = .{ .target = b.target, .type_name = b.type_name, .value = b.value, .is_pub = true, .mutable = b.mutable } },
+        .module_decl => |m| .{ .module_decl = .{ .name = m.name, .body = m.body, .is_pub = true } },
         else => expr,
     };
 }
@@ -209,9 +208,8 @@ pub const Expr = union(enum) {
         body: *Node,
         doc: ?[]const u8 = null,
     },
-    con_expr: Binding,
-    let_expr: Binding,
-    global: Binding,
+    binding: Binding,
+    module_decl: struct { name: []const u8, body: *Node, is_pub: bool = false },
     decl: DeclNode,
     // ill probably ignore node's span field for now just do its expr
     // (:assign_expr, (:ident, "aaa"), (:ident, "bbb"))
@@ -230,7 +228,6 @@ pub const Expr = union(enum) {
         // inclusive: bool = true,
     },
     import_expr: *Node,
-    mod_expr: struct { name: []const u8, body: *Node, is_pub: bool = false },
     macro_expr: struct { pattern: []const u8, template: []const u8 },
     test_block: struct { name: []const u8, body: *Node, skip: bool = false },
     test_suite: struct { name: []const u8, body: *Node },
@@ -406,9 +403,7 @@ pub const Node = struct {
                 try suite.body.printAt(writer, child(depth));
                 try close(writer, depth);
             },
-            .con_expr => |binding| try binding.printAt(writer, "const", depth),
-            .global => |binding| try binding.printAt(writer, "global", depth),
-            .let_expr => |binding| try binding.printAt(writer, "let", depth),
+            .binding => |binding| try binding.printAt(writer, "binding", depth),
             .assign_expr => |assign| {
                 try writer.writeAll("(assign");
                 try sep(writer, depth, 1);
@@ -472,7 +467,7 @@ pub const Node = struct {
                 try path.printAt(writer, child(depth));
                 try close(writer, depth);
             },
-            .mod_expr => |m| {
+            .module_decl => |m| {
                 try writer.writeAll("(mod ");
                 if (m.is_pub) try writer.writeAll("pub ");
                 try writer.writeAll(m.name);
@@ -1031,7 +1026,7 @@ pub fn walkExpr(
             .import_expr = try ctx.walk(allocator, v, ctx),
         }),
         .decl => |d| allocNode(allocator, expr.span, .{ .decl = .{ .inner = try ctx.walk(allocator, d.inner, ctx), .kind = d.kind, .is_pub = d.is_pub } }),
-        .mod_expr => |v| allocNode(allocator, expr.span, setPub(.{ .mod_expr = .{ .name = v.name, .body = try ctx.walk(allocator, v.body, ctx) } }, v.is_pub)),
+        .module_decl => |v| allocNode(allocator, expr.span, setPub(.{ .module_decl = .{ .name = v.name, .body = try ctx.walk(allocator, v.body, ctx) } }, v.is_pub)),
 
         .comp_block => |cb| allocNode(allocator, expr.span, .{ .comp_block = .{
             .expr = try ctx.walk(allocator, cb.expr, ctx),
@@ -1041,11 +1036,7 @@ pub fn walkExpr(
             .target = try ctx.walk(allocator, v.target, ctx),
             .value = try ctx.walk(allocator, v.value, ctx),
         } }),
-        .let_expr => |v| allocNode(allocator, expr.span, setPub(.{ .let_expr = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx) } }, v.is_pub)),
-
-        .con_expr => |v| allocNode(allocator, expr.span, setPub(.{ .con_expr = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx) } }, v.is_pub)),
-
-        .global => |v| allocNode(allocator, expr.span, setPub(.{ .global = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx) } }, v.is_pub)),
+        .binding => |v| allocNode(allocator, expr.span, setPub(.{ .binding = .{ .target = try ctx.walk(allocator, v.target, ctx), .type_name = v.type_name, .value = try ctx.walk(allocator, v.value, ctx), .is_pub = v.is_pub, .mutable = v.mutable } }, v.is_pub)),
 
         .tuple => |items| allocNode(allocator, expr.span, .{
             .tuple = try walkSliceWith(allocator, items, Transform, ctx),

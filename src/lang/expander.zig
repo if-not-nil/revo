@@ -89,7 +89,7 @@ fn expandInEnv(allocator: std.mem.Allocator, expr: *Node, env: *MacroEnv) Expand
                 .block = try ast.walkSliceWith(allocator, items, ExpandCtx, .{ .env = &child }),
             });
         },
-        .con_expr => |binding| expandCon(allocator, expr.span, binding, env),
+        .binding => |binding| expandCon(allocator, expr.span, binding, env),
         .decl => |d| ast.allocNode(allocator, expr.span, .{ .decl = .{ .inner = try expandInEnv(allocator, d.inner, env), .kind = d.kind, .is_pub = d.is_pub } }),
         .call => |call| maybeExpandCall(allocator, expr.span, call.callee, call.args, call.implicit_self, env),
         .ident => |name| expandIdent(expr, name, env),
@@ -103,11 +103,12 @@ fn expandCon(allocator: std.mem.Allocator, span: Span, binding: ast.Binding, env
         try env.map.put(binding.target.expr.ident, def);
         return ast.allocNode(allocator, span, .nil);
     }
-    return ast.allocNode(allocator, span, .{ .con_expr = .{
+    return ast.allocNode(allocator, span, .{ .binding = .{
         .target = try expandInEnv(allocator, binding.target, env),
         .type_name = binding.type_name,
         .value = try expandInEnv(allocator, binding.value, env),
         .is_pub = binding.is_pub,
+        .mutable = binding.mutable,
     } });
 }
 
@@ -309,27 +310,21 @@ const AstSubstituter = struct {
             .assign_expr => |a| try self.alloc(node.span, .{
                 .assign_expr = .{ .target = try self.substitute(a.target), .value = try self.substitute(a.value) },
             }),
-            .let_expr => |l| {
-                const constructed: ast.Expr = .{ .let_expr = .{
-                    .target = try self.substitute(l.target),
-                    .type_name = l.type_name,
-                    .value = try self.substitute(l.value),
+            .binding => |b| {
+                const constructed: ast.Expr = .{ .binding = .{
+                    .target = try self.substitute(b.target),
+                    .type_name = b.type_name,
+                    .value = try self.substitute(b.value),
+                    .is_pub = b.is_pub,
+                    .mutable = b.mutable,
                 } };
-                try self.alloc(node.span, ast.setPub(constructed, l.is_pub));
-            },
-            .con_expr => |c| {
-                const constructed: ast.Expr = .{ .con_expr = .{
-                    .target = try self.substitute(c.target),
-                    .type_name = c.type_name,
-                    .value = try self.substitute(c.value),
-                } };
-                try self.alloc(node.span, ast.setPub(constructed, c.is_pub));
+                try self.alloc(node.span, ast.setPub(constructed, b.is_pub));
             },
             .import_expr => |i| try self.alloc(node.span, .{
                 .import_expr = try self.substitute(i),
             }),
-            .mod_expr => |m| {
-                const constructed: ast.Expr = .{ .mod_expr = .{ .name = m.name, .body = try self.substitute(m.body) } };
+            .module_decl => |m| {
+                const constructed: ast.Expr = .{ .module_decl = .{ .name = m.name, .body = try self.substitute(m.body) } };
                 try self.alloc(node.span, ast.setPub(constructed, m.is_pub));
             },
 

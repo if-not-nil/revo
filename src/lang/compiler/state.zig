@@ -304,19 +304,19 @@ pub fn localHasTableField(self: *const Compiler, name: []const u8, field_name: [
 
 pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
     for (exprs) |expr| switch (expr.expr) {
-        .con_expr, .let_expr => |binding| {
+        .binding => |binding| {
             if (binding.target.expr != .ident or binding.value.expr != .fn_expr) continue;
             const name = binding.target.expr.ident;
             if (ast.isDiscardName(name)) continue;
-            _ = try reuseOrDeclareLocal(self, name, expr.expr == .let_expr);
+            _ = try reuseOrDeclareLocal(self, name, binding.mutable);
             try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type);
         },
         .decl => |decl| switch (decl.inner.expr) {
-            .con_expr, .let_expr => |binding| {
+            .binding => |binding| {
                 if (binding.target.expr != .ident or binding.value.expr != .fn_expr) continue;
                 const name = binding.target.expr.ident;
                 if (ast.isDiscardName(name)) continue;
-                _ = try reuseOrDeclareLocal(self, name, decl.inner.expr == .let_expr);
+                _ = try reuseOrDeclareLocal(self, name, decl.kind == .let);
                 try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type);
             },
             else => {},

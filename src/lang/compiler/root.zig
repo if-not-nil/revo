@@ -227,6 +227,8 @@ pub const Compiler = struct {
 
     pub fn compileValue(self: *Compiler, expr: *const Node) InternalLowerError!void {
         switch (expr.expr) {
+            .binding => |binding| try self.compileBinding(binding, .con),
+            .module_decl => |m| try self.compile(m.body, true),
             .number => |n| {
                 const value = n.value;
                 // int literal?
@@ -384,17 +386,42 @@ pub const Compiler = struct {
                 }
             },
             .if_expr => |v| try flow.compileIf(self, v.condition, v.then_expr, v.else_expr),
-            .con_expr => |binding| try self.compileBinding(binding, .con),
-            .global => |binding| try self.compileBinding(binding, .global),
-            .let_expr => |binding| try self.compileBinding(binding, .let),
             .decl => |d| {
-                // pub visibility is stored in Decl, propagate to inner for uniform export handling
                 var mutable_inner = d.inner;
                 switch (mutable_inner.expr) {
-                    .con_expr => |*b| b.is_pub = d.is_pub,
-                    .let_expr => |*b| b.is_pub = d.is_pub,
-                    .global => |*b| b.is_pub = d.is_pub,
-                    .mod_expr => |*m| m.is_pub = d.is_pub,
+                    .binding => |*b| {
+                        b.is_pub = d.is_pub;
+                        const kind: values.BindingKind = switch (d.kind) {
+                            .con => .con,
+                            .let => .let,
+                            .global => .global,
+                            else => .con,
+                        };
+                        return try self.compileBinding(b.*, kind);
+                    },
+                    .module_decl => |*m| {
+                        m.is_pub = d.is_pub;
+                        var slot: ?revo.LocalSlot = null;
+                        if (!ast.isDiscardName(m.name)) {
+                            const local_slot = try state_mod.declareLocal(self, m.name, false);
+                            state_mod.markLocalInitialized(self, local_slot);
+                            state_mod.reserveLocalSlots(self);
+                            slot = local_slot;
+                        }
+                        try self.compileMod(m.name, m.body);
+                        const value_reg = self.active_registers - 1;
+                        if (slot) |s| {
+                            try emit.regDupe(self);
+                            if (m.is_pub) {
+                                try self.emitPubExportFrom(m.name, value_reg);
+                            }
+                            try emit.emit(self, .bind_local, s);
+                        } else if (m.is_pub) {
+                            try self.emitPubExportFrom(m.name, value_reg);
+                        }
+                        if (m.is_pub) try emit.nil(self);
+                        return;
+                    },
                     else => {},
                 }
                 return self.compile(mutable_inner, true);
@@ -415,33 +442,6 @@ pub const Compiler = struct {
                 try emit.emit(self, .load_global, try self.vm.internAtom("import"));
                 try self.compile(path, true);
                 try emit.emit(self, .call, 1);
-            },
-            .mod_expr => |m| {
-                if (m.is_pub and !self.module_mode) {
-                    return self.fail(.ParseError, expr, "`pub` only allowed in modules");
-                }
-                if (m.is_pub and !self.isModuleTopLevelBinding()) {
-                    return self.fail(.ParseError, expr, "`pub` only allowed on top-level module bindings");
-                }
-                var slot: ?revo.LocalSlot = null;
-                if (!ast.isDiscardName(m.name)) {
-                    const local_slot = try state_mod.declareLocal(self, m.name, false);
-                    state_mod.markLocalInitialized(self, local_slot);
-                    state_mod.reserveLocalSlots(self);
-                    slot = local_slot;
-                }
-                try self.compileMod(m.name, m.body);
-                const value_reg = self.active_registers - 1;
-                if (slot) |s| {
-                    try emit.regDupe(self);
-                    if (m.is_pub) {
-                        try self.emitPubExportFrom(m.name, value_reg);
-                    }
-                    try emit.emit(self, .bind_local, s);
-                } else if (m.is_pub) {
-                    try self.emitPubExportFrom(m.name, value_reg);
-                }
-                if (m.is_pub) try emit.nil(self);
             },
             .comp_block => |cb| try self.compileComp(cb.expr),
             .loop_expr => |v| try flow.compileLoop(self, v.body),
@@ -1270,11 +1270,11 @@ pub const Compiler = struct {
         const can_export_pub =
             binding.is_pub and self.module_mode;
 
-        if (binding.is_pub and !self.isModuleTopLevelBinding()) {
+        if (binding.is_pub and self.module_namespace == null) {
             return self.fail(
                 .ParseError,
                 binding.target,
-                "`pub` only allowed on top-level module bindings",
+                "`pub` only allowed in modules",
             );
         }
         if (binding.is_pub and binding.target.expr != .ident) {

@@ -342,8 +342,7 @@ pub const NamespacePool = struct {
 test "pub declarations seen in imported namespace" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    const res = try runImportedModuleReport(&vm,
-        "test.rv",
+    const res = try runImportedModuleReport(&vm, "test.rv",
         \\ pub const x = 42
         \\ const y = 99
     );
@@ -355,8 +354,7 @@ test "pub declarations seen in imported namespace" {
 test "private declarations do not leak from imported namespace" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    const res = try runImportedModuleReport(&vm,
-        "test.rv",
+    const res = try runImportedModuleReport(&vm, "test.rv",
         \\ pub const pub_var = 42
         \\ const priv_var = 99
     );

@@ -104,7 +104,7 @@ fn expandInEnv(
                 .block = try ast.walkSliceWith(allocator, items, ProcCtx, .{ .vm = vm, .env = &child, .mode = mode }),
             });
         },
-        .con_expr => |binding| expandBinding(vm, allocator, expr.span, binding, env, mode),
+        .binding => |binding| expandBinding(vm, allocator, expr.span, binding, env, mode),
         .call => |call| maybeExpandCall(vm, allocator, expr.span, call.callee, call.args, call.implicit_self, env, mode),
         .proc_macro => |pm| blk: {
             const body = try expandInEnv(vm, allocator, pm.body, env, .runtimeize);
@@ -145,10 +145,12 @@ fn expandBinding(
         return ast.allocNode(allocator, span, .nil);
     }
 
-    const constructed: ast.Expr = .{ .con_expr = .{
+    const constructed: ast.Expr = .{ .binding = .{
         .target = try expandInEnv(vm, allocator, binding.target, env, mode),
         .type_name = binding.type_name,
         .value = try expandInEnv(vm, allocator, binding.value, env, mode),
+        .is_pub = binding.is_pub,
+        .mutable = binding.mutable,
     } };
     return ast.allocNode(allocator, span, ast.setPub(constructed, binding.is_pub));
 }

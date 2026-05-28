@@ -60,21 +60,7 @@ const DocVisitor = struct {
             .decl => |decl| {
                 self.visit(decl.inner);
             },
-            .con_expr => |binding| {
-                if (binding.value.expr == .fn_expr and binding.value.expr.fn_expr.doc != null) {
-                    const key = @intFromPtr(binding.value);
-                    const name = targetName(self.alloc, binding.target) catch return;
-                    self.addFn(key, name, binding.value) catch return;
-                }
-            },
-            .let_expr => |binding| {
-                if (binding.value.expr == .fn_expr and binding.value.expr.fn_expr.doc != null) {
-                    const key = @intFromPtr(binding.value);
-                    const name = targetName(self.alloc, binding.target) catch return;
-                    self.addFn(key, name, binding.value) catch return;
-                }
-            },
-            .global => |binding| {
+            .binding => |binding| {
                 if (binding.value.expr == .fn_expr and binding.value.expr.fn_expr.doc != null) {
                     const key = @intFromPtr(binding.value);
                     const name = targetName(self.alloc, binding.target) catch return;

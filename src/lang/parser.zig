@@ -378,20 +378,8 @@ const Parser = struct {
                 node.expr.fn_expr.doc = doc_text;
                 return node;
             },
-            .con_expr => {
-                const value = node.expr.con_expr.value;
-                if (value.expr != .fn_expr) return error.UnexpectedToken;
-                value.expr.fn_expr.doc = doc_text;
-                return node;
-            },
-            .let_expr => {
-                const value = node.expr.let_expr.value;
-                if (value.expr != .fn_expr) return error.UnexpectedToken;
-                value.expr.fn_expr.doc = doc_text;
-                return node;
-            },
-            .global => {
-                const value = node.expr.global.value;
+            .binding => |binding| {
+                const value = binding.value;
                 if (value.expr != .fn_expr) return error.UnexpectedToken;
                 value.expr.fn_expr.doc = doc_text;
                 return node;
@@ -482,10 +470,10 @@ const Parser = struct {
                     .fn_expr = .{ .params = params, .return_type = return_type, .body = body },
                 });
                 const target = try self.allocExpr(first_ident.span(), .{ .ident = first_ident.text });
-                const con_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
-                    .con_expr = .{ .target = target, .value = fn_node },
+                const bind_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
+                    .binding = .{ .target = target, .value = fn_node, .is_pub = false, .mutable = false },
                 });
-                return self.allocExpr(Span.merge(start.span(), body.span), .{ .decl = .{ .inner = con_node, .kind = ast.DeclKind.con, .is_pub = false } });
+                return self.allocExpr(Span.merge(start.span(), body.span), .{ .decl = .{ .inner = bind_node, .kind = ast.DeclKind.con, .is_pub = false } });
             }
             return error.UnexpectedToken;
         }
@@ -611,8 +599,21 @@ const Parser = struct {
 
     /// const x = expr or let x = expr, with const (a, b) = <expr> tuple destructuring
     /// with tuples and type annotations
-    fn parseBinding(self: *Parser, comptime tag: std.meta.Tag(Expr), start: Token) anyerror!*Node {
-        var binding: ast.Binding = .{ .target = undefined, .value = undefined };
+    fn parseBinding(self: *Parser, comptime kind: ast.DeclKind, start: Token) anyerror!*Node {
+        comptime var mutable: bool = false;
+        comptime {
+            if (kind == ast.DeclKind.con) {
+                mutable = false;
+            } else if (kind == ast.DeclKind.let) {
+                mutable = true;
+            } else if (kind == ast.DeclKind.global) {
+                mutable = false;
+            } else {
+                @compileError("unsupported binding kind to parseBinding");
+            }
+        }
+
+        var binding: ast.Binding = .{ .target = undefined, .value = undefined, .mutable = mutable };
 
         if (self.check(.lparen)) {
             _ = self.advance();
@@ -645,28 +646,15 @@ const Parser = struct {
         binding.value = try self.parseStatementExpression(0);
 
         const span = Span.merge(start.span(), binding.value.span);
-        const binding_node = try self.allocExpr(span, @unionInit(Expr, @tagName(tag), binding));
+        const binding_node = try self.allocExpr(span, .{ .binding = binding });
 
-        comptime var kind: ast.DeclKind = undefined;
-        comptime {
-            const tn = @tagName(tag);
-            if (std.mem.eql(u8, tn, "con_expr")) {
-                kind = ast.DeclKind.con;
-            } else if (std.mem.eql(u8, tn, "let_expr")) {
-                kind = ast.DeclKind.let;
-            } else if (std.mem.eql(u8, tn, "global")) {
-                kind = ast.DeclKind.global;
-            } else {
-                @compileError("unsupported binding tag to DeclKind");
-            }
-        }
         return self.allocExpr(span, .{ .decl = .{ .inner = binding_node, .kind = kind, .is_pub = false } });
     }
 
     fn parseDecl(self: *Parser, start: Token, is_pub: bool) anyerror!*Node {
         return switch (start.type) {
             .kw_const => {
-                const binding = try self.parseBinding(.con_expr, start);
+                const binding = try self.parseBinding(.con, start);
                 if (is_pub) {
                     const p: *Node = binding;
                     p.expr.decl.is_pub = true;
@@ -674,7 +662,7 @@ const Parser = struct {
                 return binding;
             },
             .kw_let => {
-                const binding = try self.parseBinding(.let_expr, start);
+                const binding = try self.parseBinding(.let, start);
                 if (is_pub) {
                     const p: *Node = binding;
                     p.expr.decl.is_pub = true;
@@ -793,7 +781,7 @@ const Parser = struct {
         else
             try self.parseStatementExpression(0);
         const span = Span.merge(start.span(), body.span);
-        const mod_node = try self.allocExpr(span, .{ .mod_expr = .{ .name = name.text, .body = body, .is_pub = false } });
+        const mod_node = try self.allocExpr(span, .{ .module_decl = .{ .name = name.text, .body = body, .is_pub = false } });
         return self.allocExpr(span, .{ .decl = .{ .inner = mod_node, .kind = ast.DeclKind.mod, .is_pub = is_pub } });
     }
 
@@ -913,14 +901,14 @@ const Parser = struct {
             if (self.check(.kw_const) or self.check(.kw_let)) {
                 const binding_start = self.advance();
                 const binding_expr = switch (binding_start.type) {
-                    .kw_const => try self.parseBinding(.con_expr, binding_start),
-                    .kw_let => try self.parseBinding(.let_expr, binding_start),
+                    .kw_const => try self.parseBinding(.con, binding_start),
+                    .kw_let => try self.parseBinding(.let, binding_start),
                     else => return error.UnexpectedToken,
                 };
                 end_span = binding_expr.span;
                 switch (binding_expr.expr) {
                     .decl => |decl| switch (decl.inner.expr) {
-                        .con_expr, .let_expr => |binding| try items.append(self.alloc, .{ .binding = binding }),
+                        .binding => |binding| try items.append(self.alloc, .{ .binding = binding }),
                         else => return error.UnexpectedToken,
                     },
                     else => return error.UnexpectedToken,
@@ -1259,7 +1247,7 @@ const Parser = struct {
         return switch (left.expr) {
             .number => next == .lparen and !self.isTightSuffix(left),
             .decl => expr_start_tokens.get(next),
-            .con_expr, .let_expr, .assign_expr, .return_expr, .break_expr => expr_start_tokens.get(next),
+            .assign_expr, .return_expr, .break_expr => expr_start_tokens.get(next),
             .call => call_stmt_boundary_tokens.get(next),
             else => false,
         };
@@ -1350,7 +1338,7 @@ const Parser = struct {
         const temp_ref = try self.allocExpr(left.span, .{ .ident = pipe_temp_name });
         const binding: ast.Binding = .{ .target = temp_target, .value = left };
         const bind = try self.allocExpr(left.span, .{ .decl = .{
-            .inner = try self.allocExpr(left.span, .{ .con_expr = binding }),
+            .inner = try self.allocExpr(left.span, .{ .binding = binding }),
             .kind = ast.DeclKind.con,
             .is_pub = false,
         } });
@@ -1376,7 +1364,7 @@ const Parser = struct {
         const underscore = try self.allocExpr(left.span, .{ .ident = "_" });
         const binding: ast.Binding = .{ .target = underscore, .value = left };
         const bind = try self.allocExpr(left.span, .{ .decl = .{
-            .inner = try self.allocExpr(left.span, .{ .con_expr = binding }),
+            .inner = try self.allocExpr(left.span, .{ .binding = binding }),
             .kind = ast.DeclKind.con,
             .is_pub = false,
         } });
@@ -1511,8 +1499,8 @@ test "parses @doc annotation on function declaration" {
     const tokens = try lexer.lex(alloc, src);
     const root = try parseTokens(alloc, tokens);
     try std.testing.expect(root.expr == .decl);
-    try std.testing.expect(root.expr.decl.inner.expr == .con_expr);
-    const value = root.expr.decl.inner.expr.con_expr.value;
+    try std.testing.expect(root.expr.decl.inner.expr == .binding);
+    const value = root.expr.decl.inner.expr.binding.value;
     try std.testing.expect(value.expr == .fn_expr);
     try std.testing.expectEqualStrings("adds", value.expr.fn_expr.doc.?);
 }
@@ -1556,16 +1544,16 @@ test "pub and private decls keep flags across declaration forms" {
     };
 
     const expected = [_]Expect{
-        .{ .kind = .con, .is_pub = true, .tag = .con_expr },
-        .{ .kind = .con, .is_pub = false, .tag = .con_expr },
-        .{ .kind = .let, .is_pub = true, .tag = .let_expr },
-        .{ .kind = .let, .is_pub = false, .tag = .let_expr },
-        .{ .kind = .global, .is_pub = true, .tag = .global },
-        .{ .kind = .global, .is_pub = false, .tag = .global },
-        .{ .kind = .mod, .is_pub = true, .tag = .mod_expr },
-        .{ .kind = .mod, .is_pub = false, .tag = .mod_expr },
-        .{ .kind = .con, .is_pub = true, .tag = .con_expr },
-        .{ .kind = .con, .is_pub = false, .tag = .con_expr },
+        .{ .kind = .con, .is_pub = true, .tag = .binding },
+        .{ .kind = .con, .is_pub = false, .tag = .binding },
+        .{ .kind = .let, .is_pub = true, .tag = .binding },
+        .{ .kind = .let, .is_pub = false, .tag = .binding },
+        .{ .kind = .global, .is_pub = true, .tag = .binding },
+        .{ .kind = .global, .is_pub = false, .tag = .binding },
+        .{ .kind = .mod, .is_pub = true, .tag = .module_decl },
+        .{ .kind = .mod, .is_pub = false, .tag = .module_decl },
+        .{ .kind = .con, .is_pub = true, .tag = .binding },
+        .{ .kind = .con, .is_pub = false, .tag = .binding },
         .{ .kind = .struct_decl, .is_pub = true, .tag = .struct_def },
         .{ .kind = .struct_decl, .is_pub = false, .tag = .struct_def },
         .{ .kind = .struct_decl, .is_pub = true, .tag = .test_block },
@@ -1584,7 +1572,7 @@ test "pub and private decls keep flags across declaration forms" {
         try std.testing.expectEqual(want.is_pub, item.expr.decl.is_pub);
         try std.testing.expect(item.expr.decl.inner.expr == want.tag);
         if (idx == 8 or idx == 9) {
-            try std.testing.expect(item.expr.decl.inner.expr.con_expr.value.expr == .fn_expr);
+            try std.testing.expect(item.expr.decl.inner.expr.binding.value.expr == .fn_expr);
         }
     }
 }

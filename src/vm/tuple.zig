@@ -146,7 +146,7 @@ test "parses tuple destructuring in bindings assignment and match" {
         \\ match (:ok, "x")
         \\ | (:ok, value) => value
         \\ | (:err, err) => err
-    , "(block (const (tuple-pattern a b) (tuple :ok \"value\")) (assign (tuple-pattern a b) (tuple :err \"other\")) (match (tuple :ok \"x\") (arm (tuple-pattern :ok value) value) (arm (tuple-pattern :err err) err)))");
+    , "(block (binding (tuple-pattern a b) (tuple :ok \"value\")) (assign (tuple-pattern a b) (tuple :err \"other\")) (match (tuple :ok \"x\") (arm (tuple-pattern :ok value) value) (arm (tuple-pattern :err err) err)))");
 }
 
 test "tuple destructuring ignores extras but errors when too short" {
