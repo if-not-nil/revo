@@ -80,7 +80,21 @@ pub fn lowerExprArtifactReport(
     defer compiler.deinit();
 
     compiler.compileRoot(expr) catch |err| switch (err) {
-        error.LoweringFailed => return .{ .err = compiler.failure.? },
+        error.LoweringFailed => {
+            const failure = compiler.failure orelse return error.LoweringFailed;
+            const msg = try compiler.runtime_alloc.dupe(u8, failure.report.message);
+            const parts = try compiler.runtime_alloc.dupe(diagnostic.Part, failure.report.parts);
+            parts[0] = diagnostic.Part{ .@"error" = msg };
+            return .{ .err = .{
+                .kind = failure.kind,
+                .report = .{
+                    .parts = parts,
+                    .message = msg,
+                    .owned_message = true,
+                    .owned_parts = true,
+                },
+            } };
+        },
         else => return err,
     };
 
@@ -108,6 +122,9 @@ pub const Compiler = struct {
     test_suite_names: std.ArrayList([]const u8),
     in_loop_depth: usize = 0,
     failure: ?LowerFailure = null,
+    failure_message: []const u8 = "",
+    failure_message_owned: bool = false,
+    failure_parts: [2]diagnostic.Part = [_]diagnostic.Part{diagnostic.Part{ .@"error" = "" }} ** 2,
     spans: std.ArrayList(ast.Span),
     active_span: ast.Span = .{
         .start = 0,
@@ -151,6 +168,8 @@ pub const Compiler = struct {
     }
 
     pub fn deinit(self: *Compiler) void {
+        if (self.failure) |failure| failure.deinit(self.runtime_alloc);
+        if (self.failure_message_owned) self.runtime_alloc.free(self.failure_message);
         for (self.functions.items) |*s| s.deinit(self.alloc);
         self.functions.deinit(self.alloc);
         self.slot_allocators.deinit(self.alloc);
@@ -1123,7 +1142,25 @@ pub const Compiler = struct {
         defer temp_compiler.deinit();
         temp_compiler.compileRoot(expr) catch |err| switch (err) {
             error.LoweringFailed => {
-                if (temp_compiler.failure) |nested_failure| self.failure = nested_failure else unreachable;
+                if (temp_compiler.failure) |nested_failure| {
+                    const msg = try self.runtime_alloc.dupe(u8, nested_failure.report.message);
+                    const parts = try self.runtime_alloc.dupe(
+                        diagnostic.Part,
+                        nested_failure.report.parts,
+                    );
+                    parts[0] = diagnostic.Part{ .@"error" = msg };
+                    self.failure = .{
+                        .kind = nested_failure.kind,
+                        .report = .{
+                            .parts = parts,
+                            .message = msg,
+                            .source_name = nested_failure.report.source_name,
+                            .source = nested_failure.report.source,
+                            .owned_message = true,
+                            .owned_parts = true,
+                        },
+                    };
+                } else unreachable;
                 return error.LoweringFailed;
             },
             else => return err,
@@ -1138,12 +1175,30 @@ pub const Compiler = struct {
         );
         if (result == .err) {
             const eval_failure = result.err;
+            const msg = try self.runtime_alloc.dupe(u8, eval_failure.report.message);
+            const parts = try self.runtime_alloc.dupe(
+                diagnostic.Part,
+                eval_failure.report.parts,
+            );
+            parts[0] = diagnostic.Part{ .@"error" = msg };
+            if (parts.len > 1) {
+                if (parts[1] == .span) {
+                    parts[1].span = .{
+                        .span = expr.span,
+                        .role = .primary,
+                    };
+                }
+            }
             self.failure = .{
                 .kind = .ParseError,
-                .span = eval_failure.span orelse expr.span,
-                .message = eval_failure.message,
-                .owned = false,
-                .source_name = eval_failure.source_name,
+                .report = .{
+                    .parts = parts,
+                    .message = msg,
+                    .source_name = eval_failure.report.source_name,
+                    .source = eval_failure.report.source,
+                    .owned_message = true,
+                    .owned_parts = true,
+                },
             };
             return error.LoweringFailed;
         }

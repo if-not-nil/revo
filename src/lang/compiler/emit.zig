@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const revo = @import("revo");
+const diagnostic = revo.lang.diagnostic;
 const Data = revo.Data;
 const Compiler = revo.lang.compiler.Compiler;
 const Instruction = revo.Instruction;
@@ -359,7 +360,15 @@ pub fn patchJumpToLabel(self: *Compiler, jump_idx: usize, target: usize) void {
 
 pub fn fail(self: *Compiler, kind: anytype, expr: *const Node, msg: []const u8) error{LoweringFailed} {
     const owned_msg = self.runtime_alloc.dupe(u8, msg) catch "out of memory while formatting error message";
-    self.failure = .{ .kind = kind, .span = expr.span, .message = owned_msg, .owned = owned_msg.ptr != msg.ptr };
+    if (self.failure_message_owned) self.runtime_alloc.free(self.failure_message);
+    self.failure_message = owned_msg;
+    self.failure_message_owned = owned_msg.ptr != msg.ptr;
+    self.failure_parts[0] = diagnostic.Part{ .@"error" = owned_msg };
+    self.failure_parts[1] = .{ .span = .{ .span = expr.span, .role = .primary } };
+    self.failure = .{
+        .kind = kind,
+        .report = .{ .parts = self.failure_parts[0..2], .message = owned_msg },
+    };
     return error.LoweringFailed;
 }
 

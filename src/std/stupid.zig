@@ -37,7 +37,7 @@ pub fn eval(args: []const Data, vm: *VM) !NativeResult {
     return switch (res) {
         .ok => root.resultTuple(vm, .ok, vm.currentFiber().result),
         .err => |err| {
-            const err_str = try vm.ownDataString(err.message);
+            const err_str = try vm.ownDataString(revo.lang.diagnostic.firstError(err.report).?);
             return root.resultTuple(vm, .err, err_str);
         },
     };
@@ -65,9 +65,9 @@ pub fn build(args: []const Data, vm: *VM) !NativeResult {
         .err => |err| switch (err) {
             .lower => |e| {
                 defer revo.lang.deinitError(vm.runtime.alloc, err);
-                return root.resultTuple(vm, .err, try vm.ownDataString(e.message));
+                return root.resultTuple(vm, .err, try vm.ownDataString(revo.lang.diagnostic.firstError(e.report).?));
             },
-            .parse => |e| return root.resultTuple(vm, .err, try vm.ownDataString(e.message)),
+            .parse => |e| return root.resultTuple(vm, .err, try vm.ownDataString(revo.lang.diagnostic.firstError(e.report).?)),
         },
     }
 }

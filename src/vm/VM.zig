@@ -918,20 +918,20 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
         }
     }
 
+    const message = if (kind == .Panic and self.panic_message != null)
+        self.panic_message orelse unreachable
+    else if (self.runtime_message) |msg|
+        msg
+    else
+        kind.message();
+
     var failure = EvalFailure{
         .kind = kind,
-        .span = primary_span,
-        .message = if (kind == .Panic and self.panic_message != null)
-            self.panic_message orelse unreachable
-        else if (self.runtime_message) |message|
-            message
-        else
-            kind.message(),
-        .source = if (info) |debug| debug.source else null,
-        .source_name = if (info) |debug|
-            debug.source_name
-        else
-            null,
+        .report = .{
+            .message = message,
+            .source = if (info) |debug| debug.source else null,
+            .source_name = if (info) |debug| debug.source_name else null,
+        },
     };
 
     var out_idx: usize = 0;
@@ -971,6 +971,18 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
         out_idx += 1;
     }
     failure.trace_len = out_idx;
+    failure.part_len = 2 + out_idx;
+    failure.parts[0] = revo.lang.diagnostic.Part{ .@"error" = message };
+    failure.parts[1] = .{ .span = .{
+        .span = primary_span orelse .{ .start = 0, .end = 0, .line = 1, .column = 1 },
+        .role = .primary,
+    } };
+    for (failure.trace[0..out_idx], 0..) |frame, idx| {
+        failure.parts[2 + idx] = .{ .trace = frame };
+    }
+    failure.report.parts = failure.parts[0..failure.part_len];
+    failure.report.owned_message = false;
+    failure.report.owned_parts = false;
     return failure;
 }
 

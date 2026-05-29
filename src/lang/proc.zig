@@ -266,8 +266,8 @@ fn runCompileTimeProc(parent_vm: *revo.VM, root: *Node, proc_name: []const u8) E
                 vm.runtime.alloc,
                 proc_name,
                 "compile",
-                failure.span,
-                failure.message,
+                root.span,
+                diagnostic.firstError(failure.report).?,
             );
             return error.ProcCompileFailed;
         },
@@ -279,7 +279,14 @@ fn runCompileTimeProc(parent_vm: *revo.VM, root: *Node, proc_name: []const u8) E
     switch (result) {
         .ok => {},
         .err => |failure| {
-            renderProcFailure(vm.runtime.alloc, proc_name, "runtime", failure.span, failure.message);
+            const sp = diagnostic.primarySpan(failure.report);
+            renderProcFailure(
+                vm.runtime.alloc,
+                proc_name,
+                "runtime",
+                if (sp) |p| p.span else null,
+                diagnostic.firstError(failure.report).?,
+            );
             return error.ProcEvalFailed;
         },
     }
@@ -295,7 +302,21 @@ fn renderProcFailure(
 ) void {
     var buf = std.Io.Writer.Allocating.init(allocator);
     defer buf.deinit();
-    diagnostic.renderAt(allocator, &buf.writer, "<proc>", "", span, message, &.{}, &.{}) catch {
+    var parts: [2]diagnostic.Part = undefined;
+    const slice = if (span) |s| blk: {
+        parts[0] = diagnostic.Part{ .@"error" = message };
+        parts[1] = .{ .span = .{ .span = s, .role = .primary } };
+        break :blk parts[0..2];
+    } else blk: {
+        parts[0] = diagnostic.Part{ .@"error" = message };
+        break :blk parts[0..1];
+    };
+    diagnostic.renderReport(allocator, &buf.writer, .{
+        .message = message,
+        .parts = slice,
+        .source_name = "<proc>",
+        .source = "",
+    }) catch {
         std.debug.print("proc {s}: {s} error: {s}\n", .{ proc_name, stage, message });
         return;
     };

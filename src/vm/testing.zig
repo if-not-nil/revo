@@ -12,7 +12,10 @@ pub fn run(vm: *vm_mod.VM) !void {
             if (vm.currentDebugSource()) |source| {
                 revo.printEvalError(vm.runtime.alloc, source, failure);
             } else {
-                std.debug.print("error: {s}\n", .{failure.message});
+                std.debug.print(
+                    "error: {s}\n",
+                    .{revo.lang.diagnostic.firstError(failure.report).?},
+                );
             }
             return error.RuntimeFailure;
         },

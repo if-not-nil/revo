@@ -3,6 +3,7 @@ const std = @import("std");
 const revo = @import("revo");
 const diagnostic = revo.lang.diagnostic;
 const Span = revo.lang.ast.Span;
+pub const TraceFrame = diagnostic.TraceFrame;
 
 pub const NativeError = error{
     StackUnderflow,
@@ -106,53 +107,23 @@ pub const EvalErrorKind = enum {
 pub const EvalFailure = struct {
     pub const max_trace_frames = 64;
 
-    pub const TraceFrame = struct {
-        function_name: []const u8,
-        source_name: ?[]const u8 = null,
-        source: ?[]const u8 = null,
-        span: ?Span = null,
-        pc: ?usize = null,
-
-        pub fn empty() TraceFrame {
-            return .{
-                .function_name = "",
-                .source_name = null,
-                .source = null,
-                .span = null,
-                .pc = null,
-            };
-        }
-    };
-
     kind: EvalErrorKind,
-    span: ?Span,
-    message: []const u8,
-    source: ?[]const u8 = null,
-    source_name: ?[]const u8 = null,
+    report: diagnostic.Report,
+    part_len: usize = 0,
+    parts: [max_trace_frames + 2]diagnostic.Part = [_]diagnostic.Part{diagnostic.Part{ .@"error" = "" }} ** (max_trace_frames + 2),
     trace_len: usize = 0,
     trace: [max_trace_frames]TraceFrame = [_]TraceFrame{TraceFrame.empty()} ** max_trace_frames,
 
     pub fn render(self: EvalFailure, alloc: std.mem.Allocator, writer: *std.Io.Writer, source: []const u8) !void {
-        return self.renderAt(alloc, writer, self.source_name orelse "<source>", self.source orelse source);
+        return self.renderAt(alloc, writer, self.report.source_name orelse "<source>", self.report.source orelse source);
     }
 
     pub fn renderAt(self: EvalFailure, alloc: std.mem.Allocator, writer: *std.Io.Writer, source_name: []const u8, source: []const u8) !void {
-        try diagnostic.renderAt(alloc, writer, source_name, source, self.span, self.message, &.{}, &.{});
-        if (self.trace_len == 0) return;
-
-        try writer.writeAll("\nstack trace:\n");
-        for (self.trace[0..self.trace_len], 0..) |frame, idx| {
-            const frame_source = frame.source_name orelse "<source>";
-            try writer.print("  {d}: {s}", .{ idx, frame.function_name });
-            if (frame.span) |span| {
-                try writer.print(" at {s}:{d}:{d}", .{ frame_source, span.line, span.column });
-            } else if (frame.pc) |pc| {
-                try writer.print(" at {s}:pc={d}", .{ frame_source, pc });
-            } else {
-                try writer.print(" at {s}", .{frame_source});
-            }
-            try writer.writeByte('\n');
-        }
+        var report = self.report;
+        report.source_name = source_name;
+        report.source = source;
+        report.parts = self.parts[0..self.part_len];
+        try diagnostic.renderReport(alloc, writer, report);
     }
 };
 
@@ -269,12 +240,14 @@ test "eval error messages and failure rendering include source name" {
     try std.testing.expectEqualStrings("stack underflow!", EvalErrorKind.StackUnderflow.message());
     try std.testing.expectEqualStrings("import failed!", EvalErrorKind.ImportFailed.message());
 
-    const failure = EvalFailure{
+    var failure = EvalFailure{
         .kind = .TypeError,
-        .span = null,
-        .message = "boom",
-        .source_name = "file.rv",
+        .report = .{
+            .source_name = "file.rv",
+        },
+        .part_len = 1,
     };
+    failure.parts[0] = diagnostic.Part{ .@"error" = "boom" };
 
     var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
@@ -285,13 +258,17 @@ test "eval error messages and failure rendering include source name" {
 test "failure rendering includes stack trace frames" {
     var failure = EvalFailure{
         .kind = .TypeError,
-        .span = null,
-        .message = "boom",
-        .source_name = "file.rv",
-        .source = "ignored",
+        .report = .{
+            .source_name = "file.rv",
+            .source = "ignored",
+            .parts = &.{ diagnostic.Part{ .@"error" = "boom" }, .{ .span = .{ .span = .{ .line = 2, .column = 4, .start = 0, .end = 1 }, .role = .primary } } },
+        },
+        .part_len = 2,
         .trace_len = 2,
     };
-    failure.trace[0] = .{
+    failure.parts[0] = diagnostic.Part{ .@"error" = "boom" };
+    failure.parts[1] = .{ .span = .{ .span = .{ .line = 2, .column = 4, .start = 0, .end = 1 }, .role = .primary } };
+    failure.parts[2] = .{ .trace = .{
         .function_name = "inner",
         .source_name = "file.rv",
         .span = .{
@@ -300,12 +277,13 @@ test "failure rendering includes stack trace frames" {
             .start = 0,
             .end = 1,
         },
-    };
-    failure.trace[1] = .{
+    } };
+    failure.parts[3] = .{ .trace = .{
         .function_name = "<module>",
         .source_name = "file.rv",
         .pc = 7,
-    };
+    } };
+    failure.part_len = 4;
 
     var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();

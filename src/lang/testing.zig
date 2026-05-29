@@ -274,9 +274,11 @@ pub fn expectCompileFailure(
             .lower => |lower| {
                 defer lang.deinitError(alloc, failure);
                 try std.testing.expectEqual(expected_kind, lower.kind);
-                try std.testing.expectEqual(expected_line, lower.span.line);
-                try std.testing.expectEqual(expected_column, lower.span.column);
-                try std.testing.expectEqualStrings(expected_message, lower.message);
+                const span = lang.diagnostic.primarySpan(lower.report).?;
+                const msg = lang.diagnostic.firstError(lower.report).?;
+                try std.testing.expectEqual(expected_line, span.span.line);
+                try std.testing.expectEqual(expected_column, span.span.column);
+                try std.testing.expectEqualStrings(expected_message, msg);
             },
         },
     }
@@ -331,10 +333,11 @@ pub fn expectRuntimeFailure(
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| {
             try std.testing.expectEqual(expected_kind, failure.kind);
-            try std.testing.expect(failure.span != null);
-            try std.testing.expectEqual(expected_line, failure.span.?.line);
-            try std.testing.expectEqual(expected_column, failure.span.?.column);
-            try std.testing.expectEqualStrings(expected_message, failure.message);
+            const span = lang.diagnostic.primarySpan(failure.report).?;
+            const msg = lang.diagnostic.firstError(failure.report).?;
+            try std.testing.expectEqual(expected_line, span.span.line);
+            try std.testing.expectEqual(expected_column, span.span.column);
+            try std.testing.expectEqualStrings(expected_message, msg);
         },
     }
 }
@@ -356,7 +359,10 @@ pub fn expectRuntimeFailureWithMessage(
         .ok => return error.ExpectedRuntimeFailure,
         .err => |failure| {
             try std.testing.expectEqual(expected_kind, failure.kind);
-            try std.testing.expectEqualStrings(expected_message, failure.message);
+            try std.testing.expectEqualStrings(
+                expected_message,
+                lang.diagnostic.firstError(failure.report).?,
+            );
         },
     }
 }

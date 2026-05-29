@@ -76,15 +76,33 @@ pub fn parseTokensReport(alloc: std.mem.Allocator, tokens: []const Token) anyerr
     const expr = parser.parse() catch |err| switch (err) {
         error.UnexpectedToken => {
             const token = parser.peek();
-            return .{ .err = .{ .kind = .UnexpectedToken, .span = token.span(), .message = "unexpected token" } };
+            const parts = try alloc.alloc(diagnostic.Part, 2);
+            parts[0] = diagnostic.Part{ .@"error" = "unexpected token" };
+            parts[1] = .{ .span = .{ .span = token.span(), .role = .primary } };
+            return .{ .err = .{
+                .kind = .UnexpectedToken,
+                .report = .{ .parts = parts, .message = "unexpected token", .owned_parts = true },
+            } };
         },
         error.ExpectedIdentifier => {
             const token = parser.peek();
-            return .{ .err = .{ .kind = .ExpectedIdentifier, .span = token.span(), .message = "expected identifier" } };
+            const parts = try alloc.alloc(diagnostic.Part, 2);
+            parts[0] = diagnostic.Part{ .@"error" = "expected identifier" };
+            parts[1] = .{ .span = .{ .span = token.span(), .role = .primary } };
+            return .{ .err = .{
+                .kind = .ExpectedIdentifier,
+                .report = .{ .parts = parts, .message = "expected identifier", .owned_parts = true },
+            } };
         },
         error.ExpectedMatchArm => {
             const token = parser.peek();
-            return .{ .err = .{ .kind = .ExpectedMatchArm, .span = token.span(), .message = "match expression requires at least one arm" } };
+            const parts = try alloc.alloc(diagnostic.Part, 2);
+            parts[0] = diagnostic.Part{ .@"error" = "match expression requires at least one arm" };
+            parts[1] = .{ .span = .{ .span = token.span(), .role = .primary } };
+            return .{ .err = .{
+                .kind = .ExpectedMatchArm,
+                .report = .{ .parts = parts, .message = "match expression requires at least one arm", .owned_parts = true },
+            } };
         },
         else => return err,
     };

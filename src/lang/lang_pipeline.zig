@@ -16,7 +16,7 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
         .ok => |ok| ok,
         .err => |failure| {
             var diag = failure;
-            if (source.name) |name| diag.source_name = name;
+            if (source.name) |name| diag.report.source_name = name;
             return .{ .err = .{ .parse = diag } };
         },
     };
@@ -80,7 +80,7 @@ pub fn parse(allocator: std.mem.Allocator, source: Source, opts: ParseOptions) !
             .ok => |expr| .{ .ok = .{ .root = expr } },
             .err => |failure| blk: {
                 var diag = failure;
-                if (source.name) |name| diag.source_name = name;
+                if (source.name) |name| diag.report.source_name = name;
                 break :blk .{ .err = diag };
             },
         };
@@ -95,7 +95,7 @@ pub fn parse(allocator: std.mem.Allocator, source: Source, opts: ParseOptions) !
         .ok => |root| .{ .ok = .{ .root = root } },
         .err => |failure| blk: {
             var diag = failure;
-            if (source.name) |name| diag.source_name = name;
+            if (source.name) |name| diag.report.source_name = name;
             break :blk .{ .err = diag };
         },
     };
@@ -133,7 +133,7 @@ pub fn lower(vm: *VM, expanded: Expanded, opts: LowerOptions) !LowerResult {
         .err => |failure| blk: {
             var diag = failure;
             if (opts.source) |source| {
-                if (source.name) |name| diag.source_name = name;
+                if (source.name) |name| diag.report.source_name = name;
             }
             break :blk .{ .err = diag };
         },
@@ -142,32 +142,24 @@ pub fn lower(vm: *VM, expanded: Expanded, opts: LowerOptions) !LowerResult {
 
 pub fn renderError(allocator: std.mem.Allocator, writer: *std.Io.Writer, source: Source, err: Error) !void {
     return switch (err) {
-        .parse => |failure| diagnostic.renderAt(
-            allocator,
-            writer,
-            failure.source_name orelse source.name orelse "<source>",
-            source.text,
-            failure.span,
-            failure.message,
-            failure.labels,
-            failure.notes,
-        ),
-        .lower => |failure| diagnostic.renderAt(
-            allocator,
-            writer,
-            failure.source_name orelse source.name orelse "<source>",
-            source.text,
-            failure.span,
-            failure.message,
-            failure.labels,
-            failure.notes,
-        ),
+        .parse => |failure| blk: {
+            var report = failure.report;
+            report.source_name = report.source_name orelse source.name;
+            report.source = source.text;
+            break :blk diagnostic.renderReport(allocator, writer, report);
+        },
+        .lower => |failure| blk: {
+            var report = failure.report;
+            report.source_name = report.source_name orelse source.name;
+            report.source = source.text;
+            break :blk diagnostic.renderReport(allocator, writer, report);
+        },
     };
 }
 
 pub fn deinitError(alloc: std.mem.Allocator, err: Error) void {
     switch (err) {
-        .parse => {},
+        .parse => |failure| failure.deinit(alloc),
         .lower => |failure| failure.deinit(alloc),
     }
 }
@@ -198,7 +190,13 @@ pub fn parseSourceReport(allocator: std.mem.Allocator, source: []const u8) !pars
                 .UnterminatedString => .LexUnterminatedString,
                 .Unknown => .LexUnknown,
             };
-            return .{ .err = .{ .kind = kind, .span = failure.span, .message = failure.message } };
+            const parts = try allocator.alloc(diagnostic.Part, 2);
+            parts[0] = diagnostic.Part{ .@"error" = failure.message };
+            parts[1] = .{ .span = .{ .span = failure.span, .role = .primary } };
+            return .{ .err = .{
+                .kind = kind,
+                .report = .{ .parts = parts, .message = failure.message, .owned_parts = true },
+            } };
         },
     };
     defer allocator.free(tokens);

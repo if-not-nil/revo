@@ -28,8 +28,9 @@ print(acc)
 
 const id = fn(x, y) x * 2
 id(1, y = 2)
+id(1, 2, 3)
 
-if :true 1 else "asdf"
+# if :true 1 else "asdf"
 # type A = (:ok, any) | (:err, atom)
 #
 # fn pick(how: A) -> any do

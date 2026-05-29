@@ -1124,7 +1124,12 @@ test "runtime renderer includes source path" {
         .err => |failure| {
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
-            try failure.renderAt(alloc, &buf.writer, failure.source_name orelse "<source>", source);
+            try failure.renderAt(
+                alloc,
+                &buf.writer,
+                failure.report.source_name orelse "<source>",
+                source,
+            );
             try std.testing.expect(std.mem.indexOf(u8, buf.written(), "examples/fail.rv:1:1") != null);
         },
     }
