@@ -155,8 +155,7 @@ pub fn verifyIrBytecode(ctx: *IrContext, emitted: []const Instruction, alloc: st
     if (!ctx.active or ctx.ir_builder.instructions.items.len == 0) return true;
     const lowered = try ctx.lowerToVerifyBytecode();
     defer alloc.free(lowered);
-    if (comptime false and lowered.len != emitted.len) {
-        std.debug.print("ir/emit length mismatch: {d} vs {d}\n", .{ lowered.len, emitted.len });
+    if (lowered.len != emitted.len) {
         return false;
     }
     var idx: usize = 0;
@@ -165,7 +164,6 @@ pub fn verifyIrBytecode(ctx: *IrContext, emitted: []const Instruction, alloc: st
         const em_bc = emitted[idx];
         const call_parity = (ir_bc.op == .call) and (em_bc.op == .call or em_bc.op == .call_field);
         if (!call_parity and ir_bc.op != em_bc.op) {
-            std.debug.print("opcode mismatch at {d}:\n\tir={any}\n\temit={any}\n", .{ idx, ir_bc.op, em_bc.op });
             return false;
         }
     }
