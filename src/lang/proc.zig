@@ -256,6 +256,8 @@ const ProcCtx = struct {
 /// could not for my life figure out how to comptimeize further
 //
 
+const max_recursion_depth = 64;
+
 fn evalProcMacro(
     vm: *revo.VM,
     span: Span,
@@ -263,8 +265,8 @@ fn evalProcMacro(
     args: []const *Node,
     env: *ProcEnv,
 ) ExpandError!*Node {
-    if (env.isActive(def.name)) {
-        env.error_info = .{ .proc_name = def.name, .stage = "expand", .span = span, .message = "recursive proc macro expansion" };
+    if (env.active.items.len >= max_recursion_depth) {
+        env.error_info = .{ .proc_name = def.name, .stage = "expand", .span = span, .message = "proc macro recursion depth exceeded" };
         return error.RecursiveProcMacro;
     }
     try env.pushActive(def.name);
