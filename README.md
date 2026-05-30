@@ -52,8 +52,8 @@ fn safe_div(a, b)
   else (:ok, a / b)
 
 match safe_div(10, 2)
-  | (:ok, v)  print(v) # 5
-  | (:err, e) print(e)
+  | (:ok, v)  => print(v) # 5
+  | (:err, e) => print(e)
 
 # =============================================================
 # seamless concurrency
@@ -65,20 +65,20 @@ join(h) # 42
 
 let ch = chan()
 fn worker(n) do
-    if n == 6 do
-      send(ch, :done)
-      return n
-    end
-    sleep(n * 100)
-    send(ch, n * 10)
+  if n == 6 do
+    send(ch, :done)
+    return n
+  end
+  sleep(n * 100)
+  send(ch, n * 10)
 end
 
 for i in 0..7
-    spawn worker(n)
+  spawn worker(n)
 
 loop match recv(ch)
-  | :done break :done 
-  | x print("got", x)
+  | :done => break :done 
+  | x => print("got", x)
 
 # ============================================================
 # first-class testing

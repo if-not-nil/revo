@@ -5,16 +5,16 @@
 these should be done before the language is considered complete:
 
 - [x] **predictable type inference and typechecker**
-  - needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
-  - needed for zerocost comptime type-checking, like picking the right loop iterator
-  - then, make structs comptime and add go's interfaces
+  - [X] needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
+  - [X] needed for zerocost comptime type-checking, like picking the right loop iterator
+  - [X] then, make struct layouts comptime
 
 - [x] predictablw const behaviour
     even i don't know how it works.
   - [x] either get rid of it entirely or really make it work well
   - [ ] document what happens and when
 
-- [ ] **comptime test system**
+- [x] **comptime test system**
   - [x] normal tests
   ```ruby
   test "test name" do
@@ -51,10 +51,10 @@ these should be done before the language is considered complete:
     let a @defer(fn(x) x:close()) = io:open("f.txt") 
     ```
 
-- [ ] **macro enhancements**
+- [x] **macro enhancements**
     - [x] proc macros
   - [ ] pattern matching for macros
-  - [ ] importable macros with `use` statement
+  - [ ] macros importable on compiler's side
     - [ ] clearly scope them instead of having them be global
           maybe just namespace and restrict based on current module name
 

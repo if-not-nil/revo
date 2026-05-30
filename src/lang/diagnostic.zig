@@ -1,14 +1,21 @@
-/// diagnostics borrow their text and source slices from arena-backed storage
+// diagnostics borrow their text and source slices from arena-backed storage
+// do not manually free anything
+
 const std = @import("std");
 
 const ast = @import("./ast.zig");
 const pretty = @import("../pretty.zig");
 
 /// severity bucket for a diagnostic report
+/// TODO: only err and warning can be toggled
 pub const Severity = enum { err, warning, note, help };
 
 /// role for a span inside a report
+/// TODO: only context can be toggled off
 pub const SpanRole = enum { primary, secondary, context, trace };
+
+// TODO: decide on colors for box and each bucket
+// TODO: configure thru global config/pull from base16
 const COLOR_DIM = "\x1b[2m";
 const COLOR_RESET = "\x1b[0m";
 
