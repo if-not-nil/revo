@@ -81,7 +81,7 @@ pub const Report = struct {
         errdefer alloc.free(parts);
 
         for (parts) |*part| switch (part.*) {
-            .@"error" => part.* = .{ .@"error" = message },
+            .@"error" => |err| part.* = .{ .@"error" = try alloc.dupe(u8, err) },
             .tip => |tip| part.* = .{ .tip = try alloc.dupe(u8, tip) },
             .warn => |warn| part.* = .{ .warn = try alloc.dupe(u8, warn) },
             .note => |note| part.* = .{ .note = try alloc.dupe(u8, note) },

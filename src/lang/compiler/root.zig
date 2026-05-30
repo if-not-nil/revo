@@ -906,31 +906,10 @@ pub const Compiler = struct {
         const fn_state = state_mod.currentFunctionState(self) orelse return args;
         const sig = fn_state.fn_signatures.get(fn_name) orelse return args;
         const reordered_args = try tryReorderNamedParams(self, args, sig);
+        var had_error = false;
 
         if (reordered_args.len != sig.param_types.len) {
-            const expected_types = try self.buildTypesList(sig.param_types);
-            defer self.alloc.free(expected_types);
-            const actual_types = try self.buildArgTypesList(reordered_args);
-            defer self.alloc.free(actual_types);
-
-            const expected_sig = try formatCallSignatureWithNames(
-                self.alloc,
-                fn_name,
-                sig.param_names,
-                expected_types,
-            );
-
-            // all actual argument types regardless of argc
-            const actual_sig = try formatCallSignatureTypesOnly(
-                self.alloc,
-                fn_name,
-                actual_types,
-            );
-
-            var extra_parts = try std.ArrayList(diagnostic.Part).initCapacity(
-                self.alloc,
-                if (reordered_args.len > sig.param_types.len) 1 else 0,
-            );
+            var extra_parts = try std.ArrayList(diagnostic.Part).initCapacity(self.alloc, 1);
             defer extra_parts.deinit(self.alloc);
             if (reordered_args.len > sig.param_types.len) {
                 try self.appendUnexpectedArgPart(
@@ -939,8 +918,6 @@ pub const Compiler = struct {
                     &extra_parts,
                 );
             }
-            try extra_parts.append(self.alloc, .{ .note = actual_sig });
-            try extra_parts.append(self.alloc, .{ .note = expected_sig });
             const msg = try std.fmt.allocPrint(
                 self.alloc,
                 "call to `{s}` expects {d} argument(s), got {d}",
@@ -950,7 +927,17 @@ pub const Compiler = struct {
                     reordered_args.len,
                 },
             );
-            return self.setFailureParts(.ParseError, null, msg, extra_parts.items);
+            if (extra_parts.items.len > 0) {
+                try self.appendFailureReport(.ParseError, &.{
+                    .{ .@"error" = msg },
+                    extra_parts.items[0],
+                });
+            } else {
+                try self.appendFailureReport(.ParseError, &.{
+                    .{ .@"error" = msg },
+                });
+            }
+            had_error = true;
         }
 
         const min_args = @min(sig.param_types.len, reordered_args.len);
@@ -967,27 +954,6 @@ pub const Compiler = struct {
                     reordered_args[i].span,
                 ) catch |err| switch (err) {
                     error.TypeError => {
-                        const actual_types = try self.buildArgTypesList(
-                            reordered_args,
-                        );
-                        defer self.alloc.free(actual_types);
-                        const expected_types_all = try self.buildTypesList(
-                            sig.param_types,
-                        );
-                        defer self.alloc.free(expected_types_all);
-
-                        const actual_sig = try formatCallSignatureWithNames(
-                            self.alloc,
-                            fn_name,
-                            sig.param_names,
-                            actual_types,
-                        );
-                        const expected_sig = try formatCallSignatureWithNames(
-                            self.alloc,
-                            fn_name,
-                            sig.param_names,
-                            expected_types_all,
-                        );
                         const label = if (sig.param_names[i].len == 0)
                             try std.fmt.allocPrint(
                                 self.alloc,
@@ -1024,27 +990,20 @@ pub const Compiler = struct {
                                     types.typeName(actual_type),
                                 },
                             );
-                        var extra_parts = try std.ArrayList(diagnostic.Part).initCapacity(
-                            self.alloc,
-                            2,
-                        );
-                        defer extra_parts.deinit(self.alloc);
-                        try extra_parts.append(self.alloc, .{ .note = actual_sig });
-                        try extra_parts.append(self.alloc, .{ .note = expected_sig });
-                        return self.setFailureParts(
-                            .ParseError,
-                            .{
+                        try self.appendFailureReport(.ParseError, &.{
+                            .{ .@"error" = headline },
+                            .{ .span = .{
                                 .span = reordered_args[i].span,
                                 .role = .primary,
                                 .message = label,
-                            },
-                            headline,
-                            extra_parts.items,
-                        );
+                            } },
+                        });
+                        had_error = true;
                     },
                 };
             }
         }
+        if (had_error) return error.LoweringFailed;
         return reordered_args;
     }
 
@@ -1468,6 +1427,21 @@ pub const Compiler = struct {
                 .span = merged,
                 .role = .secondary,
                 .message = "unexpected args",
+            },
+        });
+    }
+
+    fn appendFailureReport(
+        self: *Compiler,
+        kind: LowerErrorKind,
+        parts: []const diagnostic.Part,
+    ) !void {
+        const copied_parts = try self.alloc.dupe(diagnostic.Part, parts);
+        try self.failure_reports.append(self.alloc, .{
+            .kind = kind,
+            .report = .{
+                .parts = copied_parts,
+                .message = "",
             },
         });
     }

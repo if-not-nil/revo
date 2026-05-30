@@ -1894,6 +1894,36 @@ test "compiler reports multiple semantic errors in one pass" {
     }
 }
 
+test "typed call reports multiple bad arguments" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const result = try lang.build(&vm, .{
+        .text =
+        \\ const f = fn(a: int, b: string) a
+        \\ f("nope", 2)
+        ,
+    }, .{
+        .install_debug_info = false,
+    });
+
+    switch (result) {
+        .ok => return error.ExpectedCompileFailure,
+        .err => |failure| switch (failure) {
+            .lower => |lower| {
+                defer lang.deinitError(alloc, failure);
+                var error_count: usize = 0;
+                for (lower.report.parts) |part| {
+                    if (part == .@"error") error_count += 1;
+                }
+                try std.testing.expect(error_count >= 2);
+                vm.runtime.resetDiagArena();
+            },
+            else => return error.ExpectedLowerFailure,
+        },
+    }
+}
+
 //
 // fn semantics
 //
