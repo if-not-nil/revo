@@ -265,33 +265,59 @@ fn renderSpan(
     location: ast.Span,
     label_message: ?[]const u8,
 ) !void {
-    const line = if (location.line == 0) 1 else location.line;
-    const column = if (location.column == 0) 1 else location.column;
+    const start_line = if (location.line == 0) 1 else location.line;
+    const start_column = if (location.column == 0) 1 else location.column;
 
-    const line_start_pos = std.mem.lastIndexOfScalar(u8, source[0..@min(location.start, source.len)], '\n') orelse 0;
-    const line_start = if (line_start_pos == 0) 0 else line_start_pos + 1;
-    const end_rel = std.mem.indexOfScalar(u8, source[line_start..], '\n') orelse source.len - line_start;
-    const line_text = source[line_start .. line_start + end_rel];
-    const span_len = @min(location.end -| location.start, line_text.len -| (column - 1));
-    const highlight_len = @max(span_len, 1);
-
-    try writer.print(" --> {s}:{d}:{d}\n", .{ source_name, line, column });
+    try writer.print(" --> {s}:{d}:{d}\n", .{ source_name, start_line, start_column });
     try writer.writeAll("   |\n");
-    try writer.print("{d: >2} | {s}\n", .{ line, line_text });
-    try writer.writeAll("   | ");
-    for (1..column) |_| try writer.writeByte(' ');
-    try writer.writeByte('^');
-    if (highlight_len > 1) {
-        for (0..highlight_len - 2) |_| try writer.writeByte('~');
-        try writer.writeByte('^');
+
+    const clamped_start = @min(location.start, source.len);
+    const line1_before = std.mem.findScalarLast(u8, source[0..clamped_start], '\n') orelse 0;
+    var line_byte: usize = if (line1_before == 0) 0 else line1_before + 1;
+    var line_num: u32 = start_line;
+
+    while (line_byte < location.end and line_byte < source.len) {
+        const line_end_rel = std.mem.findScalar(u8, source[line_byte..], '\n') orelse (source.len - line_byte);
+        const line_end = line_byte + line_end_rel;
+        const line_text = source[line_byte..line_end];
+
+        const span_start_here = if (line_num == start_line) location.start else line_byte;
+        const span_end_here = @min(location.end, line_end);
+        const span_here = span_end_here -| span_start_here;
+        const col = if (line_num == start_line) start_column else 1;
+        const clamped = @min(span_here, line_text.len -| (col - 1));
+        const highlight = @max(clamped, 1);
+
+        try writer.print("{d: >2} | {s}\n", .{ line_num, line_text });
+        try writer.writeAll("   | ");
+        for (1..col) |_| try writer.writeByte(' ');
+        if (line_num == start_line and line_end >= location.end) {
+            try writer.writeByte('^');
+            if (highlight > 1) {
+                for (0..highlight - 2) |_| try writer.writeByte('~');
+                try writer.writeByte('^');
+            }
+            if (label_message) |msg| try writer.print(" {s}", .{msg});
+        } else if (line_num == start_line) {
+            try writer.writeByte('^');
+            if (highlight > 1) for (0..highlight - 1) |_| try writer.writeByte('~');
+        } else if (line_end >= location.end) {
+            if (highlight > 1) {
+                for (0..highlight - 1) |_| try writer.writeByte('~');
+            }
+            try writer.writeByte('^');
+            if (label_message) |msg| try writer.print(" {s}", .{msg});
+        } else {
+            for (0..highlight) |_| try writer.writeByte('~');
+        }
+        try writer.writeByte('\n');
+
+        line_byte = line_end + 1;
+        line_num += 1;
     }
-    if (label_message) |msg| {
-        try writer.print(" {s}", .{msg});
-    }
-    try writer.writeByte('\n');
 }
 
-test "diagnostics: render right" {
+test "single line span" {
     var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
     try renderAt(
@@ -305,4 +331,28 @@ test "diagnostics: render right" {
         &.{.{ .message = "try something else" }},
     );
     try std.testing.expect(buf.written().len != 0);
+}
+
+test "multi-line span" {
+    var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer buf.deinit();
+    try renderAt(
+        std.testing.allocator,
+        &buf.writer,
+        "multi.rv",
+        \\let x = (1,
+        \\  2,
+        \\  3)
+        \\
+    ,
+        .{ .start = 8, .end = 20, .line = 1, .column = 9 },
+        "type mismatch",
+        &.{},
+        &.{},
+    );
+    const output = buf.written();
+    try std.testing.expect(std.mem.indexOf(u8, output, "-->") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, " 1 |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, " 2 |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, " 3 |") != null);
 }
