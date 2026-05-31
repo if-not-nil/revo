@@ -130,7 +130,7 @@ pub fn runReadyFibers(self: *VM) !?@TypeOf(self.*).EvalFailure {
     return null;
 }
 
-pub fn fetch(self: *VM) !Instruction {
+pub inline fn fetch(self: *VM) !Instruction {
     const fiber = self.currentFiber();
     if (fiber.pc >= fiber.program.len)
         return error.ProgramEnd;

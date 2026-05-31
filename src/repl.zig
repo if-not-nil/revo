@@ -228,18 +228,21 @@ const OS = @import("builtin").target.os.tag;
 pub const Session = struct {
     vm: *VM,
     gpa: Allocator,
+    workspace: revo.lang.Workspace,
     source_acc: std.ArrayList(u8),
 
     pub fn init(vm: *VM, gpa: Allocator) !Session {
         return .{
             .vm = vm,
             .gpa = gpa,
+            .workspace = try revo.lang.Workspace.init(vm, gpa),
             .source_acc = try std.ArrayList(u8).initCapacity(gpa, 256),
         };
     }
 
     pub fn deinit(self: *Session) void {
         self.source_acc.deinit(self.gpa);
+        self.workspace.deinit();
     }
 
     fn clear(self: *Session) void {
@@ -260,18 +263,18 @@ pub const Session = struct {
         try out.writeAll("\n");
     }
 
-    fn printBuildError(self: *Session, out: *std.Io.Writer, err: revo.lang.Error) !void {
+    fn printBuildError(self: *Session, out: *std.Io.Writer, source: []const u8, err: revo.lang.Error) !void {
         var buf = std.Io.Writer.Allocating.init(self.gpa);
         defer buf.deinit();
-        try revo.lang.renderError(self.gpa, &buf.writer, .{ .name = "<repl>", .text = self.source_acc.items }, err);
+        try revo.lang.renderError(self.gpa, &buf.writer, .{ .name = "<repl>", .text = source }, err);
         try out.writeAll(buf.written());
         revo.lang.deinitError(self.gpa, err);
     }
 
-    fn printRuntimeFailure(self: *Session, out: *std.Io.Writer, failure: revo.EvalFailure) !void {
+    fn printRuntimeFailure(self: *Session, out: *std.Io.Writer, source: []const u8, failure: revo.EvalFailure) !void {
         var buf = std.Io.Writer.Allocating.init(self.gpa);
         defer buf.deinit();
-        try failure.render(self.gpa, &buf.writer, self.source_acc.items);
+        try failure.render(self.gpa, &buf.writer, source);
         try out.writeAll(buf.written());
     }
 
@@ -380,7 +383,7 @@ pub const Session = struct {
             break :blk self.source_acc.items;
         };
 
-        const build_result = revo.lang.build(self.vm, .{ .name = "<repl>", .text = source }, .{}) catch |err| {
+        const build_result = self.workspace.analyzeSource(self.gpa, "<repl>", source, .{}) catch |err| {
             try out.print("repl build error: {}\n", .{err});
             return true;
         };
@@ -388,7 +391,7 @@ pub const Session = struct {
         const artifact = switch (build_result) {
             .ok => |ok| ok,
             .err => |lang_err| {
-                try self.printBuildError(out, lang_err);
+                try self.printBuildError(out, source, lang_err);
                 return true;
             },
         };
@@ -409,7 +412,7 @@ pub const Session = struct {
                 try self.printResult(out);
             },
             .err => |failure| {
-                try self.printRuntimeFailure(out, failure);
+                try self.printRuntimeFailure(out, source, failure);
                 self.clearSnippet();
             },
         }

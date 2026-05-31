@@ -7,6 +7,7 @@ pub const parser = @import("parser.zig");
 pub const diagnostic = @import("diagnostic.zig");
 pub const testing = @import("testing.zig");
 pub const tests = @import("tests.zig");
+pub const workspace = @import("workspace.zig");
 
 pub const default_macro_source = pipeline.default_macro_source;
 pub const parse = pipeline.parse;
@@ -52,6 +53,9 @@ pub const ExpandResult = pipeline.ExpandResult;
 pub const ExpandWithVmResult = pipeline.ExpandWithVmResult;
 pub const BuildResult = pipeline.BuildResult;
 pub const ParseFailure = pipeline.ParseFailure;
+pub const Workspace = workspace.Workspace;
+pub const FileId = workspace.FileId;
+pub const Snapshot = workspace.Snapshot;
 pub const Diagnostic = diagnostic.Diagnostic;
 pub const Part = diagnostic.Part;
 pub const SpanPart = diagnostic.SpanPart;
@@ -75,4 +79,5 @@ test {
     _ = @import("testing.zig");
     _ = @import("tests.zig");
     _ = @import("lang_pipeline.zig");
+    _ = @import("workspace.zig");
 }

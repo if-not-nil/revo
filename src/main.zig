@@ -223,7 +223,10 @@ fn handleBuildError(_: std.process.Init, gpa: Allocator, source_name: []const u8
 }
 
 fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: []const u8, source_text: []const u8, test_mode: bool) !Artifact {
-    const build_result = revo.lang.build(vm, .{ .name = source_name, .text = source_text }, .{ .test_mode = test_mode }) catch |err| {
+    var ws = try revo.lang.Workspace.init(vm, gpa);
+    defer ws.deinit();
+
+    const build_result = ws.analyzeSource(gpa, source_name, source_text, .{ .test_mode = test_mode }) catch |err| {
         printError(init, "compilation - {}", .{err});
         return error.CompilationError;
     };

@@ -33,7 +33,7 @@ pub const Data = struct {
     bits: u64,
 
     pub const new = struct {
-        pub fn num(val: anytype) Data {
+        pub inline fn num(val: anytype) Data {
             const n: f64 = switch (@typeInfo(@TypeOf(val))) {
                 .comptime_int, .int => @as(f64, @floatFromInt(val)),
                 .comptime_float, .float => val,
@@ -41,31 +41,31 @@ pub const Data = struct {
             };
             return Data.numberRaw(n);
         }
-        pub fn nil() Data {
+        pub inline fn nil() Data {
             return revo.core_atoms.data(.nil);
         }
-        pub fn str(id: StringID) Data {
+        pub inline fn str(id: StringID) Data {
             return Data.boxed(.string, id);
         }
-        pub fn atom(id: AtomID) Data {
+        pub inline fn atom(id: AtomID) Data {
             return Data.boxed(.atom, id);
         }
-        pub fn function(id: FunctionID) Data {
+        pub inline fn function(id: FunctionID) Data {
             return Data.boxed(.function, id);
         }
-        pub fn boolean(val: bool) Data {
+        pub inline fn boolean(val: bool) Data {
             return if (val) revo.core_atoms.data(.true) else revo.core_atoms.data(.false);
         }
-        pub fn table(id: TableID) Data {
+        pub inline fn table(id: TableID) Data {
             return Data.boxed(.table, id);
         }
-        pub fn tuple(id: TupleID) Data {
+        pub inline fn tuple(id: TupleID) Data {
             return Data.boxed(.tuple, id);
         }
-        pub fn structVal(id: StructInstanceID) Data {
+        pub inline fn structVal(id: StructInstanceID) Data {
             return Data.boxed(.struct_val, id);
         }
-        pub fn structType(id: StructTypeID) Data {
+        pub inline fn structType(id: StructTypeID) Data {
             return Data.boxed(.struct_type, id);
         }
     };

@@ -480,10 +480,6 @@ pub inline fn schedNowMonotonicNs(self: *VM) u64 {
     return @as(u64, @intCast(ts.toNanoseconds()));
 }
 
-inline fn runReadyFibers(self: *VM) !?EvalFailure {
-    return vm_exec.runReadyFibers(self);
-}
-
 //
 // slot helpers
 //
@@ -793,17 +789,9 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
     return self.functions.createClosure(closure.prototype, detached.items);
 }
 
-fn fetch(self: *VM) !Instruction {
-    return vm_exec.fetch(self);
-}
-
-fn trace(self: *VM, instr: Instruction) void {
-    vm_exec.trace(self, instr);
-}
-
-fn dumpStack(self: *VM) void {
-    vm_exec.dumpStack(self);
-}
+const fetch = vm_exec.fetch;
+const trace = vm_exec.trace;
+const dumpStack = vm_exec.dumpStack;
 
 pub fn run(self: *VM) !void {
     return switch (try self.runReport()) {
@@ -877,9 +865,7 @@ pub inline fn callFunction(self: *VM, callee: Data, args: []const Data) EvalErro
     return self.callFunctionParts(callee, null, args);
 }
 
-pub fn compare(self: *VM, lh: Data, rh: Data) std.math.Order {
-    return compare_impl.compare(self, lh, rh);
-}
+pub const compare = compare_impl.compare;
 
 pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     const kind: EvalErrorKind = switch (err) {
@@ -1996,10 +1982,10 @@ pub inline fn evalRegister(
         .add_int => {
             const lhs = regRead(slots, base, instr.b);
             const rhs = regRead(slots, base, instr.c);
-            if (self.debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
+            // if (self.debug_assert_types) {
+            //     std.debug.assert(lhs.isNumber());
+            //     std.debug.assert(rhs.isNumber());
+            // }
             regWrite(slots, base, instr.a, Data.new.num(@as(f64, @bitCast(lhs.bits)) +
                 @as(f64, @bitCast(rhs.bits))));
         },
