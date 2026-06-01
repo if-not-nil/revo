@@ -403,14 +403,45 @@ pub const Workspace = struct {
         const snap = self.snapshot(id) orelse return error.FileNotOpen;
         if (self.inspect_cache.get(id)) |cached| {
             if (cached.version == snap.version and sameOpts(cached.opts, opts)) {
+                // cache hit: still parse n run semantic for fresh diagnostics,
+                // but reuse cached syms and deps
+                var arena = std.heap.ArenaAllocator.init(self.alloc);
+                defer arena.deinit();
+
+                const parsed = try lang.parse(arena.allocator(), .{
+                    .name = snap.name,
+                    .text = snap.text,
+                }, .{ .include_default_macros = opts.include_default_macros });
+
+                if (parsed == .err) {
+                    self.removeDeps(id);
+                    var report = try parsed.err.report.copy(alloc);
+                    report.source_name = try alloc.dupe(u8, snap.name);
+                    report.source = try alloc.dupe(u8, snap.text);
+                    return .{
+                        .snapshot = snap,
+                        .diagnostics = .{ .parse = .{
+                            .kind = parsed.err.kind,
+                            .report = report,
+                        } },
+                        .cached = true,
+                        .symbols = try copySymbols(alloc, cached.symbols),
+                        .dependencies = try self.copyDeps(id),
+                    };
+                }
+
+                const root = parsed.ok.root;
+                const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text);
                 return .{
                     .snapshot = snap,
                     .cached = true,
+                    .diagnostics = semantic_error,
                     .symbols = try copySymbols(alloc, cached.symbols),
                     .dependencies = try self.copyDeps(id),
                 };
             }
         }
+
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
 
@@ -445,6 +476,12 @@ pub const Workspace = struct {
         errdefer self.alloc.free(deps);
         try self.updateDeps(id, deps);
         const semantic_error = try semantic.analyze(alloc, root, snap.name, snap.text);
+        const cache_symbols = try copySymbols(self.alloc, symbols);
+        errdefer self.alloc.free(cache_symbols);
+        const cache_deps = try self.copyDeps(id);
+        errdefer self.alloc.free(cache_deps);
+        try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_deps);
+
         if (semantic_error) |err| {
             return .{
                 .snapshot = snap,
@@ -454,11 +491,6 @@ pub const Workspace = struct {
                 .dependencies = try self.copyDeps(id),
             };
         }
-        const cache_symbols = try copySymbols(self.alloc, symbols);
-        errdefer self.alloc.free(cache_symbols);
-        const cache_deps = try self.copyDeps(id);
-        errdefer self.alloc.free(cache_deps);
-        try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_deps);
 
         return .{
             .snapshot = snap,
