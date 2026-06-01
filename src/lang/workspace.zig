@@ -103,6 +103,11 @@ pub const IndexedSymbol = struct {
     kind: SymbolKind,
 };
 
+pub const OpenOptions = struct {
+    mode: lang.RunMode = .script,
+    project_root: []const u8 = &.{},
+};
+
 pub const Workspace = struct {
     alloc: std.mem.Allocator,
     vm: ?*VM,
@@ -161,6 +166,10 @@ pub const Workspace = struct {
     }
 
     pub fn open(self: *Workspace, name: []const u8, text: []const u8) !FileId {
+        return self.openWith(name, text, .{});
+    }
+
+    pub fn openWith(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOptions) !FileId {
         if (self.file_names.get(name)) |id| {
             try self.change(id, text);
             return id;
@@ -177,18 +186,17 @@ pub const Workspace = struct {
         const id = self.next_file_id;
         self.next_file_id += 1;
 
-        const mode = detectRunMode(self.alloc, name) catch .script;
-        const project_root: []u8 = if (mode == .project) blk: {
-            const dir = std.fs.path.dirname(name) orelse "";
-            break :blk self.alloc.dupe(u8, dir) catch "";
-        } else @as([]u8, &.{});
+        const project_root: []u8 = if (opts.mode == .project and opts.project_root.len > 0)
+            try self.alloc.dupe(u8, opts.project_root)
+        else
+            &.{};
 
         try self.files.append(self.alloc, .{
             .id = id,
             .version = 1,
             .name = name_copy,
             .text = text_copy,
-            .mode = mode,
+            .mode = opts.mode,
             .project_root = project_root,
         });
         stored = true;
@@ -1135,14 +1143,6 @@ const SymbolVisitor = struct {
         }) catch {};
     }
 };
-
-fn detectRunMode(alloc: std.mem.Allocator, name: []const u8) !lang.RunMode {
-    _ = alloc;
-    _ = name;
-    // TODO: walk and look for lib.json / exe.json
-    //       needs an Io somewhere
-    return .script;
-}
 
 fn containsId(items: []const FileId, id: FileId) bool {
     for (items) |item|
