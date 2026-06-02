@@ -245,17 +245,134 @@ async def test_close(client: LanguageClient):
     )
 
 
-@pytest.mark.skip(reason="STUB")
+COMPLETION_URI = "file:///test/completion.rv"
+COMPLETION_TEXT = """let x = 42
+
+fn say_hi(name) do
+  print("hello " + name)
+end
+
+print(say_hi("world"))
+"""
+
+
 @pytest.mark.asyncio(loop_scope="module")
-async def test_completion(client: LanguageClient):
-    """completion stub"""
+async def test_completion_basic(client: LanguageClient):
+    """completion returns keywords + globals + locals"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=COMPLETION_URI,
+                language_id="revo",
+                version=1,
+                text=COMPLETION_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
     result = await client.text_document_completion_async(
         params=CompletionParams(
             position=Position(line=0, character=0),
-            text_document=TextDocumentIdentifier(uri=TEST_URI),
+            text_document=TextDocumentIdentifier(uri=COMPLETION_URI),
         )
     )
-    assert result is None
+    assert result is not None, "expected completions, got None"
+    items = result.items if hasattr(result, 'items') else result
+    labels = [i.label for i in items]
+    assert "fn" in labels, f"expected 'fn' keyword in {labels}"
+    assert "if" in labels, f"expected 'if' keyword in {labels}"
+    assert "const" in labels, f"expected 'const' keyword in {labels}"
+    # globals
+    assert "print" in labels, f"expected 'print' in {labels}"
+    assert "fmt" in labels, f"expected 'fmt' in {labels}"
+    # locals from the file
+    assert "x" in labels, f"expected 'x' in {labels}"
+    assert "say_hi" in labels, f"expected 'say_hi' in {labels}"
+
+    client.text_document_did_close(
+        params=DidCloseTextDocumentParams(
+            text_document=TextDocumentIdentifier(uri=COMPLETION_URI),
+        )
+    )
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_completion_prefix(client: LanguageClient):
+    """completion filters by prefix"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=COMPLETION_URI,
+                language_id="revo",
+                version=1,
+                text=COMPLETION_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+    # cursor inside `print`, if after `pri` then prefix is `pri`
+    result = await client.text_document_completion_async(
+        params=CompletionParams(
+            position=Position(line=3, character=5),
+            text_document=TextDocumentIdentifier(uri=COMPLETION_URI),
+        )
+    )
+    assert result is not None
+    items = result.items if hasattr(result, 'items') else result
+    labels = [i.label for i in items]
+    assert "print" in labels, f"expected 'print' in {labels}"
+    # "pri" prefix should not match things like "fn" or "x"
+    assert "fn" not in labels, f"'fn' should not match 'pri' prefix, got {labels}"
+    assert "x" not in labels, "'x' should not match 'pri' prefix"
+
+    client.text_document_did_close(
+        params=DidCloseTextDocumentParams(
+            text_document=TextDocumentIdentifier(uri=COMPLETION_URI),
+        )
+    )
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_completion_kinds(client: LanguageClient):
+    """completion items have appropriate kind values"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=COMPLETION_URI,
+                language_id="revo",
+                version=1,
+                text=COMPLETION_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+    # cursor at start of line 0 to get all completions
+    result = await client.text_document_completion_async(
+        params=CompletionParams(
+            position=Position(line=0, character=0),
+            text_document=TextDocumentIdentifier(uri=COMPLETION_URI),
+        )
+    )
+    assert result is not None
+    items = result.items if hasattr(result, 'items') else result
+    kinds = {i.label: i.kind for i in items}
+    # keywords should be kind=14 (Keyword)
+    assert kinds.get("fn") == 14, f"'fn' should be Keyword kind (14), got {kinds.get('fn')}"
+    assert kinds.get("if") == 14
+    # functions should be kind=3 (Function)
+    assert kinds.get("print") == 3, f"'print' should be Function kind (3), got {kinds.get('print')}"
+    assert kinds.get("len") == 3
+    # all kinds should be valid ints
+    assert all(isinstance(v, int) for v in kinds.values()), "all kinds should be ints"
+
+    client.text_document_did_close(
+        params=DidCloseTextDocumentParams(
+            text_document=TextDocumentIdentifier(uri=COMPLETION_URI),
+        )
+    )
 
 
 @pytest.mark.skip(reason="TODO")

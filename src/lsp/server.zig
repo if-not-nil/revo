@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const lsp = @import("lsp");
 const revo = @import("revo");
 const lang = revo.lang;
+const completion = @import("completion.zig");
 
 const T = lsp.types;
 const ws = lang.workspace;
@@ -115,7 +116,7 @@ const Handler = struct {
             .referencesProvider = .{ .bool = true },
             .documentSymbolProvider = .{ .bool = true },
             .workspaceSymbolProvider = .{ .bool = true },
-            .completionProvider = .{ .triggerCharacters = &.{} },
+            .completionProvider = .{ .triggerCharacters = &.{"."} },
             .signatureHelpProvider = T.SignatureHelp.Options{
                 .triggerCharacters = &.{},
             },
@@ -307,13 +308,17 @@ const Handler = struct {
         return T.DocumentSymbol.Result{ .symbol_informations = try list.toOwnedSlice(arena) };
     }
 
-    /// stub; returns empty results
+    /// complete identifiers at cursor position
     pub fn @"textDocument/completion"(
-        _: *Handler,
-        _: std.mem.Allocator,
-        _: T.completion.Params,
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.completion.Params,
     ) !?T.completion.Result {
-        return null;
+        const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const ws_pos = add1(params.position);
+        const cursor_off = positionToOffset(snap.text, ws_pos) orelse return null;
+        return @as(?T.completion.Result, try completion.completions(&h.vm, &h.ws, arena, file_id, snap.text, cursor_off));
     }
 
     /// search workspace-wide by query str
@@ -456,6 +461,23 @@ fn sub1(p: ws.Position) T.Position {
     return .{ .line = p.line - 1, .character = p.character - 1 };
 }
 
+/// convert 1-based workspace position to byte offset
+fn positionToOffset(text: []const u8, pos: ws.Position) ?usize {
+    var line: u32 = 1;
+    var col: u32 = 1;
+    for (text, 0..) |ch, idx| {
+        if (line == pos.line and col == pos.character) return idx;
+        if (ch == '\n') {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    if (line == pos.line and col == pos.character) return text.len;
+    return null;
+}
+
 fn symbolKindToLsp(kind: ws.SymbolKind) T.SymbolKind {
     return switch (kind) {
         .binding => .Variable,
@@ -464,3 +486,5 @@ fn symbolKindToLsp(kind: ws.SymbolKind) T.SymbolKind {
         .type_alias => .Class,
     };
 }
+
+

@@ -713,11 +713,11 @@ const Lexer = struct {
     }
 };
 
-fn isIdentStart(c: u8) bool {
+pub fn isIdentStart(c: u8) bool {
     return std.ascii.isAlphabetic(c) or c == '_';
 }
 
-fn isIdentContinue(c: u8) bool {
+pub fn isIdentContinue(c: u8) bool {
     return isIdentStart(c) or std.ascii.isDigit(c) or c == '!' or c == '?';
 }
 

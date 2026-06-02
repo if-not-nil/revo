@@ -1463,10 +1463,11 @@ const CallAtPos = struct {
 /// the callee name and which argument the cursor is inside
 fn findCallAtPosition(text: []const u8, pos: Position) ?CallAtPos {
     const offset = positionToOffset(text, pos) orelse return null;
-    if (offset == 0) return null;
+    if (offset == 0 or offset > text.len) return null;
 
     var depth: i32 = 0;
     var i = offset;
+    if (i == text.len) i -= 1;
     while (i > 0) : (i -= 1) {
         switch (text[i]) {
             ')' => depth += 1,
