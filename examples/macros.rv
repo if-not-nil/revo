@@ -5,6 +5,3 @@ const sum_all! = macro `(%first:expr %REST(%item:expr)*)`
     `%first %REST(+ %item)` # syntax is subject to change
 
 print(sum_all!(1, 2, 3, 4)) # 10
-
-print(all_true!(1, :true, "x")) # :true
-print(all_true!(1, 0, "x"))     # 0

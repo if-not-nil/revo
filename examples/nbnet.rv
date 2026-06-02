@@ -15,28 +15,28 @@ fn serve(peer, counter) do
 
     # wait for one full line; read_line keeps appending chunks until it sees "\n".
     match peer:recv({ mode = :read_line })
-    | (:ok, "x") do
+    | (:ok, "x") => do
       # send a final message, then close the socket so future IO becomes
       # SocketClosed instead of reusing a dead fd.
       peer:send("goodbye\n")?
       peer:close()?
       return :nil
     end
-    | (:ok, "ping") do
+    | (:ok, "ping") => do
         counter = counter + 1
         # send the current counter back to the client.
         peer:send("pong " + tostring(counter) + "\n")?
     end
-    | (:ok, line) do
+    | (:ok, line) => do
         # echo any other line back to the same peer.
         peer:send(line + "\n")?
     end
-    | (:err, :SocketClosed) do
+    | (:err, :SocketClosed) => do
       # the other side hung up, so just close our handle and stop this fiber.
       peer:close()?
       return :nil
     end
-    | (:err, reason) do
+    | (:err, reason) => do
       print!("recv failed: %s \n", tostring(reason))
       # close here too: once recv fails, the socket is no longer useful.
       peer:close()?
