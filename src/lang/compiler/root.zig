@@ -674,7 +674,7 @@ pub const Compiler = struct {
 
             const msg = try std.fmt.allocPrint(
                 self.alloc,
-                "{s} expects {d} argument(s), got {d}",
+                "{s} wants {d} argument(s), got {d}",
                 .{
                     fn_name,
                     sig.params.len,
@@ -721,7 +721,7 @@ pub const Compiler = struct {
                     const headline = if (display_name) |name| blk: {
                         break :blk try std.fmt.allocPrint(
                             self.alloc,
-                            "argument {d} (`{s}`) to `{s}` expects {s}, got {s}",
+                            "argument {d} (`{s}`) to `{s}` wants {s}, got {s}",
                             .{
                                 idx + 1,
                                 name,
@@ -733,7 +733,7 @@ pub const Compiler = struct {
                     } else blk: {
                         break :blk try std.fmt.allocPrint(
                             self.alloc,
-                            "argument {d} to `{s}` expects {s}, got {s}",
+                            "argument {d} to `{s}` wants {s}, got {s}",
                             .{
                                 idx + 1,
                                 fn_name,
@@ -950,7 +950,7 @@ pub const Compiler = struct {
             }
             const msg = try std.fmt.allocPrint(
                 self.alloc,
-                "call to `{s}` expects {d} argument(s), got {d}",
+                "call to `{s}` wants {d} argument(s), got {d}",
                 .{
                     fn_name,
                     sig.param_types.len,
@@ -1000,7 +1000,7 @@ pub const Compiler = struct {
                         const headline = if (sig.param_names[i].len == 0)
                             try std.fmt.allocPrint(
                                 self.alloc,
-                                "argument {d} to `{s}` expects {s}, got {s}",
+                                "argument {d} to `{s}` wants {s}, got {s}",
                                 .{
                                     i + 1,
                                     fn_name,
@@ -1011,7 +1011,7 @@ pub const Compiler = struct {
                         else
                             try std.fmt.allocPrint(
                                 self.alloc,
-                                "argument {d} (`{s}`) to `{s}` expects {s}, got {s}",
+                                "argument {d} (`{s}`) to `{s}` wants {s}, got {s}",
                                 .{
                                     i + 1,
                                     sig.param_names[i],

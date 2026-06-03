@@ -99,17 +99,57 @@ fn addGeneralCompletions(
                 .Struct
             else
                 .Variable;
-            const doc: ?[]const u8 = if (entry.value_ptr.isFunction())
-                if (revo.std_lib.api.find(name)) |spec|
-                    if (spec.doc.len > 0) spec.doc else null
-                else
-                    null
-            else
-                null;
-            const doc_copy: ?[]const u8 = if (doc) |d| arena.dupe(u8, d) catch null else null;
+
+            var insert_text: ?[]const u8 = null;
+            var insert_text_format: ?T.InsertTextFormat = null;
+            var detail: ?[]const u8 = null;
+            var doc_copy: ?[]const u8 = null;
+
+            if (entry.value_ptr.isFunction()) {
+                if (revo.std_lib.api.find(name)) |spec| {
+                    doc_copy = if (spec.doc.len > 0) (arena.dupe(u8, spec.doc) catch null) else null;
+                    // detail: name(p1: t1, p2: t2) -> ret
+                    {
+                        var buf = std.Io.Writer.Allocating.init(arena);
+                        try buf.writer.print("{s}(", .{name});
+                        for (spec.params, 0..) |p, i| {
+                            if (i > 0) try buf.writer.print(", ", .{});
+                            try buf.writer.print("{s}: {s}", .{ p[0], p[1] });
+                        }
+                        try buf.writer.print(")", .{});
+                        if (spec.ret.len > 0)
+                            try buf.writer.print(" -> {s}", .{spec.ret});
+                        detail = buf.written();
+                    }
+                    // insertText: name(${1:p1}, ${2:p2}) or name()
+                    if (spec.params.len > 0) {
+                        var sbuf = std.Io.Writer.Allocating.init(arena);
+                        try sbuf.writer.print("{s}(", .{name});
+                        for (spec.params, 1..) |p, i| {
+                            if (i > 1) try sbuf.writer.print(", ", .{});
+                            try sbuf.writer.writeByte('$');
+                            try sbuf.writer.writeByte('{');
+                            try sbuf.writer.print("{d}", .{i});
+                            try sbuf.writer.writeByte(':');
+                            try sbuf.writer.print("{s}", .{p[0]});
+                            try sbuf.writer.writeByte('}');
+                        }
+                        try sbuf.writer.print(")", .{});
+                        insert_text = sbuf.written();
+                        insert_text_format = .Snippet;
+                    } else {
+                        insert_text = try std.fmt.allocPrint(arena, "{s}()", .{name});
+                        insert_text_format = .PlainText;
+                    }
+                }
+            }
+
             items.append(arena, .{
                 .label = name,
                 .kind = kind,
+                .detail = detail,
+                .insertText = insert_text,
+                .insertTextFormat = insert_text_format,
                 .documentation = if (doc_copy) |d|
                     .{ .markup_content = .{ .kind = .markdown, .value = d } }
                 else
@@ -141,9 +181,55 @@ fn addGeneralCompletions(
             }
             if (!duped) {
                 const label = try arena.dupe(u8, sym.name);
+
+                var insert_text: ?[]const u8 = null;
+                var insert_text_format: ?T.InsertTextFormat = null;
+                var detail: ?[]const u8 = null;
+
+                if (kind == .Function) {
+                    if (try workspace.fnSig(arena, file_id, sym.name)) |sig| {
+                        // detail: name(p1: t1, p2: t2) -> ret
+                        {
+                            var buf = std.Io.Writer.Allocating.init(arena);
+                            try buf.writer.print("{s}(", .{sym.name});
+                            for (sig.params, 0..) |p, i| {
+                                if (i > 0) try buf.writer.print(", ", .{});
+                                try buf.writer.print("{s}: {s}", .{ p.name, p.type_name });
+                            }
+                            try buf.writer.print(")", .{});
+                            if (sig.return_type.len > 0)
+                                try buf.writer.print(" -> {s}", .{sig.return_type});
+                            detail = buf.written();
+                        }
+                        // insertText: name(${1:p1}, ${2:p2}) or name()
+                        if (sig.params.len > 0) {
+                            var sbuf = std.Io.Writer.Allocating.init(arena);
+                            try sbuf.writer.print("{s}(", .{sym.name});
+                            for (sig.params, 1..) |p, i| {
+                                if (i > 1) try sbuf.writer.print(", ", .{});
+                                try sbuf.writer.writeByte('$');
+                                try sbuf.writer.writeByte('{');
+                                try sbuf.writer.print("{d}", .{i});
+                                try sbuf.writer.writeByte(':');
+                                try sbuf.writer.print("{s}", .{p.name});
+                                try sbuf.writer.writeByte('}');
+                            }
+                            try sbuf.writer.print(")", .{});
+                            insert_text = sbuf.written();
+                            insert_text_format = .Snippet;
+                        } else {
+                            insert_text = try std.fmt.allocPrint(arena, "{s}()", .{sym.name});
+                            insert_text_format = .PlainText;
+                        }
+                    }
+                }
+
                 items.append(arena, .{
                     .label = label,
                     .kind = kind,
+                    .detail = detail,
+                    .insertText = insert_text,
+                    .insertTextFormat = insert_text_format,
                 }) catch return;
             }
         }

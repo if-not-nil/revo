@@ -36,7 +36,7 @@ const CacheEntry = struct {
 };
 
 /// cached fn sig: params as name+type pairs, return type, doc
-const FnSig = struct {
+pub const FnSig = struct {
     params: []ParamInfo,
     return_type: []const u8,
     doc: ?[]const u8,
@@ -851,6 +851,14 @@ pub const Workspace = struct {
             .symbols = try copySymbols(alloc, symbols),
             .dependencies = try self.copyDeps(alloc, id),
         };
+    }
+
+    /// lookup a function signature from the inspect cache for file `id`
+    /// returns null if file hasn't been inspected, or name isn't in sig_map
+    pub fn fnSig(self: *Workspace, alloc: std.mem.Allocator, id: FileId, name: []const u8) !?FnSig {
+        _ = try self.inspectDetailed(alloc, id, .{});
+        const cache = self.inspect_cache.getPtr(id) orelse return null;
+        return cache.sig_map.get(name);
     }
 
     /// check inspect cache and return cached Analysis if valid

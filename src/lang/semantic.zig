@@ -463,7 +463,7 @@ const SemanticChecker = struct {
                 const actual = try self.analyzeNode(call.args[i]);
                 const expected = sig.params[i];
                 if (!types_mod.canCoerce(actual, expected)) {
-                    const msg = try std.fmt.allocPrint(self.alloc, "argument {d} to `{s}` expects {s}, got {s}", .{
+                    const msg = try std.fmt.allocPrint(self.alloc, "argument {d} to `{s}` wants {s}, got {s}", .{
                         i + 1,
                         call.callee.expr.ident,
                         types_mod.typeName(expected),
