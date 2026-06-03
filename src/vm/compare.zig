@@ -40,6 +40,12 @@ pub fn compare(vm: *VM, lh: Data, rh: Data) std.math.Order {
         return std.math.order(l_tuple.items.len, r_tuple.items.len);
     };
 
+    // atoms
+    if (lh.asAtom()) |la| if (rh.asAtom()) |ra| {
+        if (la == ra) return .eq;
+        return if (la < ra) .lt else .gt;
+    };
+
     return .gt;
 }
 

@@ -1220,13 +1220,23 @@ fn callNonClosureFunction(
                 }
             }
 
-            const result = f.func(args, self) catch |err| {
-                if (self.runtime_message == null) {
-                    try self.setRuntimeMessage(
-                        @errorName(err),
-                    );
-                }
-                return error.Panic;
+            const result = f.func(args, self) catch |err| switch (err) {
+                error.OutOfMemory => {
+                    if (self.runtime_message == null)
+                        try self.setRuntimeMessage(@errorName(err));
+                    return error.Panic;
+                },
+                else => {
+                    const tag = try self.internAtom(@errorName(err));
+                    const items = [_]Data{
+                        Data.new.atom(revo.core_atoms.atom_id(.err)),
+                        Data.new.atom(tag),
+                    };
+                    const data = Data.new.tuple(try self.tuples.create(&items));
+                    try self.ensureAbsoluteSlot(base + instr.c);
+                    try self.writeRegisterFast(base, instr.c, data);
+                    return;
+                },
             };
 
             switch (result) {

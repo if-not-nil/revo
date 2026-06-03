@@ -2463,6 +2463,13 @@ test "error propagation stops at module level" {
     , .Panic, ":fail");
 }
 
+test "tonumber on invalid string returns err tuple and doesnt crash" {
+    try t.top_atom(
+        \\ const asdf = tonumber("asdf")
+        \\ assert_eq(asdf[0], :err)
+    , "err");
+}
+
 test "orelse unwraps after fallback" {
     try t.top_number(
         \\ (:err, :fail) orelse (:ok, 88)
