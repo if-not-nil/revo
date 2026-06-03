@@ -1036,7 +1036,8 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
     var w = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer w.deinit();
 
-    _ = try r.interface.streamDelimiter(&w.writer, delimiter);
+    _ = r.interface.streamDelimiter(&w.writer, delimiter) catch
+        return resultTuple(vm, .err, try vm.ownDataString("EndOfStream"));
     const result_str = try w.toOwnedSlice();
     return resultTuple(vm, .ok, try vm.adoptDataString(result_str));
 }
