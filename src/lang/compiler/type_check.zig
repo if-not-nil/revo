@@ -118,7 +118,7 @@ pub fn resolveTypeName(self: *Compiler, name: []const u8) TypeInfo {
     if (std.mem.eql(u8, name, "bool")) return .bool;
     if (std.mem.eql(u8, name, "void")) return .void;
     if (std.mem.eql(u8, name, "any")) return .any;
-    if (std.mem.eql(u8, name, "function")) return .any;
+    if (std.mem.eql(u8, name, "function")) return .{ .function = &types_mod.ANY_FN_SIG };
     if (name.len > 0 and name[0] == ':') return .{ .atom = name };
     if (self.type_aliases.get(name)) |aliased| return aliased;
     return .{ .struct_type = name };

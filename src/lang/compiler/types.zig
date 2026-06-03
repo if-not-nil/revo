@@ -45,7 +45,15 @@ pub const TypeInfo = union(enum) {
                 }
                 break :blk true;
             } else false,
-            .function => |f| if (other == .function) f == other.function else false,
+            .function => |f| if (other == .function) blk: {
+                const o = other.function;
+                // structural compare: pointer match is fast path
+                if (f == o) break :blk true;
+                if (!f.return_type.eql(o.return_type)) break :blk false;
+                if (f.params.len != o.params.len) break :blk false;
+                for (f.params, o.params) |a, b| if (!a.eql(b)) break :blk false;
+                break :blk true;
+            } else false,
             .any => true,
         };
     }
@@ -56,6 +64,9 @@ pub fn atomPayload(name: []const u8) []const u8 {
 }
 
 pub const FunctionSignature = struct { params: []const TypeInfo, return_type: TypeInfo };
+
+/// sentinel "any function" type,,,, matches any callable value
+pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any };
 
 pub fn typeName(T: TypeInfo) []const u8 {
     return switch (T) {
@@ -71,6 +82,21 @@ pub fn isNumeric(T: TypeInfo) bool {
 
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
     if (from.eql(to) or to == .any or from == .any) return true;
+    // function subtyping: contravariant params, covariant return
+    if (to == .function and from == .function) {
+        const to_sig = to.function;
+        const from_sig = from.function;
+        // sentinel "any function" take and give any
+        if (to_sig == &ANY_FN_SIG or from_sig == &ANY_FN_SIG) return true;
+        // ret t: from's return must fit to's return
+        if (!canCoerce(from_sig.return_type, to_sig.return_type)) return false;
+        // params: to's params must fit from's params
+        if (from_sig.params.len != to_sig.params.len) return false;
+        for (from_sig.params, to_sig.params) |fp, tp| {
+            if (!canCoerce(tp, fp)) return false;
+        }
+        return true;
+    }
     // :true and :false are bool
     if (to == .bool and from == .atom) {
         const name = atomPayload(from.atom);

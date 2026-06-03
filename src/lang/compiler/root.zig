@@ -639,6 +639,8 @@ pub const Compiler = struct {
         if (callee_type != .function) return;
 
         const sig = callee_type.function;
+        // "any function" sentinel,,,, can't validate params or return
+        if (sig == &types.ANY_FN_SIG) return;
         const fn_sig = if (callee.expr == .ident)
             state_mod.findFnSignature(self, callee.expr.ident)
         else

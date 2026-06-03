@@ -163,8 +163,8 @@ const SemanticChecker = struct {
         if (std.mem.eql(u8, name, "bool")) return .bool;
         if (std.mem.eql(u8, name, "void")) return .void;
         if (std.mem.eql(u8, name, "any")) return .any;
-        // TODO: temp; function as a type annotation means "any fn" and maps to .any
-        if (std.mem.eql(u8, name, "function")) return .any;
+        // function as a type annotation means "any function"
+        if (std.mem.eql(u8, name, "function")) return .{ .function = &types_mod.ANY_FN_SIG };
         if (name.len > 0 and name[0] == ':') return .{ .atom = name };
         if (self.type_aliases.get(name)) |aliased| return aliased;
         if (self.struct_layouts.get(name) != null) return .{ .struct_type = name };
@@ -247,6 +247,10 @@ const SemanticChecker = struct {
         if (sig.return_type == .any and body_type != .any) {
             sig.return_type = body_type;
             sig.sig.return_type = body_type;
+        }
+        // validate explicit return type against inferred body type
+        if (sig.return_type != .any and body_type != .void and !types_mod.canCoerce(body_type, sig.return_type)) {
+            try self.appendReturnMismatch(fn_expr.body.span, sig.return_type, body_type);
         }
         return .{ .function = &sig.sig };
     }
@@ -444,7 +448,13 @@ const SemanticChecker = struct {
         _ = span;
         const callee_type = self.inferExprType(call.callee);
         if (call.callee.expr == .ident and callee_type == .function) {
-            const sig = callee_type.function.*;
+            const sig_ptr = callee_type.function;
+            // "any function" sentinel,, can't validate params or return
+            if (sig_ptr == &types_mod.ANY_FN_SIG) {
+                for (call.args) |arg| _ = try self.analyzeNode(arg);
+                return .any;
+            }
+            const sig = sig_ptr.*;
             if (call.args.len != sig.params.len) {
                 const label = blk: {
                     if (call.args.len > sig.params.len) {
