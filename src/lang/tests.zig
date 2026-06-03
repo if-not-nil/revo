@@ -1051,6 +1051,49 @@ test "while body result is loop value after iterations" {
     , 2);
 }
 
+test "loop with locals inside does not corrupt loop result" {
+    try t.top_number(
+        \\ let a = 0
+        \\ let b = 1
+        \\ let c = 2
+        \\ let d = 3
+        \\ const x = loop do
+        \\     let e = 4
+        \\     let f = 5
+        \\     let g = 6
+        \\     break(42)
+        \\ end
+        \\ x
+    , 42);
+}
+
+test "for range with preceding locals and body locals" {
+    try t.top_number(
+        \\ let a = 0
+        \\ let b = 1
+        \\ let c = 2
+        \\ let d = 3
+        \\ let e = 4
+        \\ let f = 5
+        \\ const x = for i in 0..3 do
+        \\     let g = 6
+        \\     let h = 7
+        \\     break(42)
+        \\ end
+        \\ x
+    , 42);
+}
+
+test "for range with two params and preceding locals" {
+    try t.top_number(
+        \\ let a = 0
+        \\ const x = for i, idx in 0..3 do
+        \\     i + idx
+        \\ end
+        \\ x
+    , 5);
+}
+
 test "compile report carries span and message" {
     try t.expectCompileFailure(
         "break(1)",
