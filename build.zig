@@ -222,12 +222,9 @@ pub fn build(b: *std.Build) void {
 
         const revolt = b.addExecutable(.{ .name = "revolt", .root_module = revolt_root });
         const install_revolt = b.addInstallArtifact(revolt, .{});
-        b.getInstallStep().dependOn(&install_revolt.step);
 
         const revolt_step = b.step("lsp", "build the lsp");
         revolt_step.dependOn(&install_revolt.step);
-
-        check_step.dependOn(&revolt.step);
     }
 
     const write_files = b.addWriteFiles();

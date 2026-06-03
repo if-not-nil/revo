@@ -92,6 +92,13 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
                 &self.sched,
                 self.schedNowMonotonicNs(),
             });
+        } else if (has_waiting) {
+            // channel waiters without io backend, so yield to avoid busy-wait
+            std.Io.sleep(
+                self.runtime.io,
+                std.Io.Duration.fromNanoseconds(std.time.ns_per_ms),
+                .awake,
+            ) catch {};
         }
     }
     return .ok;

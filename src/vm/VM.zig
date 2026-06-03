@@ -170,7 +170,7 @@ gc_nursery_threshold: usize = 64 * 1024,
 debug_assert_types: bool = false,
 
 /// for table lookups
-icache: [32]ICacheEntry = undefined,
+icache: [256]ICacheEntry = undefined,
 
 // gc work state for incremental
 gc_mark_stack: std.ArrayList(MarkItem),
@@ -267,7 +267,6 @@ pub fn init(runtime: revo.Runtime) !VM {
     return vm;
 }
 
-/// TODO: use @sizeOf everywhere at callsite because this is all over the place
 pub inline fn noteGCPressure(self: *VM, bytes: usize) void {
     vm_gc.noteGCPressure(self, bytes);
 }
@@ -1621,15 +1620,6 @@ fn structFieldValueMatches(
     if (expected_atom == revo.core_atoms.num.atom_id()) return value.isNumber();
     if (expected_atom == revo.core_atoms.int.atom_id()) return value.isNumber();
     if (expected_atom == revo.core_atoms.float.atom_id()) return value.isNumber();
-
-    if (expected_atom == revo.core_atoms.bool.atom_id()) {
-        const true_id = revo.core_atoms.atom_id(.true);
-        const false_id = revo.core_atoms.atom_id(.false);
-        return if (value.asAtom()) |a|
-            a == true_id or a == false_id
-        else
-            false;
-    }
     const expected_name = self.atomName(expected_atom);
     return std.mem.eql(u8, expected_name, revo.std_lib.typeof(value));
 }
@@ -1874,12 +1864,11 @@ pub inline fn evalRegister(
                 return;
             };
             if (lhs.asStr()) |ls| if (rhs.asStr()) |rs| {
+                const l_str = self.stringValue(ls);
+                const r_str = self.stringValue(rs);
+                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
                 const result_str = try self.adoptDataStringNoDedup(
-                    try std.mem.concat(
-                        alloc,
-                        u8,
-                        &.{ self.stringValue(ls), self.stringValue(rs) },
-                    ),
+                    try std.mem.concat(alloc, u8, &.{ l_str, r_str }),
                 );
                 regWrite(slots, base, instr.a, result_str);
                 return;
@@ -1929,6 +1918,7 @@ pub inline fn evalRegister(
                 );
                 _ = std.math.mul(usize, str.len, count) catch
                     return error.OutOfMemory;
+                self.noteGCPressure(str.len * count + @sizeOf(Data));
                 const result = try alloc.alloc(u8, str.len * count);
                 for (0..count) |i|
                     @memcpy(result[i * str.len ..][0..str.len], str);
@@ -2030,32 +2020,14 @@ pub inline fn evalRegister(
         .add_int => {
             const lhs = regRead(slots, base, instr.b);
             const rhs = regRead(slots, base, instr.c);
-            // if (self.debug_assert_types) {
-            //     std.debug.assert(lhs.isNumber());
-            //     std.debug.assert(rhs.isNumber());
-            // }
             regWrite(slots, base, instr.a, Data.new.num(@as(f64, @bitCast(lhs.bits)) +
                 @as(f64, @bitCast(rhs.bits))));
         },
         .sub_int => {
             const lhs = regRead(slots, base, instr.b);
             const rhs = regRead(slots, base, instr.c);
-            if (self.debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            regWrite(
-                slots,
-                base,
-                instr.a,
-                Data.new.num(@as(
-                    f64,
-                    @bitCast(lhs.bits),
-                ) - @as(
-                    f64,
-                    @bitCast(rhs.bits),
-                )),
-            );
+            regWrite(slots, base, instr.a, Data.new.num(@as(f64, @bitCast(lhs.bits)) -
+                @as(f64, @bitCast(rhs.bits))));
         },
         .mul_int => {
             const lhs = regRead(slots, base, instr.b);
@@ -2064,18 +2036,9 @@ pub inline fn evalRegister(
                 std.debug.assert(lhs.isNumber());
                 std.debug.assert(rhs.isNumber());
             }
-            regWrite(
-                slots,
-                base,
-                instr.a,
-                Data.new.num(@as(
-                    f64,
-                    @bitCast(lhs.bits),
-                ) * @as(
-                    f64,
-                    @bitCast(rhs.bits),
-                )),
-            );
+            const li = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs.bits))));
+            const ri = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs.bits))));
+            regWrite(slots, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li * ri))));
         },
         .div_int => {
             const lhs = regRead(slots, base, instr.b);
@@ -2138,8 +2101,8 @@ pub inline fn evalRegister(
         inline .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => |op| {
             const lhs_val = regRead(slots, base, instr.b);
             const rhs_val = regRead(slots, base, instr.c);
-            const lhs: f64 = @bitCast(lhs_val.bits);
-            const rhs: f64 = @bitCast(rhs_val.bits);
+            const lhs = @as(i64, @intFromFloat(@as(f64, @bitCast(lhs_val.bits))));
+            const rhs = @as(i64, @intFromFloat(@as(f64, @bitCast(rhs_val.bits))));
             const result = switch (op) {
                 .eq_int => lhs == rhs,
                 .neq_int => lhs != rhs,
@@ -2201,7 +2164,7 @@ pub inline fn evalRegister(
             ))),
         ),
         .table_new => {
-            self.noteGCPressure(64);
+            self.noteGCPressure(@sizeOf(root.table.Table) + 64);
             regWrite(
                 slots,
                 base,
@@ -2633,9 +2596,12 @@ pub inline fn evalRegister(
             }
         },
         .closure => {
-            self.noteGCPressure(48);
             const proto = try self.functions.getPrototype(
                 instr.bx,
+            );
+            self.noteGCPressure(
+                @sizeOf(root.functions.Closure) +
+                    @sizeOf(root.functions.UpvalueID) * proto.upvalue_specs.len,
             );
             var upvalues = try std.ArrayList(
                 root.functions.UpvalueID,
