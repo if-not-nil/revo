@@ -1650,8 +1650,15 @@ const SymbolVisitor = struct {
     }
 
     fn addBinding(self: *@This(), b: lang.ast.Binding) void {
-        if (b.target.expr == .ident) {
-            self.addName(b.target.expr.ident, .binding, b.target.span);
+        switch (b.target.expr) {
+            .ident => |name| self.addName(name, .binding, b.target.span),
+            .tuple_pattern => |items| {
+                for (items) |item| {
+                    if (item.expr == .ident and !lang.ast.isDiscardName(item.expr.ident))
+                        self.addName(item.expr.ident, .binding, item.span);
+                }
+            },
+            else => {},
         }
     }
 

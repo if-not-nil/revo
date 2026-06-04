@@ -329,7 +329,13 @@ const SemanticChecker = struct {
     }
 
     fn analyzeBinding(self: *SemanticChecker, binding: ast.Binding, _: ast.Span) !types_mod.TypeInfo {
-        if (binding.target.expr != .ident) return .void;
+        if (binding.target.expr != .ident) {
+            if (binding.target.expr == .tuple_pattern) {
+                _ = try self.analyzeNode(binding.value);
+                return self.declarePatternNames(binding.target);
+            }
+            return .void;
+        }
         const name = binding.target.expr.ident;
         if (binding.value.expr == .fn_expr) {
             const sig = try self.makeFnSig(binding.value.expr.fn_expr);
@@ -369,6 +375,22 @@ const SemanticChecker = struct {
 
         try self.declare(name, value_type);
         return value_type;
+    }
+
+    fn declarePatternNames(self: *SemanticChecker, pattern: *const ast.Node) !types_mod.TypeInfo {
+        switch (pattern.expr) {
+            .ident => |name| {
+                if (!ast.isDiscardName(name))
+                    try self.declare(name, .any);
+            },
+            .tuple_pattern => |items| {
+                for (items) |item| {
+                    _ = try self.declarePatternNames(item);
+                }
+            },
+            else => {},
+        }
+        return .any;
     }
 
     fn analyzeAssign(self: *SemanticChecker, assign: anytype, span: ast.Span) !types_mod.TypeInfo {

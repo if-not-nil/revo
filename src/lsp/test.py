@@ -457,6 +457,26 @@ async def test_completion_kinds(client: LanguageClient):
     )
 
 
+@pytest.mark.asyncio(loop_scope="module")
+async def test_tuple_destructuring_no_diag(client: LanguageClient):
+    """`let w1, w2 = (1, 2)` doesnt die"""
+    uri = "file:///test/tuple_destructure.rv"
+    text = "let w1, w2 = (1, 2)\nprint(w1, w2)\n"
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=uri, language_id="revo", version=1, text=text,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+    diags = client.diagnostics.get(uri, [])
+    for d in diags:
+        print(f"  diag: {d.message!r} at {d.range}")
+    assert len(diags) == 0, f"expected no diagnostics, got {
+        len(diags)}: {[d.message for d in diags]}"
+
+
 @pytest.mark.skip(reason="TODO")
 @pytest.mark.asyncio(loop_scope="module")
 async def test_will_save_wait_until(client: LanguageClient):
