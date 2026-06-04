@@ -218,17 +218,6 @@ pub const core_atoms = enum(AtomID) {
     pub inline fn str(comptime a: @This()) []const u8 {
         return @tagName(a);
     }
-
-    pub const MM_BASE = @intFromEnum(@This().__index);
-    pub const MM_COUNT = @intFromEnum(@This().__call) - MM_BASE + 1;
-
-    pub const mm_data: [MM_COUNT]Data = blk: {
-        var arr: [MM_COUNT]Data = undefined;
-        for (0..MM_COUNT) |i| {
-            arr[i] = Data.new.atom(@intCast(MM_BASE + i));
-        }
-        break :blk arr;
-    };
 };
 
 /// (:f or :false or :nil or 0 or 0.0 or :undef or :missing) == :false

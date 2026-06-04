@@ -88,7 +88,7 @@ fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: @TypeOf(self.m
     if (mt.getRaw(key)) |value| {
         return .{ .value = value, .from_meta = true };
     }
-    if (mt.getRaw(revo.core_atoms.mm_data[0])) |indexer| {
+    if (mt.getRaw(Data.new.atom(revo.core_atoms.atom_id(.__index)))) |indexer| {
         return resolveIndex(self, object, key, indexer);
     }
     return null;
@@ -127,7 +127,7 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
                 if (mt.getRaw(key)) |value| {
                     return .{ .value = value, .from_meta = true };
                 }
-                if (mt.getRaw(revo.core_atoms.mm_data[0])) |next_indexer| {
+                if (mt.getRaw(Data.new.atom(revo.core_atoms.atom_id(.__index)))) |next_indexer| {
                     return resolveIndexDepth(self, Data.new.table(table_id), key, next_indexer, depth - 1);
                 }
             }

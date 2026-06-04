@@ -291,7 +291,7 @@ pub const Table = struct {
     hash: HashPart,
     metatable: ?memory.TableID = null,
     ic_version: usize = 0,
-    mm_flags: u8 = 0,
+    metamethod_cache: u64 = 0,
 
     pub fn init(alloc: std.mem.Allocator) !Table {
         return .{
@@ -334,7 +334,7 @@ pub const Table = struct {
         const mt_id = self.metatable.?;
         const mt = try vm.tables.get(mt_id);
 
-        if (mt.getRaw(revo.core_atoms.mm_data[1])) |newindex_method| {
+        if (mt.getRaw(Data.new.atom(revo.core_atoms.atom_id(.__newindex)))) |newindex_method| {
             if (newindex_method.asFunction()) |f| {
                 const table_data = Data.new.table(table_id);
                 _ = try vm.callFunction(Data.new.function(f), &[_]Data{ table_data, key, val });
@@ -347,7 +347,7 @@ pub const Table = struct {
 
     pub fn putRaw(self: *Table, key: Data, val: Data) !void {
         self.ic_version +%= 1;
-        self.mm_flags = 0;
+        self.metamethod_cache = 0;
         if (integerArrayIndex(key)) |idx| {
             if (idx < self.array.items.len) {
                 self.array.items[idx] = val;
@@ -386,7 +386,7 @@ pub const Table = struct {
         if (depth == 0) return null;
         if (self.metatable) |mt_id| {
             const mt = try vm.tables.get(mt_id);
-            if (mt.getRaw(revo.core_atoms.mm_data[0])) |index_method| {
+            if (mt.getRaw(Data.new.atom(revo.core_atoms.atom_id(.__index)))) |index_method| {
                 if (index_method.asTable()) |table_id| {
                     const index_table = try vm.tables.get(table_id);
                     return try index_table.getWithDepth(key, vm, depth - 1);

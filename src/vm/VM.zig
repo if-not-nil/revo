@@ -1021,6 +1021,15 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     return failure;
 }
 
+fn mmCacheMask(atom: mem.AtomID) ?u64 {
+    const mm_start = @intFromEnum(revo.core_atoms.__index);
+    const mm_end = @intFromEnum(revo.core_atoms.__call);
+    if (atom >= mm_start and atom <= mm_end) {
+        return @as(u64, 1) << @as(u6, @intCast(atom - mm_start));
+    }
+    return null;
+}
+
 pub fn getMetamethodByAtom(
     self: *VM,
     val: Data,
@@ -1029,19 +1038,15 @@ pub fn getMetamethodByAtom(
     const mt_id = try self.getMetatableId(val) orelse return null;
     const mt = try self.tables.get(mt_id);
 
-    const mm_idx = atom -% revo.core_atoms.MM_BASE;
-    if (mm_idx < revo.core_atoms.MM_COUNT) {
-        if (mt.mm_flags & (@as(u8, 1) << @as(u3, @intCast(mm_idx))) != 0)
-            return null;
+    if (mmCacheMask(atom)) |mask| {
+        if (mt.metamethod_cache & mask != 0) return null;
     }
 
-    const result = if (mm_idx < revo.core_atoms.MM_COUNT)
-        mt.getRaw(revo.core_atoms.mm_data[mm_idx])
-    else
-        mt.getRaw(Data.new.atom(atom));
-
-    if (result == null and mm_idx < revo.core_atoms.MM_COUNT) {
-        mt.mm_flags |= @as(u8, 1) << @as(u3, @intCast(mm_idx));
+    const result = mt.getRaw(Data.new.atom(atom));
+    if (result == null) {
+        if (mmCacheMask(atom)) |mask| {
+            mt.metamethod_cache |= mask;
+        }
     }
     return result;
 }
