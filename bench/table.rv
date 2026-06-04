@@ -1,0 +1,10 @@
+const n = 20000
+let a = {}
+
+const t = time.now()
+for i in 0..n do
+  a = a:merge({1,2,3})
+end
+
+print(a:len())
+print!("took %v", (time.now() - t)/1000)
