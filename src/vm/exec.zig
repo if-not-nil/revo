@@ -1033,6 +1033,10 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
                     }
                     self.returnRegister(.{ .op = .ret, .a = instr.a }) catch |e| return self.evalFailure(e);
 
+                    if (fiber.frames.items.len == 0) break :dispatch;
+                    base = fiber.frames.items[fiber.frames.items.len - 1].base;
+                    regs = fiber.registers[0..fiber.registers_len];
+
                     if (fiber.pc >= fiber.program.len) break :dispatch;
                     instr = fiber.program[fiber.pc];
                     fiber.pc += 1;

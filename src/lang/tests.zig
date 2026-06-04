@@ -534,13 +534,13 @@ test "method calls require obj:method(args)" {
 }
 
 test "plain struct print works" {
-    try t.top_nil(
+    try t.top_atom(
         \\ struct Box {
         \\     state = {},
         \\ }
         \\ const c = Box{}
         \\ print(c)
-    );
+    , "ok");
 }
 
 test "method call after train keeps receiver alive" {
