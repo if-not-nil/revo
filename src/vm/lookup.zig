@@ -94,7 +94,13 @@ fn resolveViaMetatable(self: *VM, object: Data, key: Data, mt_id: @TypeOf(self.m
     return null;
 }
 
+const MAX_TAG_LOOP = 200;
+
 pub fn resolveIndex(self: *VM, object: Data, key: Data, indexer: Data) VM.EvalError!?FieldLookup {
+    return resolveIndexDepth(self, object, key, indexer, MAX_TAG_LOOP);
+}
+
+fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: usize) VM.EvalError!?FieldLookup {
     switch (indexer.tag()) {
         .function => {
             const fn_id = indexer.asFunction().?;
@@ -116,12 +122,13 @@ pub fn resolveIndex(self: *VM, object: Data, key: Data, indexer: Data) VM.EvalEr
                 return .{ .value = value, .from_meta = true };
             }
             if (index_table.metatable) |mt_id| {
+                if (depth == 0) return null;
                 const mt = try self.tables.get(mt_id);
                 if (mt.getRaw(key)) |value| {
                     return .{ .value = value, .from_meta = true };
                 }
                 if (mt.getRaw(Data.new.atom(revo.core_atoms.atom_id(.__index)))) |next_indexer| {
-                    return resolveIndex(self, Data.new.table(table_id), key, next_indexer);
+                    return resolveIndexDepth(self, Data.new.table(table_id), key, next_indexer, depth - 1);
                 }
             }
             return null;
@@ -148,6 +155,8 @@ pub fn callField(self: *VM, argc: usize) VM.EvalError!void {
     };
 
     if (!lookup.from_meta) {
+        const saved_len = fiber.registers_len;
+        errdefer fiber.registers_len = saved_len;
         fiber.registers[key_slot] = lookup.value;
         std.mem.copyForwards(
             Data,
@@ -159,6 +168,12 @@ pub fn callField(self: *VM, argc: usize) VM.EvalError!void {
         return;
     }
 
+    const saved_object = fiber.registers[object_slot];
+    const saved_key = fiber.registers[key_slot];
+    errdefer {
+        fiber.registers[object_slot] = saved_object;
+        fiber.registers[key_slot] = saved_key;
+    }
     fiber.registers[object_slot] = lookup.value;
     fiber.registers[key_slot] = object;
     try callViaStackLayout(self, object_slot, argc + 1);

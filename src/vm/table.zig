@@ -163,6 +163,7 @@ pub const Table = struct {
     hash_order: std.ArrayList(Data),
     metatable: ?memory.TableID = null,
     ic_version: usize = 0,
+    metamethod_cache: u64 = 0,
 
     pub fn init(alloc: std.mem.Allocator) !Table {
         return .{
@@ -220,6 +221,7 @@ pub const Table = struct {
 
     pub fn putRaw(self: *Table, key: Data, val: Data) !void {
         self.ic_version +%= 1;
+        self.metamethod_cache = 0;
         if (integerArrayIndex(key)) |idx| {
             if (idx < self.array.items.len) {
                 self.array.items[idx] = val;
@@ -251,14 +253,21 @@ pub const Table = struct {
         return self.hash_entries.get(key);
     }
 
+    const MAX_TAG_LOOP = 200;
+
     pub fn get(self: *Table, key: Data, vm: *revo.VM) !?Data {
+        return self.getWithDepth(key, vm, MAX_TAG_LOOP);
+    }
+
+    fn getWithDepth(self: *Table, key: Data, vm: *revo.VM, depth: usize) !?Data {
         if (self.getRaw(key)) |value| return value;
+        if (depth == 0) return null;
         if (self.metatable) |mt_id| {
             const mt = try vm.tables.get(mt_id);
             if (mt.getRaw(Data.new.atom(revo.core_atoms.atom_id(.__index)))) |index_method| {
                 if (index_method.asTable()) |table_id| {
                     const index_table = try vm.tables.get(table_id);
-                    return try index_table.get(key, vm);
+                    return try index_table.getWithDepth(key, vm, depth - 1);
                 }
                 if (index_method.asFunction() != null) return null;
             }
