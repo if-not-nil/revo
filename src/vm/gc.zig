@@ -267,6 +267,10 @@ pub inline fn markRoots(self: *VM) void {
             if (waiter.value) |v| pushMark(self, v);
         }
     }
+
+    for (self.metatables) |mt_id| {
+        if (mt_id) |id| self.tables.mark(id, self);
+    }
 }
 
 pub inline fn pushMark(self: *VM, data: revo.Data) void {
