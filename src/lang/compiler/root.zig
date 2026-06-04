@@ -1306,6 +1306,12 @@ pub const Compiler = struct {
                 binding.value,
                 "binding",
             );
+            if (kind != .global) {
+                // declare locals before compiling value so their
+                // slots sit below the tuple register
+                try values.predeclarePatternLocals(self, binding.target, kind);
+                state_mod.reserveLocalSlots(self);
+            }
         }
 
         try self.compile(binding.value, true);

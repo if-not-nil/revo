@@ -160,6 +160,26 @@ test "tuple destructuring" {
     try testing.top_true(":true");
 }
 
+test "tuple destructuring assmt doesnt die" {
+    try testing.top_number(
+        \\ let (a, b) = (1, 2)
+        \\ a = 123
+        \\ a
+    , 123);
+    try testing.top_number(
+        \\ let (a, b) = (1, 2)
+        \\ b
+    , 2);
+    try testing.top_number(
+        \\ const (a, b) = (1, 2)
+        \\ b
+    , 2);
+    try testing.top_number(
+        \\ const a, b = (1, 2)
+        \\ b
+    , 2);
+}
+
 test "tuple length" {
     try testing.top_number(
         \\ const t = (1, 2, 3, 4, 5)
