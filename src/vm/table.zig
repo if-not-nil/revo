@@ -187,9 +187,13 @@ pub const Table = struct {
             if (self.buckets.len == 0) return null;
             const mask = @as(u32, @intCast(self.buckets.len - 1));
             var idx = @as(u32, @truncate(hashKey(key))) & mask;
+            const limit: u32 = self.count; // bound probes to avoid infinite loop on full table
+            var probes: u32 = 0;
             while (self.buckets[idx].status == .occupied) {
                 if (keyEq(self.buckets[idx].key, key)) return idx;
                 idx = (idx + 1) & mask;
+                probes += 1;
+                if (probes >= limit) return null;
             }
             return null;
         }
