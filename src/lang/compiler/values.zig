@@ -537,13 +537,17 @@ pub fn compileStruct(
                 return self.fail(.ParseError, &tmp_node, msg);
             } else {
                 try seen.put(fname, true);
+                const field_type: types_mod.TypeInfo = if (item.field.type_name) |tn|
+                    try types_mod.evalTypeExpr(self, tn)
+                else
+                    types_mod.TypeInfo.any;
                 try field_defs.append(self.alloc, .{
                     .name = item.field.name,
-                    .field_type = if (item.field.type_name) |tn|
-                        types_mod.resolveTypeName(self, tn)
-                    else
-                        types_mod.TypeInfo.any,
-                    .type_name = item.field.type_name,
+                    .field_type = field_type,
+                    .type_name = if (item.field.type_name) |tn| switch (tn.kind) {
+                        .named => |n| n,
+                        else => types_mod.typeName(field_type),
+                    } else null,
                     .default_val = if (item.field.default_value) |dv|
                         evalConstNode(self, dv)
                     else

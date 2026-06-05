@@ -1684,7 +1684,7 @@ pub const Compiler = struct {
                 .initialized = true,
                 .type_name = if (param.type_name) |tn| switch (tn.kind) {
                     .named => |n| n,
-                    else => null,
+                    else => types.typeName(try types.evalTypeExpr(self, tn)),
                 } else null,
                 .type_explicit = param.type_name != null,
             };

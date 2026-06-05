@@ -167,7 +167,7 @@ pub const TableEntry = struct {
 pub const StructField = struct {
     name: []const u8,
     name_span: Span,
-    type_name: ?[]const u8 = null,
+    type_name: ?*TypeExpr = null,
     default_value: ?*Node = null,
 };
 
@@ -539,7 +539,10 @@ pub const Node = struct {
                     switch (item) {
                         .field => |field| {
                             try writer.print("(field {s}", .{field.name});
-                            if (field.type_name) |t| try writer.print(":{s}", .{t});
+                            if (field.type_name) |t| {
+                                try writer.writeByte(':');
+                                try t.printAt(writer, null);
+                            }
                             if (field.default_value) |value| {
                                 try sep(writer, child(depth), 1);
                                 try value.printAt(writer, child(child(depth)));

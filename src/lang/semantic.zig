@@ -304,10 +304,17 @@ const SemanticChecker = struct {
                     continue;
                 }
                 try seen.put(field.name, {});
+                const field_type: types_mod.TypeInfo = if (field.type_name) |tn|
+                    try types_mod.evalTypeExpr(self, tn)
+                else
+                    .any;
                 try fields.append(self.alloc, .{
                     .name = field.name,
-                    .type_name = field.type_name,
-                    .field_type = if (field.type_name) |tn| types_mod.resolveTypeName(self, tn) else .any,
+                    .type_name = if (field.type_name) |tn| switch (tn.kind) {
+                        .named => |n| n,
+                        else => types_mod.typeName(field_type),
+                    } else null,
+                    .field_type = field_type,
                 });
             },
             .binding => |b| {
