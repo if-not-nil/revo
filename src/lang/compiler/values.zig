@@ -103,6 +103,7 @@ pub fn compileLocalBinding(
     if (type_name != null) {
         if (type_check.storedTypeName(self, inferred_type)) |stored_name|
             state.setLocalType(self, slot, stored_name);
+        state.setLocalTypeExplicit(self, slot);
     }
 
     try self.regDupe();
@@ -287,6 +288,35 @@ fn compileAssignSimple(
 
                 try state.setLocalTypeHint(self, name, inferred_type);
             } else if (try state.resolveUpvalue(self, name)) |slot| {
+                type_check.validateUpvalueAssignmentType(self, name, value) catch |err| switch (err) {
+                    error.TypeError => {
+                        const actual = type_check.inferExprType(self, value);
+                        var fn_idx = self.functions.items.len - 1;
+                        var type_name: ?[]const u8 = null;
+                        while (fn_idx > 0) {
+                            fn_idx -= 1;
+                            const loc = state.resolveLocalVarIn(self, fn_idx, name) orelse continue;
+                            type_name = loc.type_name;
+                            break;
+                        }
+                        const tn = type_name orelse "unknown";
+                        const msg = try std.fmt.allocPrint(
+                            self.alloc,
+                            "`{s}` wants {s}, got {s}",
+                            .{ name, tn, types_mod.typeName(actual) },
+                        );
+                        return self.setFailureParts(
+                            .ParseError,
+                            .{
+                                .span = value.span,
+                                .role = .primary,
+                                .message = try std.fmt.allocPrint(self.alloc, "not {s}!", .{tn}),
+                            },
+                            msg,
+                            &.{},
+                        );
+                    },
+                };
                 try self.emit(.store_upval, slot);
             } else {
                 if (self.functions.items.len == 1) {

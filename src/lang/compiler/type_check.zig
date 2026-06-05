@@ -125,3 +125,24 @@ pub fn validateAssignmentType(self: *Compiler, target: *const Node, value: *cons
         else => {},
     }
 }
+
+pub fn validateUpvalueAssignmentType(self: *Compiler, name: []const u8, value: *const Node) !void {
+    var fn_idx = self.functions.items.len - 1;
+    while (fn_idx > 0) {
+        fn_idx -= 1;
+        const local = state_mod.resolveLocalVarIn(self, fn_idx, name) orelse continue;
+        if (!local.type_explicit) return;
+        const type_hints = &self.functions.items[fn_idx].type_hints;
+        var i = type_hints.items.len;
+        while (i > 0) {
+            i -= 1;
+            const hint = type_hints.items[i];
+            if (std.mem.eql(u8, hint.name, name)) {
+                const actual = inferExprType(self, value);
+                try checkType(self.alloc, hint.type_info, actual, value.span);
+                return;
+            }
+        }
+        return;
+    }
+}

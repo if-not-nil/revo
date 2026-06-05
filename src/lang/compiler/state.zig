@@ -19,6 +19,7 @@ pub const LocalVar = struct {
     initialized: bool,
     kind: LocalValueKind = .unknown,
     type_name: ?[]const u8 = null,
+    type_explicit: bool = false,
     table_fields: ?[]const []const u8 = null,
 };
 
@@ -246,6 +247,26 @@ pub fn setLocalType(self: *Compiler, slot: LocalSlot, type_name: ?[]const u8) vo
     }
 }
 
+pub fn setLocalTypeExplicit(self: *Compiler, slot: LocalSlot) void {
+    const state = currentFunctionState(self) orelse return;
+    var i = state.locals.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (state.locals.items[i].slot == slot) {
+            state.locals.items[i].type_explicit = true;
+            break;
+        }
+    }
+    i = state.all_locals.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (state.all_locals.items[i].slot == slot) {
+            state.all_locals.items[i].type_explicit = true;
+            break;
+        }
+    }
+}
+
 pub fn setLocalTableFields(self: *Compiler, slot: LocalSlot, fields: ?[]const []const u8) void {
     const state = currentFunctionState(self) orelse return;
     var i = state.locals.items.len;
@@ -384,7 +405,7 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
     errdefer param_types.deinit(self.alloc);
     for (params) |p| try param_types.append(self.alloc, if (p.type_name) |tn| switch (tn.kind) {
         .named => |n| n,
-        else => @tagName(tn.kind),
+        else => null,
     } else null);
 
     sig.* = .{

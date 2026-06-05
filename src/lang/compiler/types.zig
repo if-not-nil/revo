@@ -300,7 +300,9 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type),
         .block => |exprs| inferBlockResultType(ctx, exprs),
         .return_expr => .void,
-        .loop_expr, .while_loop, .for_loop => .void,
+        .loop_expr => |v| inferExprType(ctx, v.body),
+        .for_loop => |v| inferExprType(ctx, v.body),
+        .while_loop => |v| inferExprType(ctx, v.body),
         .break_expr => .void,
         .try_expr => |inner| inferExprType(ctx, inner),
         .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
@@ -1105,4 +1107,52 @@ test "not operator on bool stays bool" {
         \\ let b: bool = not (1 == 1)
         \\ b
     );
+}
+
+test "implicit return validates block-local variable type" {
+    try t.expectCompileError(
+        \\ fn f() -> int do
+        \\   let x = "hello"
+        \\   x
+        \\ end
+    , .ParseError);
+}
+
+test "loop expression infers correct return type" {
+    try t.expectCompileError(
+        \\ fn f() -> string do
+        \\   for i in 0..10 do i end
+        \\ end
+    , .ParseError);
+}
+
+test "upvalue assignment respects type annotation" {
+    try t.expectCompileError(
+        \\ const outer = fn() do
+        \\     let x: int = 5
+        \\     const inner = fn() do x = "hello" end
+        \\ end
+    , .ParseError);
+}
+
+test "dynamic callee validates argument types" {
+    try t.expectCompileError(
+        \\ const f: function = fn(x: int) x
+        \\ f("hello")
+    , .ParseError);
+}
+
+test "tuple pattern binding respects type annotation" {
+    try t.expectCompileError(
+        \\ const tup: string = (1, 2)
+    , .ParseError);
+}
+
+test "for loop expression produces int type" {
+    try t.top_number(
+        \\ fn f() -> int do
+        \\   for i in 0..5 do i end
+        \\ end
+        \\ f()
+    , 4);
 }

@@ -106,11 +106,33 @@ pub fn compileRangeLoopBody(
     // declare before loop_check so range_next can fill them each iteration
     if (params.len >= 1 and !ast.isDiscardName(params[0].name)) {
         value_slot = try state.declareLocal(self, params[0].name, false);
+        if (params[0].type_name) |tn| {
+            const declared = try type_check.evalTypeExpr(self, tn);
+            if (declared != .int) {
+                const msg = try std.fmt.allocPrint(
+                    self.alloc,
+                    "range loop variable must be int, got {s}",
+                    .{@tagName(declared)},
+                );
+                return self.setFailureParts(.ParseError, null, msg, &.{});
+            }
+        }
         state.setLocalType(self, value_slot.?, "int");
         try state.setLocalTypeHint(self, params[0].name, .int);
     }
     if (params.len == 2 and !ast.isDiscardName(params[1].name)) {
         index_slot = try state.declareLocal(self, params[1].name, false);
+        if (params[1].type_name) |tn| {
+            const declared = try type_check.evalTypeExpr(self, tn);
+            if (declared != .int) {
+                const msg = try std.fmt.allocPrint(
+                    self.alloc,
+                    "range loop variable must be int, got {s}",
+                    .{@tagName(declared)},
+                );
+                return self.setFailureParts(.ParseError, null, msg, &.{});
+            }
+        }
         state.setLocalType(self, index_slot.?, "int");
         try state.setLocalTypeHint(self, params[1].name, .int);
     }

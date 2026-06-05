@@ -130,6 +130,7 @@ pub const Compiler = struct {
     // register cache for upvalue loads, cleared per-block in compileBlock
     upvalue_cache: std.AutoHashMap(usize, usize) = undefined,
     type_aliases: std.StringHashMap(types.TypeInfo),
+    fn_return_type: ?[]const u8 = null,
 
     pub fn init(
         vm: *VM,
@@ -862,6 +863,7 @@ pub const Compiler = struct {
                 );
             },
             else => {
+                try self.validateTypedCall(call.callee, call.args);
                 try self.compile(call.callee, true);
                 for (call.args) |arg| try self.compile(arg, true);
                 try self.emit(
@@ -1457,6 +1459,37 @@ pub const Compiler = struct {
             };
             if (idx + 1 < exprs.len and self.active_registers > before) try self.regRelease();
         }
+        if (pushed_scope and self.fn_return_type != null and exprs.len > 0) {
+            const last = exprs[exprs.len - 1];
+            if (last.expr != .return_expr) {
+                const actual = type_check.inferExprType(self, last);
+                const expected = types.resolveTypeName(self, self.fn_return_type.?);
+                type_check.checkType(self.alloc, expected, actual, last.span) catch |err| switch (err) {
+                    error.TypeError => {
+                        const actual_str = try types.formatType(self.alloc, actual);
+                        const expected_str = try types.formatType(self.alloc, expected);
+                        const msg = try std.fmt.allocPrint(
+                            self.alloc,
+                            "return type mismatch: wanted {s}, got {s}",
+                            .{ self.fn_return_type.?, actual_str },
+                        );
+                        return self.setFailureParts(
+                            .ParseError,
+                            .{
+                                .span = last.span,
+                                .role = .primary,
+                                .message = try std.fmt.allocPrint(self.alloc, "return type not {s} (got {s})", .{
+                                    expected_str,
+                                    actual_str,
+                                }),
+                            },
+                            msg,
+                            &.{},
+                        );
+                    },
+                };
+            }
+        }
         if (pushed_scope) state_mod.popScope(self);
     }
 
@@ -1545,6 +1578,24 @@ pub const Compiler = struct {
                 binding.value,
                 "binding",
             );
+            if (binding.type_name) |tn| {
+                type_check.validateBindingType(self, tn, binding.value) catch |err| switch (err) {
+                    error.TypeError => {
+                        const actual = type_check.inferExprType(self, binding.value);
+                        const msg = try std.fmt.allocPrint(
+                            self.alloc,
+                            "binding wants {s}, got {s}",
+                            .{ tn, types.typeName(actual) },
+                        );
+                        return self.setFailureParts(
+                            .ParseError,
+                            .{ .span = binding.value.span, .role = .primary, .message = msg },
+                            msg,
+                            &.{},
+                        );
+                    },
+                };
+            }
             try values.declarePatternLocals(
                 self,
                 binding.target,
@@ -1621,8 +1672,9 @@ pub const Compiler = struct {
                 .initialized = true,
                 .type_name = if (param.type_name) |tn| switch (tn.kind) {
                     .named => |n| n,
-                    else => @tagName(tn.kind),
+                    else => null,
                 } else null,
+                .type_explicit = param.type_name != null,
             };
             s.locals.append(self.alloc, local) catch |err| {
                 s.deinit(self.alloc);
@@ -1668,13 +1720,20 @@ pub const Compiler = struct {
         self.max_registers = params.len;
         self.upvalue_cache.clearRetainingCapacity();
         if (own_sig) try s.fn_signatures.put(name, sig);
+        self.fn_return_type = if (effective_return_type) |rt| switch (rt.kind) {
+            .named => |n| n,
+            else => @tagName(rt.kind),
+        } else null;
+        defer self.fn_return_type = null;
         try self.compile(body, true);
         if (effective_return_type) |rt| {
-            const rt_name = switch (rt.kind) {
-                .named => |n| n,
-                else => @tagName(rt.kind),
-            };
-            try validateImplicitReturnType(self, body, rt_name);
+            if (body.expr != .block) {
+                const rt_name = switch (rt.kind) {
+                    .named => |n| n,
+                    else => @tagName(rt.kind),
+                };
+                try validateImplicitReturnType(self, body, rt_name);
+            }
         } else {
             const inferred_type = type_check.inferExprType(self, body);
             const inferred_type_str = try self.alloc.dupe(u8, types.typeName(inferred_type));
