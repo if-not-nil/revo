@@ -11,7 +11,7 @@ the server builds on the great work done by the zls team, being [lsp-kit][#refer
 to build the server binary:
 
 ```bash
-zig build revolt
+zig build lsp
 ```
 
 the binary is then gonna be at `zig-out/bin/revolt`

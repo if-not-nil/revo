@@ -251,7 +251,7 @@ references, document symbols, and workspace symbols.
 to build:
 
 ```bash
-zig build revolt
+zig build lsp
 ```
 
 the binary lands at `zig-out/bin/revolt`
