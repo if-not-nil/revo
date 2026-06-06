@@ -181,6 +181,9 @@ pub const DeclKind = enum {
     let,
     global,
     struct_decl,
+    test_decl,
+    suite_decl,
+    proc_decl,
     type_alias_decl,
 };
 

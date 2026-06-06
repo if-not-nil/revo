@@ -791,15 +791,15 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
         },
         .kw_test => {
             const test_block = try self.parseTest(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = test_block, .kind = ast.DeclKind.struct_decl } });
+            return self.allocExpr(start.span(), .{ .decl = .{ .inner = test_block, .kind = ast.DeclKind.test_decl } });
         },
         .kw_suite => {
             const suite = try self.parseSuite(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = suite, .kind = ast.DeclKind.struct_decl } });
+            return self.allocExpr(start.span(), .{ .decl = .{ .inner = suite, .kind = ast.DeclKind.suite_decl } });
         },
         .kw_proc => {
             const proc_macro = try self.parseProc(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = proc_macro, .kind = ast.DeclKind.struct_decl } });
+            return self.allocExpr(start.span(), .{ .decl = .{ .inner = proc_macro, .kind = ast.DeclKind.proc_decl } });
         },
         .kw_type => {
             if (!self.check(.ident)) return error.UnexpectedToken;
