@@ -48,6 +48,7 @@ pub const Kind = enum {
     UnexpectedToken,
     ExpectedIdentifier,
     ExpectedMatchArm,
+    InvalidNumber,
 };
 
 pub const ParseResult = union(enum) {
@@ -385,7 +386,13 @@ const Parser = struct {
     fn parsePrefix(self: *Parser) anyerror!*Node {
         const token = self.advance();
         return switch (token.type) {
-            .number => self.allocExpr(token.span(), .{ .number = .{ .value = try std.fmt.parseFloat(f64, token.text), .is_float = std.mem.indexOfAny(u8, token.text, ".eE") != null } }),
+            .number => blk: {
+                const value = std.fmt.parseFloat(f64, token.text) catch {
+                    try self.recordError(.InvalidNumber, "invalid number literal", token.span());
+                    break :blk self.allocExpr(token.span(), .{ .number = .{ .value = 0, .is_float = false } });
+                };
+                break :blk self.allocExpr(token.span(), .{ .number = .{ .value = value, .is_float = std.mem.indexOfAny(u8, token.text, ".eE") != null } });
+            },
             .string => self.allocExpr(token.span(), .{ .string = token.text }),
             .multiline_string => self.allocExpr(token.span(), .{ .multiline_string = token.text }),
             .hash => self.allocExpr(token.span(), .{ .hash = token.text[1..] }),

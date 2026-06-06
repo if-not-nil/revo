@@ -806,6 +806,7 @@ pub const Compiler = struct {
                     if (try self.tryCompileBoundMethodCall(
                         field,
                         call.args,
+                        call.implicit_self,
                     )) return;
                     try self.compile(field.object, true);
                     try self.@"const"(
@@ -1077,6 +1078,7 @@ pub const Compiler = struct {
         self: *Compiler,
         field: anytype,
         args: []const *Node,
+        implicit_self: bool,
     ) InternalLowerError!bool {
         const module_name = switch (type_check.inferExprType(
             self,
@@ -1114,9 +1116,10 @@ pub const Compiler = struct {
 
         try self.emit(.load_stdlib_global, module_atom);
         try self.emit(.table_get_atom, method_atom);
-        try self.compile(field.object, true);
+        if (implicit_self)
+            try self.compile(field.object, true);
         for (args) |arg| try self.compile(arg, true);
-        try self.emit(.call, @intCast(args.len + 1));
+        try self.emit(.call, @intCast(args.len + @intFromBool(implicit_self)));
         return true;
     }
 

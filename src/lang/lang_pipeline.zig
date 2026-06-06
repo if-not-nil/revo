@@ -219,6 +219,7 @@ pub fn parseSource(allocator: std.mem.Allocator, source: []const u8) !*Node {
             .ExpectedIdentifier => error.ExpectedIdentifier,
             .ExpectedMatchArm => error.ExpectedMatchArm,
             .LexUnknown => error.ParseFailed,
+            .InvalidNumber => error.ParseFailed,
         },
     };
 }
