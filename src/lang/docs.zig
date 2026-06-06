@@ -46,6 +46,7 @@ const DocVisitor = struct {
             return;
         }
         try self.seen.put(key, {});
+        errdefer self.alloc.free(name);
         const f = node.expr.fn_expr;
         try self.items.append(self.alloc, .{
             .name = name,

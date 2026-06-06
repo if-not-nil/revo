@@ -286,7 +286,7 @@ const Lexer = struct {
             else if (self.matchChar('>'))
                 self.makeToken(.arrow, start, self.pos, line, column)
             else if (std.ascii.isDigit(self.peek()))
-                self.lexNumberSigned(start, line, column)
+                self.lexNumber(start, line, column)
             else
                 self.makeToken(.minus, start, self.pos, line, column),
             '*' => if (self.matchChar('='))
@@ -450,16 +450,6 @@ const Lexer = struct {
         return self.makeToken(.number, start, self.pos, line, column);
     }
 
-    fn lexNumberSigned(self: *Lexer, start: usize, line: u32, column: u32) Token {
-        while (std.ascii.isDigit(self.peek())) _ = self.advance();
-        if (self.peek() == '.' and self.peekN(1) != '.' and std.ascii.isDigit(self.peekN(1))) {
-            _ = self.advance();
-            while (std.ascii.isDigit(self.peek())) _ = self.advance();
-        }
-        if (isIdentContinue(self.peek())) _ = self.advance();
-        return self.makeToken(.number, start, self.pos, line, column);
-    }
-
     fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
         self.pending_error_span = .{ .start = start, .end = start + 1, .line = line, .column = column };
         var buf = try std.ArrayList(u8).initCapacity(self.alloc, 16);
@@ -596,11 +586,6 @@ const Lexer = struct {
                     min_indent = count;
                 }
             }
-        }
-
-        // strip trailing empty lines
-        while (lines.items.len > 0 and lines.items[lines.items.len - 1].len == 0) {
-            _ = lines.pop();
         }
 
         const strip = min_indent orelse 0;

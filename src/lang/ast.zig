@@ -617,7 +617,7 @@ pub fn spanFromNodes(items: []const *Node, fallback: Span) Span {
     return Span.merge(items[0].span, items[items.len - 1].span);
 }
 
-// depth ariht helpers
+// depth arithmetic helpers
 fn child(depth: ?usize) ?usize {
     return if (depth) |d| d + 1 else null;
 }
@@ -1145,6 +1145,8 @@ pub fn walkExpr(
         } }),
         .match_expr => |v| walkMatch(allocator, expr.span, v, Transform, ctx),
         .table => |entries| walkTable(allocator, expr.span, entries, Transform, ctx),
+        // not good: range_literal, try_expr, orelse_expr, struct_def,
+        // test_block, test_suite, type_alias fall through here (bug)
         else => expr,
     };
 }

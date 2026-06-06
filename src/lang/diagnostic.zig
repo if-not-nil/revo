@@ -290,6 +290,8 @@ const SpanLine = struct {
     span_col: u32,
 };
 
+// not good: renderSpanBlock and renderBoxSpanBlock share ~80% of their
+// context-extraction and bookend logic but are separate codepaths
 fn countDigits(value: u32) usize {
     var n = value;
     var digits: usize = 1;
