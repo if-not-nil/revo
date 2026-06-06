@@ -22,6 +22,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
             .return_addr = @intCast(self.mainFiber().program.len),
             .base = 0,
             .register_count = 16,
+            .program = self.mainFiber().program,
         });
         const fiber = self.mainFiber();
         fiber.registers_len = 16;

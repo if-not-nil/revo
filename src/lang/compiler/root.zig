@@ -131,6 +131,7 @@ pub const Compiler = struct {
     upvalue_cache: std.AutoHashMap(usize, usize) = undefined,
     type_aliases: std.StringHashMap(types.TypeInfo),
     fn_return_type: ?[]const u8 = null,
+    pending_prototypes: std.ArrayList(revo.PrototypeID),
 
     pub fn init(
         vm: *VM,
@@ -158,6 +159,7 @@ pub const Compiler = struct {
             .value_stack = try std.ArrayList(*ir.IrInst).initCapacity(arena, 32),
             .upvalue_cache = std.AutoHashMap(usize, usize).init(arena),
             .type_aliases = std.StringHashMap(types.TypeInfo).init(arena),
+            .pending_prototypes = try std.ArrayList(revo.PrototypeID).initCapacity(arena, 4),
         };
     }
 
@@ -193,6 +195,16 @@ pub const Compiler = struct {
         const lowered = try self.lowerToVerifyBytecode();
         const instr_copy = try self.runtime_alloc.dupe(Instruction, lowered);
         defer self.alloc.free(lowered);
+
+        if (self.pending_prototypes.items.len > 0) {
+            const segment_copy = try self.runtime_alloc.dupe(Instruction, lowered);
+            const segment_id = try self.vm.functions.addBytecodeSegment(segment_copy);
+            for (self.pending_prototypes.items) |proto_id| {
+                self.vm.functions.prototypes.items[proto_id].segment_id = segment_id;
+            }
+            self.pending_prototypes.items.len = 0;
+        }
+
         const spans_copy = try self.runtime_alloc.dupe(ast.Span, self.spans.items);
         return .{ .instructions = instr_copy, .spans = spans_copy };
     }
@@ -1830,6 +1842,7 @@ pub const Compiler = struct {
             .const_locals = const_locals,
             .const_local_bits = &.{},
         });
+        try self.pending_prototypes.append(self.alloc, proto_id);
         try self.emit(.closure, proto_id);
 
         if (!own_sig) {

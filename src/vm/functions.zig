@@ -24,6 +24,7 @@ pub const Frame = struct {
     result_register: Register = 0,
     register_count: RegisterCount = 0,
     closure_id: ?mem.FunctionID = null,
+    program: []const revo.Instruction = &.{},
 };
 
 pub const NativeFn = *const fn (args: []const Data, vm: *revo.VM) NativeResult;
@@ -49,6 +50,7 @@ pub const UpvalueSpec = struct {
 
 pub const Prototype = struct {
     addr: ProgramCounter,
+    segment_id: usize = 0,
     arity: u8,
     register_count: RegisterCount = 0,
     name: []const u8,
@@ -60,6 +62,7 @@ pub const Prototype = struct {
 pub const Closure = struct {
     // cache prototype id and register_count so VM can size frames without a prototype lookup
     prototype: PrototypeID,
+    segment_id: usize = 0,
     arity: u8,
     addr: ProgramCounter,
     register_count: RegisterCount,
@@ -103,6 +106,7 @@ pub const FunctionPool = struct {
     upvalues: std.ArrayList(?Upvalue),
     upvalue_marks: std.DynamicBitSet,
     upvalue_dead: std.ArrayList(UpvalueID),
+    segments: std.ArrayList([]const revo.Instruction),
 
     pub fn init(alloc: std.mem.Allocator) !FunctionPool {
         return .{
@@ -114,6 +118,7 @@ pub const FunctionPool = struct {
             .upvalues = try std.ArrayList(?Upvalue).initCapacity(alloc, 16),
             .upvalue_marks = try std.DynamicBitSet.initEmpty(alloc, 64),
             .upvalue_dead = try std.ArrayList(UpvalueID).initCapacity(alloc, 0),
+            .segments = try std.ArrayList([]const revo.Instruction).initCapacity(alloc, 4),
         };
     }
 
@@ -131,6 +136,7 @@ pub const FunctionPool = struct {
             self.alloc.free(proto.const_locals);
             self.alloc.free(proto.const_local_bits);
         }
+        for (self.segments.items) |seg| self.alloc.free(seg);
         self.functions.deinit(self.alloc);
         self.function_marks.deinit();
         self.function_dead.deinit(self.alloc);
@@ -138,6 +144,7 @@ pub const FunctionPool = struct {
         self.upvalues.deinit(self.alloc);
         self.upvalue_marks.deinit();
         self.upvalue_dead.deinit(self.alloc);
+        self.segments.deinit(self.alloc);
     }
 
     pub inline fn create(self: *FunctionPool, func: Function) !mem.FunctionID {
@@ -193,12 +200,19 @@ pub const FunctionPool = struct {
         const proto = try self.getPrototype(prototype_id);
         return self.create(.{ .closure = .{
             .prototype = prototype_id,
+            .segment_id = proto.segment_id,
             .arity = proto.arity,
             .addr = proto.addr,
             .register_count = proto.register_count,
             .name = proto.name,
             .upvalues = try self.alloc.dupe(UpvalueID, upvalues),
         } });
+    }
+
+    pub fn addBytecodeSegment(self: *FunctionPool, instructions: []const revo.Instruction) !usize {
+        const id = self.segments.items.len;
+        try self.segments.append(self.alloc, instructions);
+        return id;
     }
 
     pub inline fn createUpvalue(self: *FunctionPool, upvalue: Upvalue) !UpvalueID {

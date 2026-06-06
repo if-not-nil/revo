@@ -864,7 +864,7 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
 
         try fiber.frames.append(
             self.runtime.alloc,
-            .{ .return_addr = @intCast(fiber.program.len), .base = 0 },
+            .{ .return_addr = @intCast(fiber.program.len), .base = 0, .program = fiber.program },
         );
     }
 
@@ -1400,6 +1400,9 @@ pub fn callRegister(
                             );
                         }
 
+                        if (self.functions.segments.items.len > closure.segment_id) {
+                            fiber.program = self.functions.segments.items[closure.segment_id];
+                        }
                         fiber.pc = closure.addr;
                         return;
                     }
@@ -1427,8 +1430,12 @@ pub fn callRegister(
                         .result_register = instr.c,
                         .register_count = closure.register_count,
                         .closure_id = closure_id,
+                        .program = fiber.program,
                     },
                 );
+                if (self.functions.segments.items.len > closure.segment_id) {
+                    fiber.program = self.functions.segments.items[closure.segment_id];
+                }
                 fiber.pc = closure.addr;
             },
             else => self.callNonClosureFunction(
@@ -1710,6 +1717,7 @@ pub fn returnRegister(
         try self.closeUpvalues(frame.base);
 
     fiber.pc = frame.return_addr;
+    fiber.program = frame.program;
 
     // check if returning to exit frame
     // only one frame left after pop
@@ -1803,7 +1811,11 @@ pub inline fn spawnRegister(
     }
 
     const child_id: FiberID = self.sched.fibers.items.len;
-    var child = try Fiber.init(self.runtime.alloc, child_id, fiber.program);
+    const child_program = if (self.functions.segments.items.len > closure.segment_id)
+        self.functions.segments.items[closure.segment_id]
+    else
+        fiber.program;
+    var child = try Fiber.init(self.runtime.alloc, child_id, child_program);
     errdefer child.deinit(self.runtime.alloc);
     child.debug_info_id = fiber.debug_info_id;
     child.state = .ready;
@@ -1831,6 +1843,7 @@ pub inline fn spawnRegister(
         .result_register = 0,
         .register_count = closure.register_count,
         .closure_id = child_closure_id,
+        .program = child.program,
     });
     child.pc = closure.addr;
 
