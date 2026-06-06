@@ -8,7 +8,12 @@ the server builds on the great work done by the zls team, being [lsp-kit][#refer
 
 # installation
 
-to build the server binary:
+release builds of `revo` bundle the LSP! run `revo --lsp` to start it.
+
+note: debug builds skip it by default (use `-Doptimize=ReleaseFast` to enable, or
+`-Dnolsp` to exclude from any build).
+
+to build the standalone server binary:
 
 ```bash
 zig build lsp

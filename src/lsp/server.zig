@@ -9,14 +9,14 @@ const T = lsp.types;
 const ws = lang.workspace;
 
 pub fn main(init: std.process.Init) !void {
-    try runLsp(init.gpa, init.io);
+    try runLsp(init.gpa, init.io, .script, "");
 }
 
-pub fn runLsp(gpa: std.mem.Allocator, io: std.Io) !void {
+pub fn runLsp(gpa: std.mem.Allocator, io: std.Io, mode: revo.lang.RunMode, project_root: []const u8) !void {
     var read_buf: [1024]u8 = undefined;
     var stdio = lsp.Transport.Stdio.init(&read_buf, .stdin(), .stdout());
 
-    var handler = try Handler.init(gpa, &stdio.transport, io);
+    var handler = try Handler.init(gpa, &stdio.transport, io, mode, project_root);
     handler.ws.attachVm(&handler.vm);
     defer handler.deinit();
 
@@ -39,8 +39,9 @@ const Handler = struct {
     uri_to_file: std.StringHashMapUnmanaged(ws.FileId) = .empty, // uri -> ws id
     file_to_uri: std.AutoHashMapUnmanaged(ws.FileId, []const u8) = .empty, // ws id -> uri
     deinited: bool = false,
+    project: lang.Project = .{ .mode = .script, .root = "" },
 
-    fn init(alloc: std.mem.Allocator, transport: *lsp.Transport, io: std.Io) !Handler {
+    fn init(alloc: std.mem.Allocator, transport: *lsp.Transport, io: std.Io, mode: revo.lang.RunMode, project_root: []const u8) !Handler {
         var vm = try revo.VM.init(.{ .alloc = alloc, .io = io });
         errdefer vm.deinit();
         var workspace = try ws.Workspace.init(alloc);
@@ -51,6 +52,7 @@ const Handler = struct {
             .io = io,
             .ws = workspace,
             .vm = vm,
+            .project = .{ .mode = mode, .root = project_root },
         };
     }
 
@@ -154,7 +156,7 @@ const Handler = struct {
             params.textDocument.uri["file://".len..]
         else
             params.textDocument.uri;
-        const id = try h.ws.open(path, params.textDocument.text);
+        const id = try h.project.open(&h.ws, path, params.textDocument.text);
         try h.registerDoc(params.textDocument.uri, id);
         try h.publishDiagnostics(arena, params.textDocument.uri, id);
     }

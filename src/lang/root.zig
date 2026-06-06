@@ -70,6 +70,7 @@ pub const Token = lexer.Token;
 pub const TokenType = lexer.TokenType;
 pub const LexError = lexer.LexError;
 pub const LexResult = lexer.LexResult;
+pub const Project = @import("Project.zig").Project;
 
 test {
     _ = @import("ast.zig");

@@ -131,7 +131,9 @@ fn runMain(init: std.process.Init) !void {
     const config = try parseArgs(init, args);
 
     if (config.mode == .lsp) {
-        return try @import("lsp_main").runLsp(init.gpa, init.io);
+        var project = revo.lang.Project.detectFromCwd(init.io, init.gpa);
+        defer project.deinit(init.gpa);
+        return try @import("lsp_main").runLsp(init.gpa, init.io, project.mode, project.root);
     }
 
     // if script path `-` then explicit stdin;
@@ -235,42 +237,14 @@ fn handleBuildError(_: std.process.Init, gpa: Allocator, source_name: []const u8
     revo.printBuildError(gpa, .{ .name = source_name, .text = source_text }, err);
 }
 
-fn detectRunMode(name: []const u8, io: std.Io) revo.lang.RunMode {
-    const dir = std.fs.path.dirname(name) orelse return .script;
-    const gpa = std.heap.page_allocator;
-
-    const abs_dir = std.Io.Dir.realPathFileAlloc(std.Io.Dir.cwd(), io, dir, gpa) catch return .script;
-    defer gpa.free(abs_dir);
-
-    var cur: []const u8 = abs_dir;
-    while (true) {
-        for (&[_][]const u8{ "lib.json", "exe.json" }) |manifest| {
-            const joined = std.fs.path.join(gpa, &.{ cur, manifest }) catch continue;
-            defer gpa.free(joined);
-            _ = std.Io.Dir.statFile(std.Io.Dir.cwd(), io, joined, .{}) catch continue;
-            return .project;
-        }
-        const parent = std.fs.path.dirname(cur) orelse break;
-        if (std.mem.eql(u8, parent, cur)) break;
-        cur = parent;
-    }
-    return .script;
-}
-
 fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: []const u8, source_text: []const u8, test_mode: bool) !Artifact {
     var ws = try revo.lang.Workspace.initWithVm(vm, gpa);
     defer ws.deinit();
 
-    const mode = detectRunMode(source_name, init.io);
-    const project_root = if (mode == .project)
-        std.fs.path.dirname(source_name) orelse ""
-    else
-        "";
-    const file_id = try ws.openWith(source_name, source_text, .{
-        .mode = mode,
-        .project_root = project_root,
-    });
-    var analysis = ws.analyzeDetailed(gpa, file_id, .{ .test_mode = test_mode, .mode = mode }) catch |err| {
+    var project = revo.lang.Project.detect(source_name, init.io, gpa);
+    defer project.deinit(gpa);
+    const file_id = try project.open(&ws, source_name, source_text);
+    var analysis = ws.analyzeDetailed(gpa, file_id, .{ .test_mode = test_mode, .mode = project.mode }) catch |err| {
         printError(init, "compilation - {}", .{err});
         return error.CompilationError;
     };
@@ -590,58 +564,4 @@ fn compileToBytecode(init: std.process.Init, gpa: Allocator, arena: Allocator, p
 
 pub fn printRuntimeFailure(init: std.process.Init, failure: revo.EvalFailure, source: []const u8) void {
     revo.printEvalError(init.gpa, source, failure);
-}
-
-test "detectRunMode on script file" {
-    const mode = detectRunMode("/tmp/nonexistent/script.rv", std.testing.io);
-    try std.testing.expect(mode == .script);
-}
-
-test "detectRunMode on project file" {
-    var dir = std.testing.tmpDir(.{});
-    defer dir.cleanup();
-
-    try dir.dir.writeFile(std.testing.io, .{ .sub_path = "lib.json", .data = "" });
-
-    const abs_dir = try dir.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
-    defer std.testing.allocator.free(abs_dir);
-    const source_path = try std.fs.path.join(std.testing.allocator, &.{ abs_dir, "main.rv" });
-    defer std.testing.allocator.free(source_path);
-
-    const mode = detectRunMode(source_path, std.testing.io);
-    try std.testing.expect(mode == .project);
-}
-
-test "detectRunMode finds project manifest in ancestor directory" {
-    var dir = std.testing.tmpDir(.{});
-    defer dir.cleanup();
-
-    try dir.dir.writeFile(std.testing.io, .{ .sub_path = "exe.json", .data = "" });
-    try dir.dir.createDir(std.testing.io, "apps", .default_dir);
-    try dir.dir.createDir(std.testing.io, "apps/nested", .default_dir);
-
-    const abs_dir = try dir.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
-    defer std.testing.allocator.free(abs_dir);
-    const source_path = try std.fs.path.join(std.testing.allocator, &.{ abs_dir, "apps", "nested", "main.rv" });
-    defer std.testing.allocator.free(source_path);
-
-    const mode = detectRunMode(source_path, std.testing.io);
-    try std.testing.expect(mode == .project);
-}
-
-test "detectRunMode ignores manifests outside source ancestors" {
-    var dir = std.testing.tmpDir(.{});
-    defer dir.cleanup();
-
-    try dir.dir.createDir(std.testing.io, "project", .default_dir);
-    try dir.dir.createDir(std.testing.io, "scripts", .default_dir);
-    try dir.dir.writeFile(std.testing.io, .{ .sub_path = "project/lib.json", .data = "" });
-
-    const abs_dir = try dir.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
-    defer std.testing.allocator.free(abs_dir);
-    const source_path = try std.fs.path.join(std.testing.allocator, &.{ abs_dir, "scripts", "main.rv" });
-    defer std.testing.allocator.free(source_path);
-
-    const mode = detectRunMode(source_path, std.testing.io);
-    try std.testing.expect(mode == .script);
 }

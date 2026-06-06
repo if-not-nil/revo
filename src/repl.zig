@@ -232,19 +232,24 @@ pub const Session = struct {
     gpa: Allocator,
     workspace: revo.lang.Workspace,
     source_acc: std.ArrayList(u8),
+    project: revo.lang.Project = .{ .mode = .script, .root = "" },
 
-    pub fn init(vm: *VM, gpa: Allocator) !Session {
+    pub fn init(vm: *VM, gpa: Allocator, io: ?std.Io) !Session {
+        var project = if (io) |i| revo.lang.Project.detectFromCwd(i, gpa) else revo.lang.Project{ .mode = .script, .root = "" };
+        errdefer project.deinit(gpa);
         return .{
             .vm = vm,
             .gpa = gpa,
             .workspace = try revo.lang.Workspace.initWithVm(vm, gpa),
             .source_acc = try std.ArrayList(u8).initCapacity(gpa, 256),
+            .project = project,
         };
     }
 
     pub fn deinit(self: *Session) void {
         self.source_acc.deinit(self.gpa);
         self.workspace.deinit();
+        self.project.deinit(self.gpa);
     }
 
     fn clear(self: *Session) void {
@@ -480,7 +485,7 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
         }
     }
 
-    var session = try Session.init(vm, gpa);
+    var session = try Session.init(vm, gpa, init.io);
     defer session.deinit();
 
     while (true) {
@@ -512,7 +517,7 @@ const TestEnv = struct {
 fn initTestEnv(alloc: std.mem.Allocator) !TestEnv {
     const vm = try alloc.create(revo.VM);
     vm.* = try revo.VM.init(.{ .alloc = alloc, .io = std.testing.io });
-    const session = try Session.init(vm, alloc);
+    const session = try Session.init(vm, alloc, std.testing.io);
     const out = std.Io.Writer.Allocating.init(alloc);
     revo.pretty.supports_color = false;
     return TestEnv{ .vm = vm, .session = session, .out = out };

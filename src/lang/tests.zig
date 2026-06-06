@@ -167,6 +167,7 @@ test "recursive typed calls stay specialized" {
 test {
     _ = @import("expander.zig").testing;
     _ = std.testing.refAllDecls(@import("compiler/root.zig"));
+    _ = std.testing.refAllDecls(@import("Project.zig"));
 }
 
 //

@@ -109,6 +109,7 @@ pub fn build(b: *std.Build) void {
                 .target = target,
                 .optimize = optimize,
             });
+            lsp_noop_mod.addImport("revo", revo_mod);
             exe_root.addImport("lsp_main", lsp_noop_mod);
         }
     } else {
@@ -117,6 +118,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
+        lsp_noop_mod.addImport("revo", revo_mod);
         exe_root.addImport("lsp_main", lsp_noop_mod);
     }
 
@@ -224,6 +226,7 @@ pub fn build(b: *std.Build) void {
                     .target = release_target,
                     .optimize = .ReleaseFast,
                 });
+                lsp_noop_mod_release.addImport("revo", revo_mod);
                 release_mod.addImport("lsp_main", lsp_noop_mod_release);
             }
         } else {
@@ -232,6 +235,7 @@ pub fn build(b: *std.Build) void {
                 .target = release_target,
                 .optimize = .ReleaseFast,
             });
+            lsp_noop_mod_release.addImport("revo", revo_mod);
             release_mod.addImport("lsp_main", lsp_noop_mod_release);
         }
 
