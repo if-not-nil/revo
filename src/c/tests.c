@@ -225,11 +225,52 @@ int main(void) {
   }
 
   //
+  // revo_table_remove
+  //
+  T("revo_table_remove removes by key");
+  {
+    RevoData rt = revo_table_create(vm);
+    uint64_t rtid = revo_table_id(rt);
+    RevoData rk = revo_atom_val(ra_ok);
+    revo_table_set(vm, rtid, rk, revo_num(42.0));
+    assert(revo_is_number(revo_table_get(vm, rtid, rk)));
+    int removed = revo_table_remove(vm, rtid, rk);
+    assert(removed);
+    assert(revo_is_nil(revo_table_get(vm, rtid, rk)));
+    // second remove returns false
+    assert(!revo_table_remove(vm, rtid, rk));
+    OK;
+  }
+
+  T("revo_table_remove integer key from array");
+  {
+    ok = erevo_eval(vm, "test", "{10, 20, 30}", &val);
+    if (!ok) FAIL(erevo_vm_last_error(vm));
+    assert(ok);
+    assert(revo_is_table(val));
+    uint64_t rtid = revo_table_id(val);
+    assert(revo_table_len(vm, rtid) == 3);
+    int removed = revo_table_remove(vm, rtid, revo_num(0.0));
+    assert(removed);
+    assert(revo_table_len(vm, rtid) == 3);  // array slots aren't compacted
+    assert(revo_is_nil(revo_table_get(vm, rtid, revo_num(0.0))));
+    OK;
+  }
+
+  T("revo_table_remove missing key");
+  {
+    RevoData rt = revo_table_create(vm);
+    assert(!revo_table_remove(vm, revo_table_id(rt), revo_num(99.0)));
+    OK;
+  }
+
+  //
   // revo_call
   //
   T("revo_call a compiled function");
   ok = erevo_eval(vm, "test", "fn(x) x + 1", &val);
-  if (!ok) FAIL(erevo_vm_last_error(vm));
+  if (!ok)
+    FAIL(erevo_vm_last_error(vm));
   assert(ok);
   assert(revo_is_function(val));
   RevoData call_args[1] = {revo_num(41.0)};
@@ -242,7 +283,8 @@ int main(void) {
 
   T("revo_call with no args");
   ok = erevo_eval(vm, "test", "fn() 99", &val);
-  if (!ok) FAIL(erevo_vm_last_error(vm));
+  if (!ok)
+    FAIL(erevo_vm_last_error(vm));
   assert(ok);
   call_ok = revo_call(vm, val, 0, NULL, &call_result);
   assert(call_ok);
@@ -252,29 +294,34 @@ int main(void) {
 
   T("revo_call returning string");
   ok = erevo_eval(vm, "test", "fn() \"hello\"", &val);
-  if (!ok) FAIL(erevo_vm_last_error(vm));
+  if (!ok)
+    FAIL(erevo_vm_last_error(vm));
   assert(ok);
   call_ok = revo_call(vm, val, 0, NULL, &call_result);
   assert(call_ok);
   assert(revo_is_string(call_result));
   assert(revo_string_length(vm, revo_string_id(call_result)) == 5);
-  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello", 5) == 0);
+  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello",
+                5) == 0);
   OK;
 
   T("revo_call returning multi-word string");
   ok = erevo_eval(vm, "test", "fn() \"hello from c\"", &val);
-  if (!ok) FAIL(erevo_vm_last_error(vm));
+  if (!ok)
+    FAIL(erevo_vm_last_error(vm));
   assert(ok);
   call_ok = revo_call(vm, val, 0, NULL, &call_result);
   assert(call_ok);
   assert(revo_is_string(call_result));
   assert(revo_string_length(vm, revo_string_id(call_result)) == 12);
-  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello from c", 12) == 0);
+  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)),
+                "hello from c", 12) == 0);
   OK;
 
   T("revo_call multiple args");
   ok = erevo_eval(vm, "test", "fn(a, b, c) a + b * c", &val);
-  if (!ok) FAIL(erevo_vm_last_error(vm));
+  if (!ok)
+    FAIL(erevo_vm_last_error(vm));
   assert(ok);
   RevoData multi_args[3] = {revo_num(10.0), revo_num(3.0), revo_num(4.0)};
   call_ok = revo_call(vm, val, 3, multi_args, &call_result);
@@ -366,7 +413,7 @@ int main(void) {
   T("revo_bool_val");
   assert(revo_bool_val(revo_bool(1)) == 1);
   assert(revo_bool_val(revo_bool(0)) == 0);
-  assert(revo_bool_val(revo_num(1.0)) == 0);  // not a bool
+  assert(revo_bool_val(revo_num(1.0)) == 0); // not a bool
   assert(revo_bool_val(revo_nil()) == 0);
   OK;
 

@@ -267,6 +267,40 @@ pub const Table = struct {
             self.last = new_last;
         }
 
+        fn remove(self: *HashPart, key: Data) bool {
+            const idx = self.lookup(key) orelse return false;
+            const mask = @as(u32, @intCast(self.buckets.len - 1));
+
+            // unlink from insertion-order list
+            if (self.buckets[idx].prev) |p| self.buckets[p].next = self.buckets[idx].next else self.first = self.buckets[idx].next;
+            if (self.buckets[idx].next) |n| self.buckets[n].prev = self.buckets[idx].prev else self.last = self.buckets[idx].prev;
+
+            self.buckets[idx].status = .empty;
+            self.count -= 1;
+
+            // repair probe sequence: re-place elements displaced by the removed one
+            var hole = idx;
+            var probe = (hole + 1) & mask;
+            while (self.buckets[probe].status == .occupied) : (probe = (probe + 1) & mask) {
+                const natural = @as(u32, @truncate(hashKey(self.buckets[probe].key) & mask));
+                // if elements natural position is in (hole, probe] it was not displaced by hole
+                const in_range = if (hole < probe)
+                    natural > hole and natural <= probe
+                else
+                    natural > hole or natural <= probe;
+                if (in_range) continue;
+
+                // move probe entry into hole
+                self.buckets[hole] = self.buckets[probe];
+                if (self.buckets[hole].prev) |p| self.buckets[p].next = hole else self.first = hole;
+                if (self.buckets[hole].next) |n| self.buckets[n].prev = hole else self.last = hole;
+                self.buckets[probe].status = .empty;
+                hole = probe;
+            }
+
+            return true;
+        }
+
         fn clone(self: *const HashPart, alloc: std.mem.Allocator) !HashPart {
             if (self.buckets.len == 0) return .{};
             const cp = try alloc.dupe(Bucket, self.buckets);
@@ -395,6 +429,20 @@ pub const Table = struct {
 
     pub inline fn getRawAtom(self: *Table, id: memory.AtomID) ?Data {
         return self.hash.get(Data.new.atom(id));
+    }
+
+    pub fn removeRaw(self: *Table, key: Data) bool {
+        self.ic_version +%= 1;
+        if (integerArrayIndex(key)) |idx| {
+            if (idx >= self.array.items.len) return false;
+            self.array.items[idx] = Data.new.nil();
+            return true;
+        }
+        return self.hash.remove(key);
+    }
+
+    pub fn remove(self: *Table, key: Data) bool {
+        return self.removeRaw(key);
     }
 
     const MAX_TAG_LOOP = 200;

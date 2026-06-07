@@ -95,6 +95,15 @@ pub export fn revo_table_get(vm_ptr: *anyopaque, table_id: u64, key: CRevoData) 
     return nil_val;
 }
 
+/// delete a table entry, returns true if key existed
+pub export fn revo_table_remove(vm_ptr: *anyopaque, table_id: u64, key: CRevoData) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tid: memory.TableID = @intCast(table_id);
+    const key_data = key.toData(v) catch return false;
+    const tbl = v.tables.get(tid) catch return false;
+    return tbl.remove(key_data);
+}
+
 /// insert or update a table entry, silently ignores errors
 pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: CRevoData, value: CRevoData) callconv(.c) void {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
