@@ -42,10 +42,17 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    const all_mods = [_]*std.Build.Module{ vm_mod, revo_mod };
+    const c_mod = b.addModule("c", .{
+        .root_source_file = b.path("src/c/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const all_mods = [_]*std.Build.Module{ vm_mod, revo_mod, c_mod };
     const imports = [_]struct { []const u8, *std.Build.Module }{
         .{ "revo", revo_mod },
         .{ "vm", vm_mod },
+        .{ "c", c_mod },
     };
     for (all_mods) |mod|
         for (imports) |imp|
@@ -153,10 +160,10 @@ pub fn build(b: *std.Build) void {
     }
 
     //
-    // erevo library
+    // erevo library & header
     //
     const erevo_mod = b.addModule("erevo", .{
-        .root_source_file = b.path("src/erevo.zig"),
+        .root_source_file = b.path("src/c/erevo.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -168,11 +175,17 @@ pub fn build(b: *std.Build) void {
         .root_module = erevo_mod,
     });
 
-    const lib_step = b.step("lib", "build the erevo library");
-    const install_lib = b.addInstallArtifact(lib, .{});
-    lib_step.dependOn(&install_lib.step);
+    const write_files = b.addWriteFiles();
+    const bindings = @import("src/c/bindings.zig");
+    const header_data = bindings.data(b.allocator) catch |err| {
+        std.debug.print("failed to autogen header: {any}\n", .{err});
+        std.process.exit(1);
+    };
+    const header_path = write_files.add("revo.h", header_data.items);
 
-    check_step.dependOn(&b.addTest(.{ .root_module = erevo_mod, .filters = test_filters }).step);
+    const lib_step = b.step("lib", "build the erevo library");
+    lib_step.dependOn(&b.addInstallArtifact(lib, .{}).step);
+    lib_step.dependOn(&b.addInstallFile(header_path, "include/revo.h").step);
 
     //
     // lsp
@@ -198,20 +211,6 @@ pub fn build(b: *std.Build) void {
         revolt_step.dependOn(&install_revolt.step);
     }
 
-    //
-    // header
-    //
-    const write_files = b.addWriteFiles();
-    const bindings = @import("src/bindings.zig");
-    const header_data = bindings.data(b.allocator) catch |err| {
-        std.debug.print("failed to autogen header: {any}\n", .{err});
-        std.process.exit(1);
-    };
-    const header_path = write_files.add("revo.h", header_data.items);
-
-    const install_header_file = b.addInstallHeaderFile(header_path, "revo.h");
-    install_header_file.step.dependOn(&write_files.step);
-    lib_step.dependOn(&install_header_file.step);
 }
 
 /// returns the real lsp server module if available and enabled, otherwise a noop stub

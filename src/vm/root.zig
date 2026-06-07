@@ -6,7 +6,6 @@ pub const NativeError = @import("debug.zig").NativeError;
 pub const EvalErrorKind = @import("debug.zig").EvalErrorKind;
 pub const EvalFailure = @import("debug.zig").EvalFailure;
 pub const EvalResult = @import("debug.zig").EvalResult;
-pub const ffi = @import("ffi.zig");
 pub const functions = @import("functions.zig");
 pub const GlobalID = @import("VM.zig").GlobalID;
 pub const interner = @import("interner.zig");

@@ -1,3 +1,6 @@
+//
+// auto-generate revo.h from callconv(.c) exports
+//
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -34,7 +37,7 @@ const TRANSLATOR = [_]TypeTranslation{
     .{ .zig = "ErevoData", .c = "RevoData" },
 };
 
-/// entrypoint, called by build.zig
+/// builds revo.h
 pub fn data(allocator: Allocator) !std.ArrayList(u8) {
     var header = try std.ArrayList(u8).initCapacity(allocator, 4096);
     errdefer header.deinit(allocator);
@@ -64,7 +67,7 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         functions.deinit(allocator);
     }
 
-    inline for (.{ "vm/ffi.zig", "erevo.zig" }) |mod| {
+    inline for (.{ "ffi.zig", "erevo.zig" }) |mod| {
         const source = @embedFile(mod);
         const source_z = try allocator.dupeZ(u8, source);
         defer allocator.free(source_z);
@@ -208,7 +211,7 @@ fn parseModuleForCallconvC(
         var param_buffer: [1]std.zig.Ast.Node.Index = undefined;
         const fn_proto = ast.fullFnProto(&param_buffer, decl_idx) orelse continue;
 
-        // for callconv(.c)
+        // must have callconv(.c)
         if (fn_proto.ast.callconv_expr.unwrap()) |conv| {
             if (!std.mem.eql(u8, ".c", ast.getNodeSource(conv))) continue;
         } else continue;
@@ -216,11 +219,8 @@ fn parseModuleForCallconvC(
         const name_token = fn_proto.name_token orelse continue;
         const fn_name = ast.tokenSlice(name_token);
 
-        // all revo_ and erevo_ go
         const expected_prefix = if (category == .revo) "revo_" else "erevo_";
-        if (!std.mem.startsWith(u8, fn_name, expected_prefix)) {
-            continue;
-        }
+        if (!std.mem.startsWith(u8, fn_name, expected_prefix)) continue;
 
         try functions.append(allocator, .{
             .name = try allocator.dupe(u8, fn_name),
@@ -317,19 +317,20 @@ const ParamInfo = struct {
 fn translateType(allocator: Allocator, zig_type: []const u8) ![]const u8 {
     const trimmed = std.mem.trim(u8, zig_type, " \t\n");
 
+    // exact match first
     for (TRANSLATOR) |entry| {
         if (std.mem.eql(u8, trimmed, entry.zig)) {
             return try allocator.dupe(u8, entry.c);
         }
     }
 
-    // prefix matches for ptr types
+    // prefix match for pointer types
     for (TRANSLATOR) |entry| {
         if (std.mem.startsWith(u8, trimmed, entry.zig)) {
             return try allocator.dupe(u8, entry.c);
         }
     }
 
-    // should be alright
+    // fallback: pass through as-is
     return try allocator.dupe(u8, trimmed);
 }

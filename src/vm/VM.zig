@@ -1140,7 +1140,7 @@ fn callNonClosureFunction(
             const args = fiber.registers[args_start..args_end];
 
             var c_args = try self.runtime.alloc.alloc(
-                revo.ffi.CRevoData,
+                root.functions.CRevoData,
                 args.len,
             );
             defer self.runtime.alloc.free(c_args);
@@ -1158,14 +1158,14 @@ fn callNonClosureFunction(
             }
 
             for (args, 0..) |arg, i|
-                c_args[i] = try revo.ffi.CRevoData.ofData(
+                c_args[i] = try root.functions.CRevoData.ofData(
                     arg,
                     self.runtime.alloc,
                     &self.strings,
                     &string_copies,
                 );
 
-            var c_result: revo.ffi.CRevoData = .{
+            var c_result: root.functions.CRevoData = .{
                 .tag = 0,
                 .value = 0,
             };

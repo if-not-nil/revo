@@ -261,7 +261,7 @@ const builtin = @import("builtin");
 
 pub const vm = @import("vm");
 pub const memory = vm.memory;
-pub const ffi = vm.ffi;
+pub const ffi = @import("c").ffi;
 pub const table = vm.table;
 pub const tuple = vm.tuple;
 pub const functions = vm.functions;

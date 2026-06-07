@@ -28,11 +28,56 @@ pub const Frame = struct {
 };
 
 pub const NativeFn = *const fn (args: []const Data, vm: *revo.VM) NativeResult;
+
+pub const RevoBinding = extern struct {
+    name: [*:0]const u8,
+    fn_ptr: *const anyopaque,
+};
+
+pub const CRevoData = extern struct {
+    tag: u64,
+    value: u64,
+
+    pub fn toData(self: *const CRevoData, _: *revo.VM) !Data {
+        const tag: mem.Type = @enumFromInt(
+            @as(@typeInfo(mem.Type).@"enum".tag_type, @intCast(self.tag)),
+        );
+        return switch (tag) {
+            .number => Data.numberRaw(@bitCast(self.value)),
+            .string => Data.new.str(@intCast(self.value)),
+            .atom => Data.new.atom(@intCast(self.value)),
+            .function => Data.new.function(@intCast(self.value)),
+            .table => Data.new.table(@intCast(self.value)),
+            .tuple => Data.new.tuple(@intCast(self.value)),
+            .struct_val, .struct_type => unreachable,
+        };
+    }
+
+    pub fn ofData(data: Data, vm_alloc: std.mem.Allocator, strings: *const revo.VM.Interner, copies: *std.ArrayList([:0]u8)) !CRevoData {
+        const tag = data.tag();
+        const value: u64 = switch (tag) {
+            .number => @bitCast(data.asNum().?),
+            .string => blk: {
+                const str_slice = strings.getAssumeAlive(data.asString().?);
+                const copy = try vm_alloc.dupeZ(u8, str_slice);
+                try copies.append(vm_alloc, copy);
+                break :blk @intFromPtr(copy.ptr);
+            },
+            .atom => data.asAtom().?,
+            .function => data.asFunction().?,
+            .table => data.asTable().?,
+            .tuple => data.asTuple().?,
+            .struct_val, .struct_type => unreachable,
+        };
+        return .{ .tag = @intFromEnum(tag), .value = value };
+    }
+};
+
 pub const CFnPtr = *const fn (
     vm: *anyopaque,
     argc: usize,
-    argv: [*]revo.ffi.CRevoData,
-    out_result: *revo.ffi.CRevoData,
+    argv: [*]CRevoData,
+    out_result: *CRevoData,
 ) callconv(.c) void;
 /// TODO: make functions have fixed arity too
 pub const VARIADIC: u8 = 0xFF;
