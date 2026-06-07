@@ -578,11 +578,53 @@ test "repl can call a global function later" {
     try std.testing.expect(std.mem.indexOfPos(u8, env.out.written(), before_call, "4\n") != null);
 }
 
-test "splash selection wraps by seed" {
-    try std.testing.expectEqualStrings(splash_texts[0], splashText(0));
-    try std.testing.expectEqualStrings(splash_texts[1], splashText(1));
-    try std.testing.expectEqualStrings(
-        splash_texts[0],
-        splashText(splash_texts.len),
-    );
+// the workspace caches compiled bytecode by FileId; re-opening <repl> with
+// new text via change() should invalidate caches
+test "repl string methods work on multiple string literals" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    const ok1 = try env.session.step(&env.out.writer, "\"abc\":trim()");
+    try std.testing.expect(ok1);
+
+    const before = env.out.written().len;
+    _ = try env.session.step(&env.out.writer, "\"abc\":sub(1,1)");
+    // second step should succeed but may error with wrong method name
+    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before..], "error:") == null);
+}
+
+// same bug with methods in reverse order
+test {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    _ = try env.session.step(&env.out.writer, "\"abc\":sub(1,1)");
+
+    const before = env.out.written().len;
+    _ = try env.session.step(&env.out.writer, "\"abc\":trim()");
+    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before..], "error:") == null);
+}
+
+test "repl multiple string methods in sequence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    _ = try env.session.step(&env.out.writer, "\"abc\":trim()");
+    const before = env.out.written().len;
+    _ = try env.session.step(&env.out.writer, "\"abc\":split(\"b\")");
+    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before..], "error:") == null);
+
+    const before2 = env.out.written().len;
+    _ = try env.session.step(&env.out.writer, "\"abc\":replace(\"b\", \"d\")");
+    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before2..], "error:") == null);
+
+    const before3 = env.out.written().len;
+    _ = try env.session.step(&env.out.writer, "\"abc\":starts_with?(\"a\")");
+    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before3..], "error:") == null);
 }

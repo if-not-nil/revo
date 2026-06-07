@@ -34,6 +34,11 @@ pub fn runImportedModule(vm: *revo.VM, source_path: []const u8, source: []const 
 fn swapFiberAndRun(vm: *revo.VM, source_path: []const u8, program: []const revo.Instruction) !struct { result: revo.EvalResult, prev: revo.VM.Fiber } {
     try vm.setProgramSourceName(source_path);
 
+    // clear icache between independent program runs to prevent stale
+    // hits when two different compilations reuse the same pc positions
+    for (&vm.icache) |*entry|
+        entry.* = .{ .pc = std.math.maxInt(revo.ProgramCounter), .table_id = 0, .version = 0, .value = undefined };
+
     const module_dir = std.fs.path.dirname(source_path) orelse ".";
     const prev_module_dir = vm.module_dir;
     vm.module_dir = module_dir;

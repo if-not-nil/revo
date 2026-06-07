@@ -3039,3 +3039,45 @@ test "compiler: named parameters positional after named error" {
 //         \\ 99
 //     , 99);
 // }
+
+test "double assignment" {
+    try t.top_number(
+        \\ a = {}
+        \\ c = (a.b = 5)
+    , 5);
+}
+
+test "assignment expression returns assigned value" {
+    try t.top_number(
+        \\ let a = {}
+        \\ let c = (a.b = 5)
+        \\ c
+    , 5);
+}
+
+test "for loop calls __iter on table with metatable __iter" {
+    try t.top_number(
+        \\ let t = set_metatable({}, {
+        \\   __iter = fn(idx) 42,
+        \\   len = fn(self) 2,
+        \\ })
+        \\ let sum = 0
+        \\ for x in t do
+        \\   sum = sum + x
+        \\ end
+        \\ sum
+    , 84);
+}
+
+test "expect returns err tuple on false" {
+    try t.top_atom(
+        \\ let r = expect(1 == 2)
+        \\ r[0]
+    , "err");
+}
+
+test "expect returns value on truthy" {
+    try t.top_number(
+        \\ expect(42)?
+    , 42);
+}
