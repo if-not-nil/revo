@@ -24,6 +24,17 @@ pub const specs: []const api.FnSpec = &.{
         .f = root.define(&.{.string}, readdir_fn),
     },
     .{
+        // method version
+        .name = "readdir",
+        .placements = &.{api.mod("file")},
+        .params = &.{
+            .{ "self", "table" },
+        },
+        .ret = "(:ok, table) | (:err, atom)",
+        .doc = "returns table of directory entries for the dir handle's path",
+        .f = root.define(&.{.any}, readdir_meth_fn),
+    },
+    .{
         .name = "exists?",
         .placements = &.{api.mod("fs")},
         .params = &.{
@@ -321,6 +332,38 @@ fn close_fn(args: []const Data, vm: *VM) !NativeResult {
     return try NativeResult.Ok(vm, revo.core_atoms.data(.ok));
 }
 
+/// > file:readdir() -> !table
+/// returns table of directory entries for the dir handle's path
+fn readdir_meth_fn(args: []const Data, vm: *VM) !NativeResult {
+    const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
+    const path = handle.path;
+
+    const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{}) catch |err| {
+        return try NativeResult.Err(vm, mapIOError(err));
+    };
+    defer open_dir.close(vm.runtime.io);
+    var iter = open_dir.iterate();
+
+    var entries = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, 16);
+    defer entries.deinit(vm.runtime.alloc);
+
+    while (try iter.next(vm.runtime.io)) |ent| {
+        const entry_table = try vm.tables.create();
+        var t = try vm.tables.get(entry_table);
+        try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name));
+        try t.putRaw(try vm.dataAtom("kind"), try vm.ownDataString(kindName(ent.kind)));
+        try entries.append(vm.runtime.alloc, Data.new.table(entry_table));
+    }
+
+    const result_table = try vm.tables.create();
+    var t = try vm.tables.get(result_table);
+    for (entries.items, 1..) |entry, i| {
+        try t.putRaw(Data.new.num(i), entry);
+    }
+
+    return try NativeResult.Ok(vm, Data.new.table(result_table));
+}
+
 /// > fs.exists?(path: string) -> !atom
 /// does path exist?
 fn exists_fn(args: []const Data, vm: *VM) !NativeResult {
@@ -514,6 +557,58 @@ test "fs.readdir returns table of entries" {
 
     const source = try sourceForPath(
         \\ type(fs.readdir("{s}"):unwrap()) == :table
+    , dir_path);
+    defer alloc.free(source);
+    try testing.top_true(source);
+}
+
+test "fs.readdir returns entries with name and kind" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "x.txt", .data = "hello" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "y.txt", .data = "world" });
+
+    const dir_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(dir_path);
+
+    const source = try sourceForPath(
+        \\ const entries = fs.readdir("{s}"):unwrap()
+        \\ const e1 = entries[1]
+        \\ e1.name != :nil and e1.kind != :nil
+    , dir_path);
+    defer alloc.free(source);
+    try testing.top_true(source);
+}
+
+test "fs.dir:readdir() returns entries" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "z.txt", .data = "test" });
+
+    const dir_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(dir_path);
+
+    const source = try sourceForPath(
+        \\ const dir = fs.open("{s}"):unwrap()
+        \\ const entries = dir:readdir():unwrap()
+        \\ type(entries) == :table
+    , dir_path);
+    defer alloc.free(source);
+    try testing.top_true(source);
+}
+
+// issue: fs.readdir with relative path (e.g., ".") should work
+test "fs.readdir works with current directory" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "c.txt", .data = "data" });
+
+    const dir_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(dir_path);
+
+    const source = try sourceForPath(
+        \\ const entries = fs.readdir("{s}"):unwrap()
+        \\ type(entries) == :table
     , dir_path);
     defer alloc.free(source);
     try testing.top_true(source);
