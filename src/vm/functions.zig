@@ -34,6 +34,8 @@ pub const RevoBinding = extern struct {
     fn_ptr: *const anyopaque,
 };
 
+/// not the real repr, converted from the underlying type
+/// (currently only nanbox, but if i start supporting x32, that would be very handy)
 pub const CRevoData = extern struct {
     tag: u64,
     value: u64,
@@ -50,6 +52,23 @@ pub const CRevoData = extern struct {
             .table => Data.new.table(@intCast(self.value)),
             .tuple => Data.new.tuple(@intCast(self.value)),
             .struct_val, .struct_type => unreachable,
+        };
+    }
+
+    pub fn fromData(data: Data) CRevoData {
+        const tag = data.tag();
+        return .{
+            .tag = @intFromEnum(tag),
+            .value = switch (tag) {
+                .number => @bitCast(data.asNum().?),
+                .string => data.asString().?,
+                .atom => data.asAtom().?,
+                .function => data.asFunction().?,
+                .table => data.asTable().?,
+                .tuple => data.asTuple().?,
+                .struct_val => data.asStructVal().?,
+                .struct_type => data.asStructType().?,
+            },
         };
     }
 

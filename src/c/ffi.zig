@@ -14,7 +14,14 @@ const CRevoData = functions.CRevoData;
 const RevoBinding = functions.RevoBinding;
 const CFnPtr = functions.CFnPtr;
 
+// for error/missing returns
+const nil_val = CRevoData{
+    .tag = @intFromEnum(memory.Type.atom),
+    .value = @intFromEnum(revo.core_atoms.nil),
+};
+
 pub export fn revo_intern(vm_ptr: *anyopaque, ptr_val: u64, len: usize) callconv(.c) u64 {
+    // returns 0 on failure but safe because vm assigns ids starting at 1
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const ptr: [*]u8 = @ptrFromInt(ptr_val);
     const slice = ptr[0..len];
@@ -35,22 +42,14 @@ pub export fn revo_getglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize)
     const ptr: [*]u8 = @ptrFromInt(name_ptr);
     const name_slice = ptr[0..name_len];
 
-    if (v.getGlobal(name_slice)) |value| {
-        const tag = value.tag();
-        const c_value: u64 = switch (tag) {
-            .number => @bitCast(value.asNum().?),
-            .string => value.asString().?,
-            .atom => value.asAtom().?,
-            .function => value.asFunction().?,
-            .table => value.asTable().?,
-            .tuple => value.asTuple().?,
-            .struct_val => value.asStructVal().?,
-            .struct_type => value.asStructType().?,
-        };
-        return .{ .tag = @intFromEnum(tag), .value = c_value };
-    }
+    const value = v.getGlobal(name_slice) orelse
+        return nil_val;
 
-    return CRevoData{ .tag = @intFromEnum(memory.Type.atom), .value = 0 }; // nil sentinel
+    // getGlobal returns :undef for missing names instead of null
+    if (value.tag() == .atom and value.asAtom().? == @intFromEnum(revo.core_atoms.undef))
+        return nil_val;
+
+    return CRevoData.fromData(value);
 }
 
 pub export fn revo_setglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize, value: CRevoData) callconv(.c) void {
@@ -62,33 +61,31 @@ pub export fn revo_setglobal(vm_ptr: *anyopaque, name_ptr: u64, name_len: usize,
     v.setGlobal(name_slice, data) catch {};
 }
 
+pub export fn revo_table_create(vm_ptr: *anyopaque) callconv(.c) CRevoData {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tid = v.tables.create() catch
+        return nil_val;
+    return .{ .tag = @intFromEnum(memory.Type.table), .value = @intCast(tid) };
+}
+
+pub export fn revo_table_len(vm_ptr: *anyopaque, table_id: u64) callconv(.c) u64 {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tbl = v.tables.get(@intCast(table_id)) catch return 0;
+    return @intCast(tbl.count());
+}
+
 pub export fn revo_table_get(vm_ptr: *anyopaque, table_id: u64, key: CRevoData) callconv(.c) CRevoData {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
 
     const tid: memory.TableID = @intCast(table_id);
-    const key_data = key.toData(v) catch return CRevoData{ .tag = @intFromEnum(memory.Type.atom), .value = 0 };
+    const key_data = key.toData(v) catch return nil_val;
 
-    const tbl = v.tables.get(tid) catch return CRevoData{ .tag = @intFromEnum(memory.Type.atom), .value = 0 };
+    const tbl = v.tables.get(tid) catch return nil_val;
 
-    if (tbl.get(key_data, v) catch return CRevoData{ .tag = @intFromEnum(memory.Type.atom), .value = 0 }) |value| {
-        const tag = value.tag();
-        const c_value: u64 = switch (tag) {
-            .number => @bitCast(value.asNum().?),
-            .string => value.asString().?,
-            .atom => value.asAtom().?,
-            .function => value.asFunction().?,
-            .table => value.asTable().?,
-            .tuple => value.asTuple().?,
-            .struct_val => value.asStructVal().?,
-            .struct_type => value.asStructType().?,
-        };
-        return .{ .tag = @intFromEnum(tag), .value = c_value };
-    }
+    if (tbl.get(key_data, v) catch return nil_val) |value|
+        return CRevoData.fromData(value);
 
-    return CRevoData{
-        .tag = @intFromEnum(memory.Type.atom),
-        .value = revo.core_atoms.atom_id(.nil),
-    };
+    return nil_val;
 }
 
 pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: CRevoData, value: CRevoData) callconv(.c) void {
@@ -102,9 +99,41 @@ pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: CRevoData, 
     tbl.put(tid, v, key_data, value_data) catch {};
 }
 
+pub export fn revo_tuple_create(vm_ptr: *anyopaque, count: u64, items: [*]const CRevoData) callconv(.c) CRevoData {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const src = items[0..count];
+    var data_list = std.ArrayList(Data).initCapacity(v.runtime.alloc, count) catch
+        return nil_val;
+    defer data_list.deinit(v.runtime.alloc);
+    for (src) |*c_item| {
+        const item_data = c_item.toData(v) catch
+            return nil_val;
+        data_list.appendAssumeCapacity(item_data);
+    }
+    const tid = v.tuples.create(data_list.items) catch
+        return nil_val;
+    return .{ .tag = @intFromEnum(memory.Type.tuple), .value = @intCast(tid) };
+}
+
+pub export fn revo_tuple_get(vm_ptr: *anyopaque, tuple_id: u64, index: u64) callconv(.c) CRevoData {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tup = v.tuples.get(@intCast(tuple_id)) catch
+        return nil_val;
+    if (index >= tup.items.len)
+        return nil_val;
+    return CRevoData.fromData(tup.items[@intCast(index)]);
+}
+
+pub export fn revo_tuple_len(vm_ptr: *anyopaque, tuple_id: u64) callconv(.c) u64 {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tup = v.tuples.get(@intCast(tuple_id)) catch return 0;
+    return @intCast(tup.items.len);
+}
+
 pub export fn revo_string_data(vm_ptr: *anyopaque, id: u64) callconv(.c) ?[*]const u8 {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const slice = v.strings.get(@intCast(id)) catch return null;
+    // pointer valid only until next GC sweep; caller must not hold across allocs
     return slice.ptr;
 }
 
@@ -128,7 +157,7 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
         return error.NoBindings;
     };
 
-    var registered = try std.ArrayList(functions.CFunction).initCapacity(vm_ptr.runtime.alloc, 2);
+    var registered = try std.ArrayList(functions.CFunction).initCapacity(vm_ptr.runtime.alloc, 16);
     defer registered.deinit(vm_ptr.runtime.alloc);
 
     var i: usize = 0;

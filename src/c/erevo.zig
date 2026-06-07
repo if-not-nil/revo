@@ -97,21 +97,8 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
     return switch (result) {
         .ok => blk: {
             if (out_value) |out| {
-                const cr = inner.currentResult();
-                const tag = @intFromEnum(cr.tag());
-                const value = if (cr.asNum()) |n|
-                    @as(u64, @bitCast(n))
-                else if (cr.asString()) |v|
-                    @as(u64, @intCast(v))
-                else if (cr.asAtom()) |v|
-                    @as(u64, @intCast(v))
-                else if (cr.asFunction()) |v|
-                    @as(u64, @intCast(v))
-                else if (cr.asTable()) |v|
-                    @as(u64, @intCast(v))
-                else
-                    @as(u64, @intCast(cr.asTuple().?));
-                out.* = .{ .tag = tag, .value = value };
+                const crd = revo.functions.CRevoData.fromData(inner.currentResult());
+                out.* = @bitCast(crd);
             }
             break :blk true;
         },
@@ -131,7 +118,7 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
 }
 
 pub export fn erevo_vm_create() callconv(.c) ?*ErevoVM {
-    const alloc = std.heap.page_allocator;
+    const alloc = std.heap.page_allocator; // TODO: switch to c_allocator once GC gets triggered less
     var io = std.Io.Threaded.init(alloc, .{});
     errdefer io.deinit();
 
@@ -151,8 +138,8 @@ pub export fn erevo_vm_destroy(vm: ?*ErevoVM) callconv(.c) void {
     const self: *VM = @ptrCast(@alignCast(inner.c_data.?));
     if (self.last_error) |msg| self.alloc.free(msg);
 
-    self.io.deinit();
     inner.runtime.deinit();
+    self.io.deinit();
     self.alloc.destroy(self);
 }
 

@@ -632,14 +632,7 @@ pub fn putInTableAtom(
         self.markData(Data.new.function(fn_id));
 }
 
-pub fn seedBootstrapGlobals(self: *VM, target: *Globals) !void {
-    var it = self.stdlib_globals.iterator();
-    while (it.next()) |entry| {
-        try target.put(entry.key_ptr.*, entry.value_ptr.*);
-    }
-}
-
-pub fn getGlobal(self: *VM, name: []const u8) ?Data {
+pub inline fn getGlobal(self: *VM, name: []const u8) ?Data {
     if (self.atoms.get(name)) |id| return self.globals.get(id);
     return revo.core_atoms.data(.undef);
 }
