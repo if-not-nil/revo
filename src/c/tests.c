@@ -225,6 +225,89 @@ int main(void) {
   }
 
   //
+  // revo_call
+  //
+  T("revo_call a compiled function");
+  ok = erevo_eval(vm, "test", "fn(x) x + 1", &val);
+  if (!ok) FAIL(erevo_vm_last_error(vm));
+  assert(ok);
+  assert(revo_is_function(val));
+  RevoData call_args[1] = {revo_num(41.0)};
+  RevoData call_result;
+  int call_ok = revo_call(vm, val, 1, call_args, &call_result);
+  assert(call_ok);
+  assert(revo_is_number(call_result));
+  assert(fabs(revo_num_value(call_result) - 42.0) < 1e-12);
+  OK;
+
+  T("revo_call with no args");
+  ok = erevo_eval(vm, "test", "fn() 99", &val);
+  if (!ok) FAIL(erevo_vm_last_error(vm));
+  assert(ok);
+  call_ok = revo_call(vm, val, 0, NULL, &call_result);
+  assert(call_ok);
+  assert(revo_is_number(call_result));
+  assert(fabs(revo_num_value(call_result) - 99.0) < 1e-12);
+  OK;
+
+  T("revo_call returning string");
+  ok = erevo_eval(vm, "test", "fn() \"hello\"", &val);
+  if (!ok) FAIL(erevo_vm_last_error(vm));
+  assert(ok);
+  call_ok = revo_call(vm, val, 0, NULL, &call_result);
+  assert(call_ok);
+  assert(revo_is_string(call_result));
+  assert(revo_string_length(vm, revo_string_id(call_result)) == 5);
+  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello", 5) == 0);
+  OK;
+
+  T("revo_call returning multi-word string");
+  ok = erevo_eval(vm, "test", "fn() \"hello from c\"", &val);
+  if (!ok) FAIL(erevo_vm_last_error(vm));
+  assert(ok);
+  call_ok = revo_call(vm, val, 0, NULL, &call_result);
+  assert(call_ok);
+  assert(revo_is_string(call_result));
+  assert(revo_string_length(vm, revo_string_id(call_result)) == 12);
+  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello from c", 12) == 0);
+  OK;
+
+  T("revo_call multiple args");
+  ok = erevo_eval(vm, "test", "fn(a, b, c) a + b * c", &val);
+  if (!ok) FAIL(erevo_vm_last_error(vm));
+  assert(ok);
+  RevoData multi_args[3] = {revo_num(10.0), revo_num(3.0), revo_num(4.0)};
+  call_ok = revo_call(vm, val, 3, multi_args, &call_result);
+  assert(call_ok);
+  assert(revo_is_number(call_result));
+  assert(fabs(revo_num_value(call_result) - 22.0) < 1e-12);
+  OK;
+
+  T("revo_call non-function returns false");
+  call_ok = revo_call(vm, revo_num(42.0), 0, NULL, &call_result);
+  assert(!call_ok);
+  OK;
+
+  //
+  // c-string convenience wrappers
+  //
+  T("revo_getglobal_cstr");
+  revo_setglobal_cstr(vm, "abc", revo_num(123.0));
+  RevoData gv = revo_getglobal_cstr(vm, "abc");
+  assert(revo_is_number(gv));
+  assert(fabs(revo_num_value(gv) - 123.0) < 1e-12);
+  // missing key returns nil
+  gv = revo_getglobal_cstr(vm, "does-not-exist");
+  assert(revo_is_nil(gv));
+  OK;
+
+  T("revo_atom_id");
+  RevoData atom_val = revo_atom_val(ra_ok);
+  assert(revo_atom_id(atom_val) == ra_ok);
+  assert(revo_atom_id(revo_bool(1)) == ra_true);
+  OK;
+
+  //
   // helper macros and inline functions
   //
   T("revo_nil");
@@ -278,6 +361,13 @@ int main(void) {
 
   T("revo_is_bool false on nil");
   assert(!revo_is_bool(revo_nil()));
+  OK;
+
+  T("revo_bool_val");
+  assert(revo_bool_val(revo_bool(1)) == 1);
+  assert(revo_bool_val(revo_bool(0)) == 0);
+  assert(revo_bool_val(revo_num(1.0)) == 0);  // not a bool
+  assert(revo_bool_val(revo_nil()) == 0);
   OK;
 
   //

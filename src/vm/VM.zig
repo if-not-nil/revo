@@ -851,6 +851,11 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
     const initial_pc = fiber.pc;
     const initial_slot_len = fiber.registers_len;
 
+    // root callee before any allocation that could trigger GC
+    if (fiber.registers_len >= MAX_REGISTERS) return error.StackOverflow;
+    fiber.registers[fiber.registers_len] = callee;
+    fiber.registers_len += 1;
+
     if (fiber.frames.items.len == 0) {
         if (fiber.debug_info_id == null)
             fiber.debug_info_id = self.pending_debug_info_id;
@@ -863,7 +868,7 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
 
     const caller_frame_depth = fiber.frames.items.len;
     const base = (try self.currentFrame()).base;
-    const callee_slot = fiber.registers_len;
+    const callee_slot = fiber.registers_len - 1;
 
     errdefer {
         fiber.registers_len = initial_slot_len;
@@ -874,9 +879,8 @@ fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []const 
         }
     }
 
-    if (fiber.registers_len >= MAX_REGISTERS) return error.StackOverflow;
-    fiber.registers[fiber.registers_len] = callee;
-    fiber.registers_len += 1;
+    // note: callee already rooted at callee_slot above
+    // callee_slot points to where we stored it; args start at callee_slot + 1
     if (maybe_first) |first| {
         if (fiber.registers_len >= MAX_REGISTERS) return error.StackOverflow;
         fiber.registers[fiber.registers_len] = first;
@@ -1376,7 +1380,7 @@ pub fn callRegister(
                         }
 
                         tail_frame.base = caller_fn_slot + 1;
-                        tail_frame.call_site_pc = fiber.pc - 1;
+                        tail_frame.call_site_pc = if (fiber.pc > 0) fiber.pc - 1 else 0;
                         tail_frame.closure_id = closure_id;
                         tail_frame.register_count = closure.register_count;
 
@@ -1418,7 +1422,7 @@ pub fn callRegister(
                     self.runtime.alloc,
                     .{
                         .return_addr = fiber.pc,
-                        .call_site_pc = fiber.pc - 1,
+                        .call_site_pc = if (fiber.pc > 0) fiber.pc - 1 else 0,
                         .base = new_base,
                         .result_register = instr.c,
                         .register_count = closure.register_count,

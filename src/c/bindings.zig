@@ -34,6 +34,7 @@ const TRANSLATOR = [_]TypeTranslation{
     .{ .zig = "?*ErevoProgram", .c = "ErevoProgram*" },
     .{ .zig = "?*ErevoData", .c = "ErevoData*" },
     .{ .zig = "CRevoData", .c = "RevoData" },
+    .{ .zig = "*CRevoData", .c = "RevoData*" },
     .{ .zig = "[*]const CRevoData", .c = "const RevoData*" },
     .{ .zig = "ErevoData", .c = "RevoData" },
 };
@@ -51,6 +52,7 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\
         \\#include <stddef.h>
         \\#include <stdint.h>
+        \\#include <string.h>
         \\
         \\#ifdef __cplusplus
         \\extern "C" {
@@ -126,15 +128,18 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\static inline RevoData revo_atom_val(uint64_t id) { RevoData d; d.tag = revo_atom; d.value = id; return d; }
         \\static inline double revo_num_value(RevoData d) { union { uint64_t u; double f; } u = { .u = d.value }; return u.f; }
         \\static inline uint64_t revo_string_id(RevoData d) { return d.value; }
+        \\static inline uint64_t revo_atom_id(RevoData d) { return d.value; }
         \\static inline uint64_t revo_table_id(RevoData d) { return d.value; }
         \\static inline uint64_t revo_tuple_id(RevoData d) { return d.value; }
         \\static inline int revo_is_nil(RevoData d) { return d.tag == revo_atom && d.value == ra_nil; }
         \\static inline int revo_is_number(RevoData d) { return d.tag == revo_number; }
         \\static inline int revo_is_string(RevoData d) { return d.tag == revo_string; }
         \\static inline int revo_is_atom(RevoData d) { return d.tag == revo_atom; }
+        \\static inline int revo_is_function(RevoData d) { return d.tag == revo_function; }
         \\static inline int revo_is_table(RevoData d) { return d.tag == revo_table; }
         \\static inline int revo_is_tuple(RevoData d) { return d.tag == revo_tuple; }
         \\static inline int revo_is_bool(RevoData d) { return d.tag == revo_atom && (d.value == ra_true || d.value == ra_false); }
+        \\static inline int revo_bool_val(RevoData d) { return revo_is_bool(d) ? (d.value == ra_true ? 1 : 0) : 0; }
         \\
         \\// function ptr type
         \\typedef void (*RevoFn)(void *vm, size_t argc, RevoData *argv, RevoData *out_result);
@@ -177,6 +182,14 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
     }
 
     try header.appendSlice(allocator,
+        \\
+        \\// c-string convenience wrappers
+        \\static inline RevoData revo_getglobal_cstr(void* vm, const char* name) {
+        \\  return revo_getglobal(vm, (uint64_t)(uintptr_t)name, strlen(name));
+        \\}
+        \\static inline void revo_setglobal_cstr(void* vm, const char* name, RevoData value) {
+        \\  revo_setglobal(vm, (uint64_t)(uintptr_t)name, strlen(name), value);
+        \\}
         \\
         \\#ifdef __cplusplus
         \\}

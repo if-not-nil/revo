@@ -4,9 +4,12 @@
 const std = @import("std");
 const revo = @import("revo");
 
+/// opaque handle to a vm instance
 pub const ErevoVM = opaque {};
+/// opaque handle to a compiled program
 pub const ErevoProgram = opaque {};
 
+/// c-level type tags matching revo's runtime type system
 pub const ErevoType = enum(u64) {
     number = 0,
     string,
@@ -16,6 +19,7 @@ pub const ErevoType = enum(u64) {
     tuple,
 };
 
+/// a revo value passed across the c boundary (tag + value, 16 bytes)
 pub const ErevoData = extern struct {
     tag: u64,
     value: u64,
@@ -117,6 +121,7 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoData) bool {
     };
 }
 
+/// create a new vm instance, returns null on failure
 pub export fn erevo_vm_create() callconv(.c) ?*ErevoVM {
     const alloc = std.heap.page_allocator; // TODO: switch to c_allocator once GC gets triggered less
     var io = std.Io.Threaded.init(alloc, .{});
@@ -133,6 +138,7 @@ pub export fn erevo_vm_create() callconv(.c) ?*ErevoVM {
     return @ptrCast(inner);
 }
 
+/// destroy a vm instance (null-safe)
 pub export fn erevo_vm_destroy(vm: ?*ErevoVM) callconv(.c) void {
     const inner = if (vm) |p| @as(*revo.VM, @ptrCast(@alignCast(p))) else return;
     const self: *VM = @ptrCast(@alignCast(inner.c_data.?));
@@ -143,6 +149,7 @@ pub export fn erevo_vm_destroy(vm: ?*ErevoVM) callconv(.c) void {
     self.alloc.destroy(self);
 }
 
+/// return last error message, empty string if none (null-safe)
 pub export fn erevo_vm_last_error(vm: ?*ErevoVM) callconv(.c) [*:0]const u8 {
     const inner = if (vm) |p| @as(*revo.VM, @ptrCast(@alignCast(p))) else return "";
     const self: *VM = @ptrCast(@alignCast(inner.c_data.?));
@@ -150,11 +157,13 @@ pub export fn erevo_vm_last_error(vm: ?*ErevoVM) callconv(.c) [*:0]const u8 {
     return if (self.last_error) |msg| msg.ptr else "";
 }
 
+/// compile source code into a program, returns null on error (null-safe)
 pub export fn erevo_compile(vm: ?*ErevoVM, name: [*:0]const u8, source: [*:0]const u8) callconv(.c) ?*ErevoProgram {
     const inner = if (vm) |p| @as(*revo.VM, @ptrCast(@alignCast(p))) else return null;
     return @ptrCast(compileProgram(inner, std.mem.span(name), std.mem.span(source)) orelse return null);
 }
 
+/// destroy a compiled program (null-safe)
 pub export fn erevo_program_destroy(program: ?*ErevoProgram) callconv(.c) void {
     const self = if (program) |p| @as(*Program, @ptrCast(@alignCast(p))) else return;
 
@@ -165,6 +174,7 @@ pub export fn erevo_program_destroy(program: ?*ErevoProgram) callconv(.c) void {
     self.alloc.destroy(self);
 }
 
+/// execute a compiled program, writes result through out_value (both pointers optional)
 pub export fn erevo_run(vm: ?*ErevoVM, program: ?*ErevoProgram, out_value: ?*ErevoData) callconv(.c) bool {
     const inner = if (vm) |p| @as(*revo.VM, @ptrCast(@alignCast(p))) else return false;
     const compiled = if (program) |p| @as(*Program, @ptrCast(@alignCast(p))) else return false;
@@ -172,6 +182,7 @@ pub export fn erevo_run(vm: ?*ErevoVM, program: ?*ErevoProgram, out_value: ?*Ere
     return runProgram(inner, compiled, out_value);
 }
 
+/// compile, run, and free a program in one step (null-safe, out_value optional)
 pub export fn erevo_eval(vm: ?*ErevoVM, name: [*:0]const u8, source: [*:0]const u8, out_value: ?*ErevoData) callconv(.c) bool {
     const inner = if (vm) |p|
         @as(*revo.VM, @ptrCast(@alignCast(p)))
