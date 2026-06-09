@@ -3063,11 +3063,16 @@ test "assignment expression returns assigned value" {
     , 5);
 }
 
-test "for loop calls __iter on table with metatable __iter" {
+test "for loop calls iterator" {
     try t.top_number(
         \\ let t = set_metatable({}, {
-        \\   __iter = fn(idx) 42,
-        \\   len = fn(self) 2,
+        \\   __iter = fn(self) do
+        \\     let i = 0
+        \\     fn() do
+        \\       i += 1
+        \\       if i > 2 :done else 42
+        \\     end
+        \\   end,
         \\ })
         \\ let sum = 0
         \\ for x in t do

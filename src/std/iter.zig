@@ -1,10 +1,4 @@
-/// every iter entry is registered in 4 places rn:
-///   - global function
-///   - string metatable
-///   - tuple metatable
-///   - table metatable
-/// this is by design, even the "not giving them a whole iter module" part
-const places: []const api.Placement = &.{
+const all_places: []const api.Placement = &.{
     api.g,
     api.method("string", .string),
     api.method("tuple", .tuple),
@@ -12,6 +6,19 @@ const places: []const api.Placement = &.{
 };
 
 pub const specs: []const api.FnSpec = &.{
+    .{
+        .name = "to_iter",
+        .placements = &.{api.g},
+        .params = &.{.{ "obj", "any" }},
+        .ret = "function",
+        .doc =
+        \\ wraps any iterable in a zero-arg callable
+        \\ built-in types (string, tuple, table) get a position-based iterator
+        \\ functions return as-is (already callable)
+        \\ tables with __iter metamethod call __iter(obj)
+        ,
+        .f = root.define(&.{.any}, to_iter),
+    },
     .{
         .name = "map",
         .placements = &.{
@@ -35,7 +42,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "filter",
-        .placements = places,
+        .placements = all_places,
         .params = &.{
             .{ "collection", "any" },
             .{ "pred", "function" },
@@ -51,7 +58,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "reduce",
-        .placements = places,
+        .placements = all_places,
         .params = &.{
             .{ "collection", "any" },
             .{ "fn", "function" },
@@ -68,7 +75,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "each",
-        .placements = places,
+        .placements = all_places,
         .params = &.{
             .{ "collection", "any" },
             .{ "fn", "function" },
@@ -84,7 +91,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "find",
-        .placements = places,
+        .placements = all_places,
         .params = &.{
             .{ "what", "any" },
             .{ "fn", "function" },
@@ -100,7 +107,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "all?",
-        .placements = places,
+        .placements = all_places,
         .params = &.{
             .{ "collection", "any" },
             .{ "pred", "function" },
@@ -116,7 +123,7 @@ pub const specs: []const api.FnSpec = &.{
     },
     .{
         .name = "any?",
-        .placements = places,
+        .placements = all_places,
         .params = &.{
             .{ "collection", "any" },
             .{ "pred", "function" },
@@ -538,7 +545,85 @@ pub fn any_fn(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = Data.new.boolean(false) };
 }
 
-/// TODO: maybe dont do that
+/// > to_iter(obj: any) -> function
+/// returns a zero-arg callable iterator for obj
+pub fn to_iter(args: []const Data, vm: *VM) !NativeResult {
+    const obj = args[0];
+
+    if (obj.tag() == .function) return .okData(obj);
+
+    if (try vm.getMetamethodByAtom(obj, revo.core_atoms.__iter.atom_id())) |mm|
+        return .okData(try vm.callFunction(mm, &[_]Data{obj}));
+
+    if (obj.tag() == .string or obj.tag() == .tuple or obj.tag() == .table)
+        return makeCallableIterator(vm, obj);
+
+    return .errType(0, "iterable", dataToString(args[0]));
+}
+
+fn makeCallableIterator(vm: *VM, obj: Data) !NativeResult {
+    const atom_obj = try vm.internAtom("obj");
+    const atom_pos = try vm.internAtom("pos");
+
+    const it_id = try vm.tables.create();
+    const it = try vm.tables.get(it_id);
+    try it.putRaw(Data.new.atom(atom_obj), obj);
+    try it.putRaw(Data.new.atom(atom_pos), Data.new.num(0));
+
+    const mt_id = try vm.tables.create();
+    const mt = try vm.tables.get(mt_id);
+    const call_fn_id = try vm.installNative("__iter_call", .{
+        .arity = 1,
+        .param_types = &.{.any},
+        .func = iteratorNext,
+    });
+    try mt.putRawAtom(try vm.internAtom("__call"), Data.new.function(call_fn_id));
+    try vm.setTableMetatable(it_id, mt_id);
+
+    return .okData(Data.new.table(it_id));
+}
+
+/// __call handler for iterator tables
+/// reads self.obj and self.pos, returns element or :none
+fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
+    const it = args[0];
+    const it_id = it.asTable().?;
+    const tbl = try vm.tables.get(it_id);
+    const atom_obj = try vm.internAtom("obj");
+    const atom_pos = try vm.internAtom("pos");
+
+    const obj = tbl.getRaw(Data.new.atom(atom_obj)) orelse return .okData(revo.core_atoms.data(.done));
+    const pos_val = tbl.getRaw(Data.new.atom(atom_pos)) orelse return .okData(revo.core_atoms.data(.done));
+    const pos = @as(usize, @intFromFloat(pos_val.asNum().?));
+
+    const val: ?Data = switch (obj.tag()) {
+        .string => blk: {
+            const str = vm.stringValue(obj.asString().?);
+            if (pos >= str.len) break :blk null;
+            break :blk try vm.ownDataString(str[pos .. pos + 1]);
+        },
+        .tuple => blk: {
+            const t_id = obj.asTuple().?;
+            const t = vm.tuples.get(t_id) catch break :blk null;
+            if (pos >= t.items.len) break :blk null;
+            break :blk t.items[pos];
+        },
+        .table => blk: {
+            const table_id = obj.asTable().?;
+            const t = try vm.tables.get(table_id);
+            if (pos >= t.array.items.len) break :blk null;
+            break :blk t.array.items[pos];
+        },
+        else => null,
+    };
+
+    if (val) |v| {
+        try tbl.putRaw(Data.new.atom(atom_pos), Data.new.num(@as(f64, @floatFromInt(pos + 1))));
+        return .okData(v);
+    }
+    return .okData(revo.core_atoms.data(.done));
+}
+
 inline fn isTruthy(data: Data) bool {
     return !revo.isFalse(data);
 }

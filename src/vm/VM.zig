@@ -1028,7 +1028,7 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
     return failure;
 }
 
-pub fn getMetamethodByAtom(
+pub inline fn getMetamethodByAtom(
     self: *VM,
     val: Data,
     atom: mem.AtomID,

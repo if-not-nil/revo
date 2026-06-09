@@ -316,6 +316,10 @@ pub fn mergeWithDefaults(allocator: std.mem.Allocator, defaults: *Node, user: *N
 
 const std = @import("std");
 
+const revo = @import("revo");
+const VM = revo.VM;
+const Result = revo.Result;
+
 const lang = @import("./root.zig");
 const ast = lang.ast;
 const Node = ast.Node;
@@ -325,11 +329,6 @@ const proc = lang.proc;
 const Lexer = lang.Lexer;
 const parser = lang.parser;
 const diagnostic = lang.diagnostic;
-
-const revo = @import("revo");
-const VM = revo.VM;
-const Result = revo.Result;
-
 pub const Artifact = compiler.Artifact;
 pub const ParseFailure = parser.ParseFailure;
 pub const LowerFailure = compiler.LowerFailure;

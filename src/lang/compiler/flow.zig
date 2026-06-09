@@ -218,17 +218,17 @@ pub fn compileFor(
     var loop = try LoopScopeT.init(self);
     defer loop.deinit();
 
-    // pin
+    // wrap expression with to_iter
+    try self.emit(.load_global, try self.vm.internAtom("to_iter"));
     try self.compile(iter, true);
-    const iter_slot: LocalSlot = @intCast(self.active_registers - 1);
-    const iter_storage: VarStorage = .{ .local = iter_slot };
+    try self.emit(.call, 1);
+    const it_slot: LocalSlot = @intCast(self.active_registers - 1);
+    reserveRegisters(self, @intCast(it_slot + 1));
 
     // idx <- 0
     try self.emit(.load_small_int, 0);
     const idx_slot: LocalSlot = @intCast(self.active_registers - 1);
-    const idx_storage: VarStorage = .{ .local = idx_slot };
-
-    reserveRegisters(self, @intCast(iter_slot + 1));
+    try self.emit(.store_local, idx_slot);
     reserveRegisters(self, @intCast(idx_slot + 1));
 
     const needs_index = params.len == 2 and !ast.isDiscardName(params[1].name);
@@ -243,22 +243,18 @@ pub fn compileFor(
         index_storage = .{ .local = index_slot };
     }
 
-    // ensure active_registers > value_slot so emitForValueLoad result
-    // and subsequent idx load don't overwrite value_slot
     state.reserveLocalSlots(self);
 
     const loop_check: ProgramCounter = @intCast(self.irLen());
 
-    // condition: idx < iter.len
-    try emitStorageLoad(self, idx_storage);
-    try emitStorageLoad(self, iter_storage);
-    try self.@"const"(Data.new.atom(try self.vm.internAtom("len")));
-    try self.emit(.call_field, (@as(Operand, 1) << 15) | 0);
-    try self.emit(.lt, 0);
-    const end_jump = try self.jump(.jump_if_false);
-
-    // leaves 1 result on stack at active_registers - 1
-    try emitForValueLoad(self, iter_storage, idx_storage);
+    // it() -> value | :none
+    try self.emit(.load_local, it_slot);
+    try self.emit(.call, 0);
+    // check for :done
+    try self.regDupe();
+    try self.@"const"(Data.new.atom(try self.vm.internAtom("done")));
+    try self.emit(.eq, 0);
+    const end_jump = try self.jump(.jump_if_true);
 
     if (value_storage) |storage| {
         const value_slot: LocalSlot = @intCast(storage.local);
@@ -268,11 +264,11 @@ pub fn compileFor(
         try self.regRelease();
     }
     if (needs_index) {
-        try emitStorageLoad(self, idx_storage);
+        try self.emit(.load_local, idx_slot);
         if (index_storage) |storage| {
-            const index_slot: LocalSlot = @intCast(storage.local);
-            state.markLocalInitialized(self, index_slot);
-            try self.emit(.bind_local, index_slot);
+            const index_slot2: LocalSlot = @intCast(storage.local);
+            state.markLocalInitialized(self, index_slot2);
+            try self.emit(.bind_local, index_slot2);
         } else {
             try self.regRelease();
         }
@@ -292,13 +288,10 @@ pub fn compileFor(
     try self.regRelease();
 
     // idx += 1
-    try emitStorageLoad(self, idx_storage);
+    try self.emit(.load_local, idx_slot);
     try self.emit(.load_small_int, 1);
     try self.emit(.add, 0);
-    switch (idx_storage) {
-        .local => |slot| try self.emit(.store_local, slot),
-        .global => |sym| try self.emit(.store_global, sym),
-    }
+    try self.emit(.store_local, idx_slot);
 
     try self.emit(.jump, loop_check);
 
@@ -312,64 +305,6 @@ pub fn emitStorageLoad(self: *Compiler, storage: VarStorage) !void {
         .local => |slot| try self.emit(.load_local, slot),
         .global => |sym| try self.emit(.load_global, sym),
     }
-}
-
-pub fn emitForValueLoad(
-    self: *Compiler,
-    iter_storage: VarStorage,
-    idx_storage: VarStorage,
-) !void {
-    // type dispatch: tuple, string, table each have a different get opcode;
-    // anything else calls `__iter` so user types can define iteration
-    const base_depth = self.active_registers;
-    const tuple_check = try emitForTypeCheck(self, iter_storage, "tuple");
-    try emitStorageLoad(self, iter_storage);
-    try emitStorageLoad(self, idx_storage);
-    try self.emit(.tuple_get, 0);
-    const done = try self.jump(.jump);
-
-    self.active_registers = base_depth;
-    self.patchJump(tuple_check);
-    const string_check = try emitForTypeCheck(self, iter_storage, "string");
-    try emitStorageLoad(self, iter_storage);
-    try emitStorageLoad(self, idx_storage);
-    try self.emit(.table_get, 0);
-    const done2 = try self.jump(.jump);
-
-    self.active_registers = base_depth;
-    self.patchJump(string_check);
-    const table_check = try emitForTypeCheck(self, iter_storage, "table");
-    try emitStorageLoad(self, iter_storage);
-    try emitStorageLoad(self, idx_storage);
-    try self.emit(.table_get, 0);
-    const done3 = try self.jump(.jump);
-
-    self.active_registers = base_depth;
-    self.patchJump(table_check);
-    try emitStorageLoad(self, iter_storage); // fallback: __iter(idx)
-    try self.@"const"(Data.new.atom(try self.vm.internAtom("__iter")));
-    try emitStorageLoad(self, idx_storage);
-    try self.emit(.call_field, 1);
-
-    self.patchJump(done);
-    self.patchJump(done2);
-    self.patchJump(done3);
-    self.active_registers = base_depth + 1;
-}
-
-pub fn emitForTypeCheck(
-    self: *Compiler,
-    iter_storage: VarStorage,
-    type_name: []const u8,
-) !usize {
-    // emits `type(iter) == :type_name`, returns index of jump_if_false
-    try self.emit(.load_global, try self.vm.internAtom("type"));
-    try emitStorageLoad(self, iter_storage);
-    try self.emit(.call, 1);
-    const tname = try self.vm.internAtom(type_name);
-    try self.@"const"(Data.new.atom(tname));
-    try self.emit(.eq, 0);
-    return self.jump(.jump_if_false);
 }
 
 pub fn emitLoopRecurse(

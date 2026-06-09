@@ -1,0 +1,76 @@
+
+# built-in for tables, tuples, strings
+for v in {10, 20, 30} do print(v) end
+# 10 20 30
+
+for v in (1, 2, 3) do print(v) end
+# 1 2 3
+
+for c in "hi" do print(c) end
+# "h" "i"
+
+@doc"counts down from n-1 to 0"
+fn countdown(n) do
+  let cur = n
+  fn() match cur
+  | 0 => :done
+  | _ => cur -= 1
+end
+
+for x in countdown(5) do print(x) end
+# 4 3 2 1 0
+
+#
+# custom object with an __iter metamethod
+#
+let Counter = set_metatable({
+  {:zero, "none"},
+  {:one, "singular"},
+  {:two, "pair"},
+  {:three, "crowd"}
+}, {
+  __iter = fn(self) do
+    let idx = 0
+    let n = len(self)
+    fn() match idx
+      | x when (x >= n) => :done
+      | _ => do
+        let val = self[idx]
+        idx += 1
+        val
+    end
+  end
+})
+
+for entry in Counter do print(entry) end
+# {:zero, "none"} {:one, "singular"} {:two, "pair"} {:three, "crowd"}
+
+# transform on access
+fn data_fn(self) do
+  let idx = 0
+  let n = len(self)
+  fn() match idx
+    | x when (x >= n) => :done
+    | _ => do
+        let val = self[idx] * 2
+        idx += 1
+        val
+    end
+end
+
+let data = set_metatable({10, 20, 30, 40}, { __iter = data_fn })
+
+for x in data do print(x) end
+# 20 40 60 80
+
+for x, i in data do print(i, x) end
+# 0 20; 1 40; 2 60; 3 80
+# iterator is still just a value
+
+let data2 = {10, 20, 30}
+let iter2 = to_iter(data2)
+print(iter2())
+print(iter2())
+print(iter2())
+print(iter2())
+# 10 20 30 :done

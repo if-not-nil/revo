@@ -187,6 +187,8 @@ pub const core_atoms = enum(AtomID) {
     __tostring,
     __debug,
     __call,
+    __iter,
+    done,
     SocketClosed,
     InvalidAddress,
     ConnectionFailed,

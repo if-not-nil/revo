@@ -322,10 +322,9 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
 
 pub fn inferTupleType(ctx: anytype, items: []const *ast.Node) TypeInfo {
     if (items.len == 0) return .{ .tuple = &.{} };
-    var types = std.ArrayList(TypeInfo).initCapacity(ctx.alloc, items.len) catch return .any;
-    defer types.deinit(ctx.alloc);
-    for (items) |item| types.append(ctx.alloc, inferExprType(ctx, item)) catch return .any;
-    return .{ .tuple = types.toOwnedSlice(ctx.alloc) catch return .any };
+    const types = ctx.alloc.alloc(TypeInfo, items.len) catch return .any;
+    for (items, types) |item, *dst| dst.* = inferExprType(ctx, item);
+    return .{ .tuple = types };
 }
 
 pub fn inferIndexType(ctx: anytype, object: *const ast.Node, key: *const ast.Node) TypeInfo {

@@ -7,12 +7,12 @@
 ##
 
 fn bind(trolley, track) match trolley
-  | (:ok, ok) track(ok)
-  | (:err, e) (:err, e)
+  | (:ok, ok) => track(ok)
+  | (:err, e) => (:err, e)
 
 fn unwrap_or_else(trolley, track) match trolley
-  | (:err, e) track(e)
-  | (:ok, ok) (:ok, ok)
+  | (:err, e) => track(e)
+  | (:ok, ok) => (:ok, ok)
 
 fn or_else_msg(trolley, track) match trolley
   | (:err, e, msg) track(e, msg)

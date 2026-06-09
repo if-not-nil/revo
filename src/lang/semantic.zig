@@ -18,14 +18,35 @@ pub fn analyze(
     type_map: ?*std.StringHashMap([]const u8),
     type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
 ) !?lang.Error {
-    var checker = try SemanticChecker.init(alloc, source_name, source, known_globals, type_map, type_annotations);
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, type_annotations);
     defer checker.deinit();
 
     _ = try checker.visit(root);
+    if (type_map) |tm| try reparentTypeMap(tm, alloc);
     if (checker.errors.items.len == 0) return null;
 
     const report = try checker.finishReport();
-    return .{ .semantic = .{ .kind = .ParseError, .report = report } };
+    const copied = try report.copy(alloc);
+    return .{ .semantic = .{ .kind = .ParseError, .report = copied } };
+}
+
+fn reparentTypeMap(tm: *std.StringHashMap([]const u8), alloc: std.mem.Allocator) !void {
+    var keys = try std.ArrayList([]const u8).initCapacity(alloc, tm.count());
+    defer keys.deinit(alloc);
+    var vals = try std.ArrayList([]const u8).initCapacity(alloc, tm.count());
+    defer vals.deinit(alloc);
+    var it = tm.iterator();
+    while (it.next()) |entry| {
+        keys.appendAssumeCapacity(try alloc.dupe(u8, entry.key_ptr.*));
+        vals.appendAssumeCapacity(try alloc.dupe(u8, entry.value_ptr.*));
+    }
+    tm.clearRetainingCapacity();
+    for (keys.items, vals.items) |k, v|
+        try tm.put(k, v);
 }
 
 const Scope = struct {
@@ -36,7 +57,7 @@ const Scope = struct {
     }
 
     fn deinit(self: *Scope) void {
-        self.values.deinit();
+        _ = self;
     }
 };
 
@@ -108,25 +129,7 @@ const SemanticChecker = struct {
     }
 
     fn deinit(self: *SemanticChecker) void {
-        while (self.scopes.items.len != 0) self.popScope();
-        var layouts = self.struct_layouts.iterator();
-        while (layouts.next()) |entry|
-            self.alloc.free(entry.value_ptr.*);
-
-        self.struct_layouts.deinit();
-        self.type_aliases.deinit();
-
-        for (self.fn_sigs.items) |sig| {
-            self.alloc.free(sig.param_names);
-            self.alloc.free(sig.param_types);
-            self.alloc.destroy(sig);
-        }
-
-        self.fn_sigs.deinit(self.alloc);
-        self.return_types.deinit(self.alloc);
-        self.typed_names.deinit();
-        self.errors.deinit(self.alloc);
-        self.scopes.deinit(self.alloc);
+        _ = self;
     }
 
     fn finishReport(self: *SemanticChecker) !diagnostic.Report {
@@ -148,8 +151,7 @@ const SemanticChecker = struct {
     }
 
     fn popScope(self: *SemanticChecker) void {
-        var scope = self.scopes.pop() orelse return;
-        scope.deinit();
+        _ = self.scopes.pop();
     }
 
     fn declare(self: *SemanticChecker, name: []const u8, t: types_mod.TypeInfo) !void {
@@ -229,9 +231,7 @@ const SemanticChecker = struct {
 
     fn makeStdlibSig(self: *SemanticChecker, spec: revo.std_lib.api.FnSpec) !?*FnSig {
         var param_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, spec.params.len);
-        defer param_types.deinit(self.alloc);
         var param_names = try std.ArrayList([]const u8).initCapacity(self.alloc, spec.params.len);
-        defer param_names.deinit(self.alloc);
         for (spec.params) |p| {
             try param_names.append(self.alloc, p[0]);
             const resolved = types_mod.resolveTypeName(self, p[1]);
@@ -264,9 +264,7 @@ const SemanticChecker = struct {
 
     fn makeFnSig(self: *SemanticChecker, fn_expr: anytype) !*FnSig {
         var param_names = try std.ArrayList([]const u8).initCapacity(self.alloc, fn_expr.params.len);
-        defer param_names.deinit(self.alloc);
         var param_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, fn_expr.params.len);
-        defer param_types.deinit(self.alloc);
         for (fn_expr.params) |p| {
             try param_names.append(self.alloc, p.name);
             try param_types.append(self.alloc, if (p.type_name) |tn| try types_mod.evalTypeExpr(self, tn) else .any);
@@ -466,9 +464,7 @@ const SemanticChecker = struct {
     fn analyzeStruct(self: *SemanticChecker, def: anytype, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
         var seen = std.StringHashMap(void).init(self.alloc);
-        defer seen.deinit();
         var fields = try std.ArrayList(struct_layout.FieldDef).initCapacity(self.alloc, def.items.len);
-        errdefer fields.deinit(self.alloc);
 
         for (def.items) |item| switch (item) {
             .field => |field| {
@@ -500,7 +496,6 @@ const SemanticChecker = struct {
         };
 
         const slice = try fields.toOwnedSlice(self.alloc);
-        if (self.struct_layouts.fetchRemove(def.name)) |kv| self.alloc.free(kv.value);
         try self.struct_layouts.put(def.name, slice);
         try self.declare(def.name, .{ .struct_type = def.name });
         return .{ .struct_type = def.name };
@@ -535,7 +530,6 @@ const SemanticChecker = struct {
                         name_str,
                         fn_type,
                     );
-                    self.alloc.free(name_str);
                 }
                 try self.declare(name, expected);
             } else {
@@ -548,7 +542,6 @@ const SemanticChecker = struct {
         // table literal -- analyze entries and record field types for method shadowing
         if (binding.value.expr == .table) {
             var fields = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
-            errdefer fields.deinit();
             for (binding.value.expr.table) |entry| {
                 if (entry.key) |key| {
                     if (key.expr == .ident) {
@@ -573,7 +566,6 @@ const SemanticChecker = struct {
                         name_str,
                         .{ .struct_type = "table" },
                     );
-                    self.alloc.free(name_str);
                 }
                 try self.declare(name, expected);
                 return expected;
@@ -601,7 +593,6 @@ const SemanticChecker = struct {
                     name_str,
                     value_type,
                 );
-                self.alloc.free(name_str);
             }
             try self.declare(name, expected);
             return expected;
@@ -674,7 +665,6 @@ const SemanticChecker = struct {
                 const actual_type = try self.analyzeNode(idx.object);
                 if (!types_mod.canCoerce(.{ .struct_type = "table" }, actual_type)) {
                     const name_str = try types_mod.formatType(self.alloc, actual_type);
-                    defer self.alloc.free(name_str);
 
                     try self.appendError(
                         try std.fmt.allocPrint(self.alloc, "mutation is not allowed for {s}", .{name_str}),
