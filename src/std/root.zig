@@ -579,7 +579,7 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
     var w = vm.runtime.stdout.writer(vm.runtime.io, &buf);
     defer w.flush() catch {};
 
-    std.debug.print("* test \"{s}\"...\n", .{try vm.strings.get(name)});
+    w.interface.print("* test \"{s}\"...\n", .{try vm.strings.get(name)}) catch {};
     const res = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
         const failure = vm.evalFailure(err);
         failure.render(vm.runtime.alloc, &w.interface, vm.currentDebugSource() orelse "") catch {
@@ -589,7 +589,6 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
                 "hard-fail - {s}",
                 .{@errorName(err)},
             );
-            // std.debug.print("!! hard-failed: \"{s}\"\n", .{@errorName(err)});
             return .{ .ok = Data.new.nil() };
         };
         return .{ .ok = Data.new.nil() };
@@ -614,7 +613,6 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
             "fail - {s}",
             .{obuf.written()},
         );
-        // std.debug.print("* failed: {s}\n", .{buf.items});
     }
     return .{ .ok = Data.new.nil() };
 }
@@ -622,15 +620,18 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
 /// internal, pls dont use. runs a test suite
 pub fn dosuite(args: []const Data, vm: *VM) !NativeResult {
     const body = args[1].asFunction().?;
+    var sbuf: [128]u8 = undefined;
+    var sw = vm.runtime.stdout.writer(vm.runtime.io, &sbuf);
+    defer sw.flush() catch {};
     _ = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
         const failure = vm.evalFailure(err);
         var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
         defer buf.deinit();
         failure.render(vm.runtime.alloc, &buf.writer, vm.currentDebugSource() orelse "") catch {
-            std.debug.print("* suite hard-failed: \"{s}\"\n", .{@errorName(err)});
+            sw.interface.print("* suite hard-failed: \"{s}\"\n", .{@errorName(err)}) catch {};
             return .okCa(.nil);
         };
-        std.debug.print("{s}\n", .{buf.written()});
+        sw.interface.print("{s}\n", .{buf.written()}) catch {};
     };
 
     return .okCa(.nil);
@@ -897,18 +898,20 @@ pub fn assert_eq(args: []const Data, vm: *VM) !NativeResult {
 /// prints values to stdout with space separator
 ///     print("hello", 42, "world")
 pub fn print(args: []const Data, vm: *VM) !NativeResult {
+    var pbuf: [256]u8 = undefined;
+    var pw = std.Io.File.stdout().writerStreaming(vm.runtime.io, &pbuf);
+    defer _ = pw.flush() catch {};
     if (args.len == 0) {
-        std.debug.print("\n", .{});
+        _ = try pw.interface.writeAll("\n");
+        try pw.flush();
         return okAtom(vm);
     }
     for (args, 0..) |a, idx| {
-        var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-        defer buf.deinit();
-        try append_data(&buf.writer, a, vm, .display);
-        std.debug.print("{s}", .{buf.written()});
-        if (idx < args.len - 1) std.debug.print(" ", .{});
+        if (idx != 0) _ = try pw.interface.writeAll(" ");
+        try append_data(&pw.interface, a, vm, .display);
     }
-    std.debug.print("\n", .{});
+    try pw.interface.print("\n", .{});
+    try pw.flush();
     return .{ .ok = revo.core_atoms.data(.ok) };
 }
 
