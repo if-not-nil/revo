@@ -118,9 +118,9 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
 
     for (artifact.instructions) |instr| {
         try writeIntLE(&buffer, allocator, u8, @intFromEnum(instr.op));
-        try writeIntLE(&buffer, allocator, u16, @intCast(instr.a));
-        try writeIntLE(&buffer, allocator, u16, @intCast(instr.b));
-        try writeIntLE(&buffer, allocator, u16, @intCast(instr.c));
+        try writeIntLE(&buffer, allocator, u8, @intCast(instr.a));
+        try writeIntLE(&buffer, allocator, u8, @intCast(instr.b));
+        try writeIntLE(&buffer, allocator, u8, @intCast(instr.c));
         try writeIntLE(&buffer, allocator, u32, @intCast(instr.bx));
     }
 
@@ -157,7 +157,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
     for (vm.functions.prototypes.items) |proto| {
         try writeIntLE(&buffer, allocator, u32, @intCast(proto.addr));
         try writeIntLE(&buffer, allocator, u8, proto.arity);
-        try writeIntLE(&buffer, allocator, u16, @intCast(proto.register_count));
+        try writeIntLE(&buffer, allocator, u8, @intCast(proto.register_count));
         try writeIntLE(&buffer, allocator, u32, @intCast(proto.name.len));
         try writeIntLE(&buffer, allocator, u32, @intCast(proto.upvalue_specs.len));
         try writeIntLE(&buffer, allocator, u32, @intCast(proto.const_locals.len));
@@ -165,12 +165,12 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
 
         for (proto.upvalue_specs) |spec| {
             try writeIntLE(&buffer, allocator, u8, if (spec.is_local) 1 else 0);
-            try writeIntLE(&buffer, allocator, u16, @intCast(spec.index));
+            try writeIntLE(&buffer, allocator, u8, @intCast(spec.index));
             try writeIntLE(&buffer, allocator, u8, if (spec.mutable) 1 else 0);
         }
 
         for (proto.const_locals) |local| {
-            try writeIntLE(&buffer, allocator, u16, @intCast(local));
+            try writeIntLE(&buffer, allocator, u8, @intCast(local));
         }
 
         const bits_len = (proto.const_locals.len + 7) / 8;
@@ -245,9 +245,9 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     for (instructions) |*instr| {
         instr.* = .{
             .op = @enumFromInt((try reader.takeArray(1))[0]),
-            .a = std.mem.readInt(u16, try reader.takeArray(2), .little),
-            .b = std.mem.readInt(u16, try reader.takeArray(2), .little),
-            .c = std.mem.readInt(u16, try reader.takeArray(2), .little),
+            .a = (try reader.takeArray(1))[0],
+            .b = (try reader.takeArray(1))[0],
+            .c = (try reader.takeArray(1))[0],
             .bx = std.mem.readInt(u32, try reader.takeArray(4), .little),
         };
     }
@@ -307,7 +307,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     for (0..prototypes_count) |_| {
         const addr = std.mem.readInt(u32, try reader.takeArray(4), .little);
         const arity = (try reader.takeArray(1))[0];
-        const register_count = std.mem.readInt(u16, try reader.takeArray(2), .little);
+        const register_count: u8 = (try reader.takeArray(1))[0];
         const name_len = std.mem.readInt(u32, try reader.takeArray(4), .little);
         const uv_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
         const cl_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
@@ -321,7 +321,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
         for (upvalue_specs) |*spec| {
             spec.* = .{
                 .is_local = (try reader.takeArray(1))[0] != 0,
-                .index = std.mem.readInt(u16, try reader.takeArray(2), .little),
+                .index = (try reader.takeArray(1))[0],
                 .mutable = (try reader.takeArray(1))[0] != 0,
             };
         }
@@ -329,7 +329,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
         const const_locals = try allocator.alloc(functions.LocalSlot, cl_count);
         defer allocator.free(const_locals);
         for (const_locals) |*local| {
-            local.* = std.mem.readInt(u16, try reader.takeArray(2), .little);
+            local.* = (try reader.takeArray(1))[0];
         }
 
         const bits_len = (cl_count + 7) / 8;

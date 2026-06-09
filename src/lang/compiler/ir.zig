@@ -4,13 +4,14 @@ const revo = @import("revo");
 const Instruction = revo.opcode.Instruction;
 const Opcode = revo.opcode.Opcode;
 const Operand = revo.Operand;
+const Register = revo.opcode.Register;
 
-pub const IrValue = union(enum) { reg: u16, const_idx: usize, inst: *IrInst };
+pub const IrValue = union(enum) { reg: Register, const_idx: usize, inst: *IrInst };
 
 pub const IrInst = struct {
     opcode: Opcode,
     operands: []const IrValue,
-    result_reg: u16 = 0,
+    result_reg: Register = 0,
     op_arg: Operand = 0,
 };
 
@@ -42,31 +43,32 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
     const op = inst.opcode;
     const r = inst.result_reg;
     const bx = inst.op_arg;
+    const bxi: u32 = @intCast(bx);
     var bc: Instruction = undefined;
 
     switch (op) {
         .add, .sub, .mul, .div, .mod, .add_int, .sub_int, .mul_int, .div_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .negate, .not, .negate_int, .negate_float => bc = .{ .op = op, .a = r, .b = r },
-        .load_global, .load_stdlib_global, .load_upval, .closure => bc = .{ .op = op, .a = r, .bx = bx },
+        .load_global, .load_stdlib_global, .load_upval, .closure => bc = .{ .op = op, .a = r, .bx = bxi },
         .load_local => bc = .{ .op = op, .a = r, .b = @intCast(bx) },
         .table_new => bc = .{ .op = op, .a = r },
-        .struct_new => bc = .{ .op = op, .a = r, .bx = bx },
+        .struct_new => bc = .{ .op = op, .a = r, .bx = bxi },
         .load_nil => bc = .{ .op = op, .a = r },
-        .load_small_int => bc = .{ .op = op, .a = r, .bx = bx },
-        .load_const => bc = .{ .op = op, .a = r, .bx = bx },
+        .load_small_int => bc = .{ .op = op, .a = r, .bx = bxi },
+        .load_const => bc = .{ .op = op, .a = r, .bx = bxi },
         .halt => bc = .{ .op = op, .a = if (r == 0) 0 else r },
         .ret => bc = .{ .op = op, .a = if (r == 0) 0 else r },
-        .jump => bc = .{ .op = op, .bx = bx },
-        .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => bc = .{ .op = op, .a = r, .bx = bx },
-        .store_global, .store_global_const, .store_upval => bc = .{ .op = op, .a = r, .bx = bx },
+        .jump => bc = .{ .op = op, .bx = bxi },
+        .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => bc = .{ .op = op, .a = r, .bx = bxi },
+        .store_global, .store_global_const, .store_upval => bc = .{ .op = op, .a = r, .bx = bxi },
         .store_local, .bind_local => bc = .{ .op = op, .a = @intCast(bx), .b = r },
-        .tuple_new => bc = .{ .op = op, .a = r, .b = r, .bx = bx },
+        .tuple_new => bc = .{ .op = op, .a = r, .b = r, .bx = bxi },
         .tuple_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .table_set => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
         .table_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
-        .table_set_atom, .struct_set_offset => bc = .{ .op = op, .a = r, .c = r + 1, .bx = bx },
+        .table_set_atom, .struct_set_offset => bc = .{ .op = op, .a = r, .c = r + 1, .bx = bxi },
         .struct_set_method => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
-        .table_get_atom, .tuple_get_const, .struct_get_offset => bc = .{ .op = op, .a = r, .b = r, .bx = bx },
+        .table_get_atom, .tuple_get_const, .struct_get_offset => bc = .{ .op = op, .a = r, .b = r, .bx = bxi },
         .call, .spawn => bc = .{ .op = op, .a = r, .b = @intCast(bx), .c = r },
         .call_field => bc = .{ .op = op, .a = r, .b = @intCast(bx), .c = r },
         .join => bc = .{ .op = op, .a = r },
@@ -82,10 +84,10 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
         .range_init => bc = .{ .op = op, .a = r, .b = r, .c = r + 2, .bx = @intCast(r + 1) },
         .range_next => {
             const has_index = bx != 0;
-            bc = .{ .op = op, .a = r, .b = r - 3, .c = if (has_index) r + 1 else 0, .bx = @as(Operand, if (has_index) r + 2 else r + 1) };
+            bc = .{ .op = op, .a = r, .b = r - 3, .c = if (has_index) r + 1 else 0, .bx = @as(u32, if (has_index) r + 2 else r + 1) };
         },
-        .range_for => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2, .bx = bx },
-        .unwrap_result => bc = .{ .op = op, .a = r, .bx = bx },
+        .range_for => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2, .bx = bxi },
+        .unwrap_result => bc = .{ .op = op, .a = r, .bx = bxi },
     }
 
     try out.append(alloc, bc);

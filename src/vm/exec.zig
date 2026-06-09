@@ -859,8 +859,8 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             continue :dispatch instr.op;
         },
         .call_field => {
-            const colon = (instr.b & @as(opcode.Register, 1 << 15)) != 0;
-            const explicit_argc: usize = @intCast(instr.b & ~@as(opcode.Register, 1 << 15));
+            const colon = (instr.b & 0x80) != 0;
+            const explicit_argc: usize = instr.b & 0x7F;
             const object = regRead(regs, base, instr.a);
             const key = regRead(regs, base, instr.a + 1);
 

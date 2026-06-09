@@ -1,5 +1,5 @@
 pub const Operand = usize;
-pub const Register = u16;
+pub const Register = u8;
 
 pub const Opcode = enum(u8) {
     move, // "R[a] <- R[b]"
@@ -127,10 +127,10 @@ pub const Opcode = enum(u8) {
     jump_if_err, // if (:err, ...), jump to bx
 };
 
-pub const Instruction = struct {
+pub const Instruction = packed struct {
     op: Opcode,
-    a: Register = 0,
-    b: Register = 0,
-    c: Register = 0,
-    bx: Operand = 0,
+    a: u8 = 0,
+    b: u8 = 0,
+    c: u8 = 0,
+    bx: u32 = 0,
 };

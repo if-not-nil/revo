@@ -5,6 +5,7 @@ const Data = revo.Data;
 const Instruction = revo.Instruction;
 const Opcode = revo.opcode.Opcode;
 const Operand = revo.Operand;
+const Register = revo.opcode.Register;
 const VM = revo.VM;
 const LocalSlot = revo.LocalSlot;
 const ProgramCounter = revo.ProgramCounter;
@@ -221,7 +222,7 @@ pub const Compiler = struct {
         return self.value_stack.pop() orelse error.OutOfMemory;
     }
 
-    pub fn record(self: *Compiler, opcode: Opcode, ops: []const ir.IrValue, push_res: bool, result_reg: u16, op_arg: Operand) !*ir.IrInst {
+    pub fn record(self: *Compiler, opcode: Opcode, ops: []const ir.IrValue, push_res: bool, result_reg: Register, op_arg: Operand) !*ir.IrInst {
         const inst = try self.alloc.create(ir.IrInst);
         inst.* = .{ .opcode = opcode, .operands = try self.alloc.dupe(ir.IrValue, ops) };
         try self.ir_builder.instructions.append(self.alloc, inst);
@@ -231,7 +232,7 @@ pub const Compiler = struct {
         return inst;
     }
 
-    pub fn recordStackOp(self: *Compiler, opcode: Opcode, pop_n: usize, push_n: usize, result_reg: u16, op_arg: Operand) !void {
+    pub fn recordStackOp(self: *Compiler, opcode: Opcode, pop_n: usize, push_n: usize, result_reg: Register, op_arg: Operand) !void {
         var ops = try self.alloc.alloc(ir.IrValue, pop_n);
         defer self.alloc.free(ops);
         var i = pop_n;
@@ -244,11 +245,11 @@ pub const Compiler = struct {
         while (p < push_n) : (p += 1) try self.value_stack.append(self.alloc, self.ir_builder.instructions.items[self.ir_builder.instructions.items.len - 1]);
     }
 
-    pub fn recordLoad(self: *Compiler, opcode: Opcode, result_reg: u16, op_arg: Operand) !void {
+    pub fn recordLoad(self: *Compiler, opcode: Opcode, result_reg: Register, op_arg: Operand) !void {
         _ = try self.record(opcode, &.{}, true, result_reg, op_arg);
     }
 
-    pub fn recordMove(self: *Compiler, result_reg: u16) !void {
+    pub fn recordMove(self: *Compiler, result_reg: Register) !void {
         if (self.value_stack.items.len == 0) {
             _ = try self.record(.load_nil, &.{}, true, result_reg, 0);
             return;
@@ -321,7 +322,7 @@ pub const Compiler = struct {
 
     pub fn emit(self: *Compiler, op: Opcode, op_arg: Operand) !void {
         var d = self.active_registers;
-        var result_reg: u16 = 0;
+        var result_reg: Register = 0;
 
         switch (op) {
             .add, .sub, .mul, .div, .mod, .add_int, .sub_int, .mul_int, .div_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
@@ -427,7 +428,7 @@ pub const Compiler = struct {
                 try self.recordStackOp(op, op_arg + 1, 1, result_reg, op_arg);
             },
             .call_field => {
-                const argc = op_arg & ~@as(Operand, 1 << 15);
+                    const argc = op_arg & ~@as(Operand, 1 << 7);
                 const needed = argc + 2;
                 std.debug.assert(d >= needed);
                 const base = d - needed;
@@ -818,7 +819,7 @@ pub const Compiler = struct {
                     );
                     for (call.args) |arg| try self.compile(arg, true);
                     const argc = call.args.len |
-                        (@as(usize, @intFromBool(call.implicit_self)) << 15);
+                        (@as(usize, @intFromBool(call.implicit_self)) << 7);
                     try self.emit(.call_field, @intCast(argc));
                 }
             },
@@ -827,7 +828,7 @@ pub const Compiler = struct {
                 try self.compile(index.key, true);
                 for (call.args) |arg| try self.compile(arg, true);
                 const argc = call.args.len |
-                    (@as(usize, @intFromBool(call.implicit_self)) << 15);
+                    (@as(usize, @intFromBool(call.implicit_self)) << 7);
                 try self.emit(.call_field, @intCast(argc));
             },
             .ident => |fn_name| {

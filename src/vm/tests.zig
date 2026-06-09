@@ -33,7 +33,7 @@ test "vm join returns dead fiber result" {
 
     const handle = try vm.addConstant(Data.new.num(1));
     const program = [_]revo.Instruction{
-        .{ .op = .load_const, .a = 0, .bx = handle },
+        .{ .op = .load_const, .a = 0, .bx = @intCast(handle) },
         .{ .op = .join, .a = 0 },
         .{ .op = .halt, .a = 0 },
     };
@@ -63,7 +63,7 @@ test "vm join parks current fiber when target alive" {
     //
     // const handle = try vm.addConstant(Data.new.num(1));
     // const program = [_]revo.Instruction{
-    //     .{ .op = .load_const, .a = 0, .bx = handle },
+    //     .{ .op = .load_const, .a = 0, .bx = @intCast(handle) },
     //     .{ .op = .join, .a = 0 },
     //     .{ .op = .halt, .a = 0 },
     // };
@@ -95,9 +95,9 @@ test "vm spawn passes n args to child and join returns result" {
     const c_three = try vm.addConstant(Data.new.num(3));
 
     const program = [_]revo.Instruction{
-        .{ .op = .load_const, .a = 0, .bx = c_fn },
-        .{ .op = .load_const, .a = 1, .bx = c_two },
-        .{ .op = .load_const, .a = 2, .bx = c_three },
+        .{ .op = .load_const, .a = 0, .bx = @intCast(c_fn) },
+        .{ .op = .load_const, .a = 1, .bx = @intCast(c_two) },
+        .{ .op = .load_const, .a = 2, .bx = @intCast(c_three) },
         .{ .op = .spawn, .a = 0, .b = 2, .c = 0 },
         .{ .op = .join, .a = 0 },
         .{ .op = .halt, .a = 0 },
