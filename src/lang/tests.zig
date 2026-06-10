@@ -3166,3 +3166,63 @@ test "expect returns value on truthy" {
         \\ expect(42)?
     , 42);
 }
+
+//
+// optional param
+//
+
+test "optional param omitted defaults to :no" {
+    try t.top_atom(
+        \\ const f = fn(a, ?b) b
+        \\ f(42)
+    , "no");
+}
+
+test "optional param provided passes through" {
+    try t.top_number(
+        \\ const f = fn(a, ?b) b
+        \\ f(42, 10)
+    , 10);
+}
+
+test "optional param with required and optional both used" {
+    try t.top_number(
+        \\ const f = fn(a, ?b) a + b
+        \\ f(3, 7)
+    , 10);
+}
+
+test "multiple optional params" {
+    try t.top_atom(
+        \\ const f = fn(a, ?b, ?c) c
+        \\ f(1)
+    , "no");
+}
+
+test "second optional param provided while first omitted" {
+    try t.top_number(
+        \\ const f = fn(a, ?b, ?c) c
+        \\ f(1, :no, 42)
+    , 42);
+}
+
+test "all params optional" {
+    try t.top_atom(
+        \\ const f = fn(?a, ?b) a
+        \\ f()
+    , "no");
+}
+
+test "too few args on fn with optional" {
+    try t.expectCompileError(
+        \\ const f = fn(a, ?b) a
+        \\ f()
+    , .ParseError);
+}
+
+test "too many args on fn with optional" {
+    try t.expectCompileError(
+        \\ const f = fn(a, ?b) a
+        \\ f(1, 2, 3)
+    , .ParseError);
+}

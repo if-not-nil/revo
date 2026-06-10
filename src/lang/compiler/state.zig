@@ -43,6 +43,7 @@ pub const FunctionState = struct {
         param_names: []const []const u8,
         param_types: []const ?[]const u8,
         return_type: ?[]const u8,
+        required_count: usize,
     };
 
     pub fn init(alloc: std.mem.Allocator) !FunctionState {
@@ -405,6 +406,11 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
         else => null,
     } else null);
 
+    var required_count: usize = params.len;
+    for (params) |p| {
+        if (p.optional) required_count -= 1;
+    }
+
     sig.* = .{
         .param_names = try param_names.toOwnedSlice(self.alloc),
         .param_types = try param_types.toOwnedSlice(self.alloc),
@@ -412,6 +418,7 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
             .named => |n| n,
             else => @tagName(rt.kind),
         } else null,
+        .required_count = required_count,
     };
     return sig;
 }

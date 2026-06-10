@@ -83,6 +83,7 @@ test "vm spawn passes n args to child and join returns result" {
     const proto_id = try vm.functions.createPrototype(.{
         .addr = 6,
         .arity = 2,
+        .total_arity = 2,
         .register_count = 4,
         .name = "sum2",
         .upvalue_specs = &.{},
@@ -255,6 +256,7 @@ test "vm gc reuses freed function ids" {
     const proto_id = try vm.functions.createPrototype(.{
         .addr = 0,
         .arity = 0,
+        .total_arity = 0,
         .name = "f",
         .upvalue_specs = &.{},
         .const_locals = &.{},
@@ -278,6 +280,7 @@ test "vm gc keeps rooted closures and captured tables alive" {
     const proto_id = try vm.functions.createPrototype(.{
         .addr = 0,
         .arity = 0,
+        .total_arity = 0,
         .name = "capture",
         .upvalue_specs = &.{},
         .const_locals = &.{},
@@ -304,6 +307,7 @@ test "vm gc keeps struct methods alive" {
     const proto_id = try vm.functions.createPrototype(.{
         .addr = 0,
         .arity = 1,
+        .total_arity = 1,
         .name = "take",
         .upvalue_specs = &.{},
         .const_locals = &.{},

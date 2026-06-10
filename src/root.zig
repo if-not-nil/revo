@@ -175,6 +175,7 @@ pub const core_atoms = enum(AtomID) {
     undef,
     none,
     no_result,
+    no,
     false,
     // false atoms all above to check faster
     true,

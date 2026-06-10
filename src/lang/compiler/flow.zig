@@ -705,10 +705,14 @@ pub fn compileAnd(self: *Compiler, left: *const Node, right: *const Node) !void 
     try self.regDupe();
     const short = try self.jump(.jump_if_false);
     try self.regRelease();
+    const left_inst = try self.pop(); // non-constant
     try self.compile(right, true);
     const end = try self.jump(.jump);
     self.patchJump(short);
     self.patchJump(end);
+    // push left's inst so value_stack has non-constant ref (prevents fold pass
+    // from treating add/mul/whatever operands as constants across the branch)
+    try self.value_stack.append(self.alloc, left_inst);
 }
 
 pub fn compileOr(self: *Compiler, left: *const Node, right: *const Node) !void {
@@ -717,10 +721,14 @@ pub fn compileOr(self: *Compiler, left: *const Node, right: *const Node) !void {
     try self.regDupe();
     const short = try self.jump(.jump_if_true);
     try self.regRelease();
+    const left_inst = try self.pop(); // non-constant
     try self.compile(right, true);
     const end = try self.jump(.jump);
     self.patchJump(short);
     self.patchJump(end);
+    // push left's inst so value_stack has non-constant ref (prevents fold pass
+    // from treating add/mul/whatever operands as constants across the branch)
+    try self.value_stack.append(self.alloc, left_inst);
 }
 
 pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node) !void {

@@ -1067,7 +1067,7 @@ pub const Compiler = struct {
         const reordered_args = try tryReorderNamedParams(self, args, sig);
         var had_error = false;
 
-        if (reordered_args.len != sig.param_types.len) {
+        if (reordered_args.len < sig.required_count or reordered_args.len > sig.param_types.len) {
             var extra_parts = try std.ArrayList(diagnostic.Part).initCapacity(self.alloc, 1);
             defer extra_parts.deinit(self.alloc);
             if (reordered_args.len > sig.param_types.len) {
@@ -1077,25 +1077,22 @@ pub const Compiler = struct {
                     &extra_parts,
                 );
             }
-            const msg = try std.fmt.allocPrint(
-                self.alloc,
-                "call to `{s}` wants {d} arg(s), got {d}",
-                .{
-                    fn_name,
-                    sig.param_types.len,
-                    reordered_args.len,
-                },
-            );
-            if (extra_parts.items.len > 0) {
-                try self.appendFailureReport(.ParseError, &.{
-                    .{ .@"error" = msg },
-                    extra_parts.items[0],
-                });
-            } else {
-                try self.appendFailureReport(.ParseError, &.{
-                    .{ .@"error" = msg },
-                });
-            }
+            const msg = if (sig.required_count == sig.param_types.len)
+                try std.fmt.allocPrint(
+                    self.alloc,
+                    "call to `{s}` wants {d} arg(s), got {d}",
+                    .{ fn_name, sig.required_count, reordered_args.len },
+                )
+            else
+                try std.fmt.allocPrint(
+                    self.alloc,
+                    "call to `{s}` wants at least {d} arg(s), got {d}",
+                    .{ fn_name, sig.required_count, reordered_args.len },
+                );
+            try self.appendFailureReport(.ParseError, &.{
+                .{ .@"error" = msg },
+                if (extra_parts.items.len > 0) extra_parts.items[0] else .{ .@"error" = "" },
+            });
             had_error = true;
         }
 
@@ -1451,6 +1448,10 @@ pub const Compiler = struct {
         if (loop_sym != null) self.in_loop_depth += 1;
         defer self.in_loop_depth = prev_in_loop;
 
+        var required_count: u8 = @intCast(params.len);
+        for (params) |p| {
+            if (p.optional) required_count -= 1;
+        }
         self.active_registers = params.len;
         self.max_registers = params.len;
         self.upvalue_cache.clearRetainingCapacity();
@@ -1490,7 +1491,8 @@ pub const Compiler = struct {
         self.patchJump(jump_over);
         const proto_id = try self.vm.functions.createPrototype(.{
             .addr = body_addr,
-            .arity = @intCast(params.len),
+            .arity = required_count,
+            .total_arity = @intCast(params.len),
             .register_count = @intCast(fn_register_count),
             .name = name,
             .upvalue_specs = finished.upvalues.items,

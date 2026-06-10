@@ -1302,6 +1302,21 @@ fn callNonClosureFunction(
     }
 }
 
+fn fillOptionalSlots(regs: []Data, base: usize, argc: usize, total_arity: u8, register_count: u8) void {
+    if (argc < total_arity) {
+        @memset(
+            regs[base + argc .. base + total_arity],
+            revo.core_atoms.data(.no),
+        );
+    }
+    if (total_arity < register_count) {
+        @memset(
+            regs[base + total_arity .. base + register_count],
+            revo.core_atoms.data(.missing),
+        );
+    }
+}
+
 pub fn callRegister(
     self: *VM,
     instr: Instruction,
@@ -1326,17 +1341,20 @@ pub fn callRegister(
             .closure => |closure| {
                 if (closure.arity !=
                     root.functions.VARIADIC and
-                    closure.arity != argc)
+                    (argc < closure.arity or argc > closure.total_arity))
                 {
                     @branchHint(.unlikely);
-                    try self.setRuntimeMessageFmt(
-                        "function `{s}` wants {d} args, got {d}",
-                        .{
-                            closure.name,
-                            closure.arity,
-                            argc,
-                        },
-                    );
+                    if (closure.arity == closure.total_arity) {
+                        try self.setRuntimeMessageFmt(
+                            "function `{s}` wants {d} args, got {d}",
+                            .{ closure.name, closure.arity, argc },
+                        );
+                    } else {
+                        try self.setRuntimeMessageFmt(
+                            "function `{s}` wants between {d} and {d} args, got {d}",
+                            .{ closure.name, closure.arity, closure.total_arity, argc },
+                        );
+                    }
                     return error.WrongArity;
                 }
 
@@ -1377,12 +1395,13 @@ pub fn callRegister(
                             try ensureRegCapacity(fiber, self.runtime.alloc, tail_needed);
                             fiber.registers_len = tail_needed;
                         }
-                        if (argc < closure.register_count) {
-                            @memset(
-                                fiber.registers[tail_frame_hot.base + argc .. tail_frame_hot.base + closure.register_count],
-                                revo.core_atoms.data(.missing),
-                            );
-                        }
+                        fillOptionalSlots(
+                            fiber.registers,
+                            tail_frame_hot.base,
+                            argc,
+                            closure.total_arity,
+                            closure.register_count,
+                        );
 
                         if (self.functions.segments.items.len > closure.segment_id) {
                             fiber.program = self.functions.segments.items[closure.segment_id];
@@ -1398,12 +1417,13 @@ pub fn callRegister(
                     try ensureRegCapacity(fiber, self.runtime.alloc, call_needed);
                     fiber.registers_len = call_needed;
                 }
-                if (argc < closure.register_count) {
-                    @memset(
-                        fiber.registers[new_base + argc .. new_base + closure.register_count],
-                        revo.core_atoms.data(.missing),
-                    );
-                }
+                fillOptionalSlots(
+                    fiber.registers,
+                    new_base,
+                    argc,
+                    closure.total_arity,
+                    closure.register_count,
+                );
 
                 try fiber.frames_hot.append(
                     self.runtime.alloc,
@@ -1794,12 +1814,12 @@ pub inline fn spawnRegister(
     };
 
     if (closure.arity != root.functions.VARIADIC and
-        closure.arity != argc)
+        (argc < closure.arity or argc > closure.total_arity))
     {
         @branchHint(.unlikely);
         try self.setRuntimeMessageFmt(
-            "fiber closure `{s}` wants {d} args, got {d}",
-            .{ closure.name, closure.arity, argc },
+            "fiber closure `{s}` wants between {d} and {d} args, got {d}",
+            .{ closure.name, closure.arity, closure.total_arity, argc },
         );
         return error.WrongArity;
     }
@@ -1828,6 +1848,14 @@ pub inline fn spawnRegister(
         else
             revo.core_atoms.data(.missing);
     }
+
+    fillOptionalSlots(
+        child.registers,
+        0,
+        argc,
+        closure.total_arity,
+        closure.register_count,
+    );
 
     const child_closure_id = try self.detachClosureForFiber(
         closure_id,

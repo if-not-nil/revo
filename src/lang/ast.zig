@@ -156,6 +156,7 @@ pub fn allocTypeExpr(allocator: std.mem.Allocator, span: Span, kind: TypeExpr.Ki
 pub const FnParam = struct {
     name: []const u8,
     type_name: ?*TypeExpr = null,
+    optional: bool = false,
 };
 
 pub const TableEntry = struct {

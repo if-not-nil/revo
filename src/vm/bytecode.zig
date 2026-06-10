@@ -341,6 +341,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
         _ = try vm.functions.createPrototype(.{
             .addr = addr,
             .arity = arity,
+            .total_arity = arity,
             .register_count = register_count,
             .name = name,
             .upvalue_specs = upvalue_specs,

@@ -65,6 +65,7 @@ pub const FunctionSignature = struct {
     return_type: TypeInfo,
     param_names: []const []const u8 = &.{},
     is_any_fn_sig: bool = false,
+    required_count: usize = 0,
 };
 
 /// sentinel "any function" type,,, matches any callable value

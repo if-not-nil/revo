@@ -66,6 +66,7 @@ const FnSig = struct {
     param_types: []const types_mod.TypeInfo,
     return_type: types_mod.TypeInfo,
     sig: types_mod.FunctionSignature,
+    required_count: usize,
 };
 
 const SemanticChecker = struct {
@@ -254,10 +255,12 @@ const SemanticChecker = struct {
             .param_names = names_slice,
             .param_types = types_slice,
             .return_type = ret,
+            .required_count = types_slice.len,
             .sig = .{
                 .param_names = names_slice,
                 .params = types_slice,
                 .return_type = ret,
+                .required_count = types_slice.len,
             },
         };
         try self.fn_sigs.append(self.alloc, sig_ptr);
@@ -267,9 +270,11 @@ const SemanticChecker = struct {
     fn makeFnSig(self: *SemanticChecker, fn_expr: anytype) !*FnSig {
         var param_names = try std.ArrayList([]const u8).initCapacity(self.alloc, fn_expr.params.len);
         var param_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, fn_expr.params.len);
+        var required_count: usize = 0;
         for (fn_expr.params) |p| {
             try param_names.append(self.alloc, p.name);
             try param_types.append(self.alloc, if (p.type_name) |tn| try types_mod.evalTypeExpr(self, tn) else .any);
+            if (!p.optional) required_count += 1;
         }
         const params_slice = try param_types.toOwnedSlice(self.alloc);
         const names_slice = try param_names.toOwnedSlice(self.alloc);
@@ -279,10 +284,12 @@ const SemanticChecker = struct {
             .param_names = names_slice,
             .param_types = params_slice,
             .return_type = ret,
+            .required_count = required_count,
             .sig = .{
                 .param_names = names_slice,
                 .params = params_slice,
                 .return_type = ret,
+                .required_count = required_count,
             },
         };
         try self.fn_sigs.append(self.alloc, sig_ptr);
@@ -350,7 +357,7 @@ const SemanticChecker = struct {
                         break :chk first == .atom and
                             // handle both with-colon and without-colon conventions
                             (std.mem.eql(u8, first.atom, ":ok") or std.mem.eql(u8, first.atom, "ok") or
-                             std.mem.eql(u8, first.atom, ":err") or std.mem.eql(u8, first.atom, "err"));
+                                std.mem.eql(u8, first.atom, ":err") or std.mem.eql(u8, first.atom, "err"));
                     } else false;
                     if (!is_result) {
                         try self.appendError(
@@ -783,22 +790,23 @@ const SemanticChecker = struct {
             // method calls (implicit_self) prepend the object as arg 0 at runtime
             const self_offset: usize = if (call.implicit_self) 1 else 0;
             const total_args = call.args.len + self_offset;
-            if (total_args != sig.params.len) {
+            if (total_args < sig.required_count or (total_args > sig.params.len)) {
                 const stdlib_spec = revo.std_lib.api.find(name);
                 const is_variadic = stdlib_spec != null and stdlib_spec.?.variadic;
-                const min_args = if (is_variadic) sig.params.len -| 1 else sig.params.len;
-                if (total_args < min_args) {
+                if (is_variadic and total_args >= sig.params.len -| 1) {
+                    // variadic fns are fine with >= min
+                } else if (total_args < sig.required_count) {
                     const label = try std.fmt.allocPrint(self.alloc, "{d} missing args", .{
-                        min_args -| total_args,
+                        sig.required_count -| total_args,
                     });
                     try self.appendError(
                         try std.fmt.allocPrint(self.alloc, "`{s}` wants at least {d} args, got {d}", .{
-                            name, min_args, total_args,
+                            name, sig.required_count, total_args,
                         }),
                         call.callee.span,
                         label,
                     );
-                } else if (!is_variadic and total_args > sig.params.len) {
+                } else if (total_args > sig.params.len) {
                     const label = try std.fmt.allocPrint(self.alloc, "{d} extra args", .{
                         total_args -| sig.params.len,
                     });

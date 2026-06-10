@@ -1182,8 +1182,9 @@ fn parseParamList(self: *Parser, terminator: TokenType) anyerror![]ast.FnParam {
     errdefer params.deinit(self.alloc);
 
     while (!self.check(terminator)) {
+        const optional = self.match(.huh);
         const name = try self.expectIdent();
-        var param: ast.FnParam = .{ .name = name.text };
+        var param: ast.FnParam = .{ .name = name.text, .optional = optional };
         if (self.match(.colon)) param.type_name = try self.parseTypeExpr();
         try params.append(self.alloc, param);
         if (!self.match(.comma)) break;
