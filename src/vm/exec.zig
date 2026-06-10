@@ -696,19 +696,34 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
         .closure => {
             const proto = try self.functions.getPrototype(instr.bx);
             self.noteGCPressure(@sizeOf(revo.functions.Closure) + @sizeOf(revo.functions.UpvalueID) * proto.upvalue_specs.len);
-            var upvalues = try std.ArrayList(revo.functions.UpvalueID).initCapacity(alloc, proto.upvalue_specs.len);
-            defer upvalues.deinit(alloc);
 
-            for (proto.upvalue_specs) |spec| {
-                if (spec.is_local) {
-                    const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
-                    try upvalues.append(alloc, try self.captureUpvalue(frame_base + spec.index));
-                } else {
-                    const closure2 = (try self.currentClosure()) orelse return self.evalFailure(error.TypeError);
-                    try upvalues.append(alloc, closure2.upvalues[spec.index]);
+            var upv_buf: [8]revo.functions.UpvalueID = undefined;
+            const upvalues = if (proto.upvalue_specs.len <= 8) blk: {
+                for (proto.upvalue_specs, 0..) |spec, i| {
+                    if (spec.is_local) {
+                        const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+                        upv_buf[i] = try self.captureUpvalue(frame_base + spec.index);
+                    } else {
+                        const closure2 = (try self.currentClosure()) orelse return self.evalFailure(error.TypeError);
+                        upv_buf[i] = closure2.upvalues[spec.index];
+                    }
                 }
-            }
-            regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, upvalues.items)));
+                break :blk upv_buf[0..proto.upvalue_specs.len];
+            } else blk: {
+                var list = try std.ArrayList(revo.functions.UpvalueID).initCapacity(alloc, proto.upvalue_specs.len);
+                defer list.deinit(alloc);
+                for (proto.upvalue_specs) |spec| {
+                    if (spec.is_local) {
+                        const frame_base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+                        try list.append(alloc, try self.captureUpvalue(frame_base + spec.index));
+                    } else {
+                        const closure2 = (try self.currentClosure()) orelse return self.evalFailure(error.TypeError);
+                        try list.append(alloc, closure2.upvalues[spec.index]);
+                    }
+                }
+                break :blk list.items;
+            };
+            regWrite(regs, base, instr.a, Data.new.function(try self.functions.createClosure(instr.bx, upvalues)));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
