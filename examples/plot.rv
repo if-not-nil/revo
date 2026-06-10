@@ -1,0 +1,90 @@
+#!/usr/bin/env revo
+
+const colors = {
+	"#009E73",
+	"#F0E442",
+	"#0072B2",
+	"#CC79A7",
+	"#D55E00"
+}
+
+fn indexes(table) do
+	let i = -1
+	table:map(fn(elem) do
+		i = i + 1
+		(i, elem)
+	end)
+end
+
+fn append(table, value) do
+	table:insert(table:len(), value)
+end
+
+fn transpose(table) do
+	let result = {}
+	const length = table[0]:len()
+	for i in 0..length do
+		result:insert(i, table:map(fn(t) t[i]))
+	end
+	result
+end
+
+let line = :nil
+let data = {}
+while do
+	let (st_, line_) = read({})
+	line = line_
+	st_ == :ok
+end do
+	if (line != :nil)
+		line
+			|> _:split(",")
+			|> _:map(fn (n) tonumber(n) orelse 0)
+			|> append(data, _)
+end
+
+const (min, max) = data:reduce(
+	fn(acc, row) row:reduce(
+		fn(rowacc, num) (
+			math.min(rowacc[0], num),
+			math.max(rowacc[1], num)
+		),
+		acc
+	),
+	(1000000, -1000000)
+)
+
+const padding = 5
+const width = 800
+const height = 300
+
+print("<?xml version='1.0'?>")
+print({
+	"<svg xmlns='http://www.w3.org/2000/svg' width='",
+	width + padding * 2,
+	"' height='",
+	height + padding * 2,
+	"' version='1.1'>"
+}:concat(""))
+
+for series in indexes(transpose(data)) do
+	const (color, linedata) = series
+	let output = {
+		"	<polyline stroke='",
+		colors[color],
+		"' stroke-width='2.5' fill='none' points='"
+	}:concat("")
+	for entry in indexes(linedata) do
+		const (index, point) = entry
+		if (index != 0) (output = output + " ")
+		output = {
+			output,
+			(index / linedata:len() * width + padding),
+			",",
+			(height - (point - min) / (max - min) * height + padding)
+		}:concat("")
+	end
+	output = output + "'/>"
+	print(output)
+end
+print("</svg>")
