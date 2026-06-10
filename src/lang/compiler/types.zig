@@ -64,11 +64,12 @@ pub const FunctionSignature = struct {
     params: []const TypeInfo,
     return_type: TypeInfo,
     param_names: []const []const u8 = &.{},
+    is_any_fn_sig: bool = false,
 };
 
 /// sentinel "any function" type,,, matches any callable value
 /// ptr identity;; only matches when &ANY_FN_SIG is used
-pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any, .param_names = &.{} };
+pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any, .param_names = &.{}, .is_any_fn_sig = true };
 
 pub fn typeName(T: TypeInfo) []const u8 {
     return switch (T) {
@@ -112,7 +113,7 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
         const to_sig = to.function;
         const from_sig = from.function;
         // sentinel "any function" take and give any
-        if (to_sig == &ANY_FN_SIG or from_sig == &ANY_FN_SIG) return true;
+        if (to_sig.is_any_fn_sig or from_sig.is_any_fn_sig) return true;
         // ret t: from's return must fit to's return
         if (!canCoerce(from_sig.return_type, to_sig.return_type)) return false;
         // params: to's params must fit from's params
@@ -306,7 +307,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .number => |n| if (n.is_float) .float else .int,
         .string, .multiline_string => .string,
         .hash => |name| .{ .atom = name },
-        .nil => .any,
+        .nil => .{ .atom = ":nil" },
         .ident => |name| ctx.inferIdentType(name),
         .unary => |u| inferUnaryOp(u.op, inferExprType(ctx, u.expr)),
         .binary => |b| inferBinaryOp(b.op, inferExprType(ctx, b.left), inferExprType(ctx, b.right)),

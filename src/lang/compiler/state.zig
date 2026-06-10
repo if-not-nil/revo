@@ -289,10 +289,13 @@ pub fn setLocalTableFields(self: *Compiler, slot: LocalSlot, fields: ?[]const []
 
 pub fn setLocalTypeHint(self: *Compiler, name: []const u8, type_info: types.TypeInfo) !void {
     const state = currentFunctionState(self) orelse return;
-    try state.type_hints.append(self.alloc, .{
-        .name = name,
-        .type_info = type_info,
-    });
+    for (state.type_hints.items, 0..) |hint, i| {
+        if (std.mem.eql(u8, hint.name, name)) {
+            state.type_hints.items[i] = .{ .name = name, .type_info = type_info };
+            return;
+        }
+    }
+    try state.type_hints.append(self.alloc, .{ .name = name, .type_info = type_info });
 }
 
 pub fn resolveLocalTypeHint(self: *const Compiler, name: []const u8) ?types.TypeInfo {

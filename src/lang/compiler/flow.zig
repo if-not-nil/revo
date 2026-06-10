@@ -665,6 +665,12 @@ fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
     if (std.mem.eql(u8, name, "string")) return .string;
     if (std.mem.eql(u8, name, "bool")) return .bool;
     if (std.mem.eql(u8, name, "table")) return .{ .struct_type = "table" };
+    if (std.mem.eql(u8, name, "int")) return .int;
+    if (std.mem.eql(u8, name, "float")) return .float;
+    if (std.mem.eql(u8, name, "atom")) return .{ .atom = "" };
+    if (std.mem.eql(u8, name, "nil")) return .{ .atom = ":nil" };
+    if (std.mem.eql(u8, name, "any")) return .any;
+    if (std.mem.eql(u8, name, "tuple")) return .{ .tuple = &.{} };
     return null;
 }
 
@@ -682,6 +688,13 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
             const tuple_items = types.toOwnedSlice(self.alloc) catch break :blk null;
             break :blk types_mod.TypeInfo{ .tuple = tuple_items };
         },
+        .ident => |name| {
+            // look up the variable type from hints or local state
+            // // and type narrowing from variable names is handled somewher else
+            _ = name;
+            return null;
+        },
+        .nil => .{ .atom = ":nil" },
         else => null,
     };
 }

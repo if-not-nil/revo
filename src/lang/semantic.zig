@@ -57,7 +57,7 @@ const Scope = struct {
     }
 
     fn deinit(self: *Scope) void {
-        _ = self;
+        self.values.deinit();
     }
 };
 
@@ -129,7 +129,8 @@ const SemanticChecker = struct {
     }
 
     fn deinit(self: *SemanticChecker) void {
-        _ = self;
+        for (self.scopes.items) |*scope| scope.deinit();
+        self.scopes.deinit(self.alloc);
     }
 
     fn finishReport(self: *SemanticChecker) !diagnostic.Report {
@@ -342,7 +343,23 @@ const SemanticChecker = struct {
                 break :blk types_mod.inferExprType(self, node);
             },
             .try_expr => |inner| blk: {
-                _ = try self.analyzeNode(inner);
+                const inner_type = try self.analyzeNode(inner);
+                if (inner_type != .any) {
+                    const is_result = if (inner_type == .tuple and inner_type.tuple.len >= 1) chk: {
+                        const first = inner_type.tuple[0];
+                        break :chk first == .atom and
+                            // handle both with-colon and without-colon conventions
+                            (std.mem.eql(u8, first.atom, ":ok") or std.mem.eql(u8, first.atom, "ok") or
+                             std.mem.eql(u8, first.atom, ":err") or std.mem.eql(u8, first.atom, "err"));
+                    } else false;
+                    if (!is_result) {
+                        try self.appendError(
+                            try std.fmt.allocPrint(self.alloc, "try expects :ok/:err tagged tuple, got {s}", .{types_mod.typeName(inner_type)}),
+                            inner.span,
+                            "not a result type",
+                        );
+                    }
+                }
                 break :blk types_mod.inferExprType(self, node);
             },
             .orelse_expr => |v| blk: {
@@ -416,13 +433,20 @@ const SemanticChecker = struct {
                 break :blk types_mod.inferExprType(self, node);
             },
             .while_loop => |v| blk: {
-                _ = try self.analyzeNode(v.predicate);
+                const pred_type = try self.analyzeNode(v.predicate);
+                if (!types_mod.canCoerce(pred_type, .bool)) {
+                    try self.appendError(
+                        try std.fmt.allocPrint(self.alloc, "while predicate must be boolean, got {s}", .{types_mod.typeName(pred_type)}),
+                        v.predicate.span,
+                        "expected bool",
+                    );
+                }
                 try self.pushScope();
                 _ = try self.analyzeNode(v.body);
                 self.popScope();
                 break :blk types_mod.inferExprType(self, node);
             },
-            else => types_mod.inferExprType(self, node),
+            .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .macro_expr, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
         };
     }
 
@@ -684,7 +708,14 @@ const SemanticChecker = struct {
                     );
                 }
             },
-            else => {},
+            else => {
+                const target_kind = @tagName(assign.target.expr);
+                try self.appendError(
+                    try std.fmt.allocPrint(self.alloc, "cannot assign to {s}", .{target_kind}),
+                    assign.target.span,
+                    "invalid assignment target",
+                );
+            },
         }
         return .any;
     }
@@ -739,7 +770,7 @@ const SemanticChecker = struct {
         // typed function call validation
         if (callee_type == .function) {
             const sig_ptr = callee_type.function;
-            if (sig_ptr == &types_mod.ANY_FN_SIG) {
+            if (sig_ptr.is_any_fn_sig) {
                 for (call.args) |arg| _ = try self.analyzeNode(arg);
                 return .any;
             }
@@ -796,6 +827,21 @@ const SemanticChecker = struct {
                     );
                 }
                 _ = ai;
+            }
+            for (call.args, 0..) |arg, i| {
+                if (isNamedParam(arg)) |pn| {
+                    for (call.args[i + 1 ..]) |later_arg| {
+                        if (isNamedParam(later_arg)) |later_pn| {
+                            if (std.mem.eql(u8, pn, later_pn)) {
+                                try self.appendError(
+                                    try std.fmt.allocPrint(self.alloc, "duplicate named arg `{s}`", .{pn}),
+                                    later_arg.span,
+                                    "already specified",
+                                );
+                            }
+                        }
+                    }
+                }
             }
             if (has_named) {
                 for (0..sig.params.len) |i| {

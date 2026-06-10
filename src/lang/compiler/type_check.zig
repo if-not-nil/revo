@@ -45,7 +45,7 @@ fn inferVarType(self: *Compiler, name: []const u8) TypeInfo {
 
 fn inferTypeMap(self: *Compiler, name: []const u8) TypeInfo {
     if (self.type_aliases.get(name)) |aliased| return aliased;
-    return state_mod.resolveLocalTypeHint(self, name) orelse .any;
+    return .any;
 }
 
 pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
