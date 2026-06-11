@@ -492,21 +492,21 @@ fn lexString(self: *Lexer, start: usize, line: u32, column: u32) !Token {
         const c = self.advance();
         if (c == '\\') {
             if (self.atEnd()) return error.UnterminatedString;
-            const escaped = self.advance();
-            const replacement: u8 = switch (escaped) {
-                'n' => '\n',
-                't' => '\t',
-                'r' => '\r',
-                '\\' => '\\',
-                '"' => '"',
-                '\'' => '\'',
-                else => {
-                    try buf.append(self.alloc, '\\');
-                    try buf.append(self.alloc, escaped);
-                    continue;
+            const from = self.pos - 1;
+            var offset = from;
+            switch (std.zig.string_literal.parseEscapeSequence(self.source, &offset)) {
+                .success => |lit| {
+                    while (self.pos < offset) _ = self.advance();
+                    var enc: [4]u8 = undefined;
+                    const n = std.unicode.utf8Encode(lit, &enc) catch return error.UnterminatedString;
+                    try buf.appendSlice(self.alloc, enc[0..n]);
                 },
-            };
-            try buf.append(self.alloc, replacement);
+                .failure => {
+                    try buf.append(self.alloc, '\\');
+                    _ = self.advance();
+                    try buf.append(self.alloc, self.source[self.pos - 1]);
+                },
+            }
             continue;
         }
         if (c == '"') {
@@ -655,20 +655,26 @@ fn lexBacktickString(self: *Lexer, start: usize, line: u32, column: u32) !Token 
         const c = self.advance();
         if (c == '\\') {
             if (self.atEnd()) return error.UnterminatedString;
-            const escaped = self.advance();
-            const replacement: u8 = switch (escaped) {
-                'n' => '\n',
-                't' => '\t',
-                'r' => '\r',
-                '\\' => '\\',
-                '`' => '`',
-                else => {
-                    try buf.append(self.alloc, '\\');
-                    try buf.append(self.alloc, escaped);
-                    continue;
+            if (self.source[self.pos] == '`') {
+                _ = self.advance();
+                try buf.append(self.alloc, '`');
+                continue;
+            }
+            const from = self.pos - 1;
+            var offset = from;
+            switch (std.zig.string_literal.parseEscapeSequence(self.source, &offset)) {
+                .success => |lit| {
+                    while (self.pos < offset) _ = self.advance();
+                    var enc: [4]u8 = undefined;
+                    const n = std.unicode.utf8Encode(lit, &enc) catch return error.UnterminatedString;
+                    try buf.appendSlice(self.alloc, enc[0..n]);
                 },
-            };
-            try buf.append(self.alloc, replacement);
+                .failure => {
+                    try buf.append(self.alloc, '\\');
+                    _ = self.advance();
+                    try buf.append(self.alloc, self.source[self.pos - 1]);
+                },
+            }
             continue;
         }
         if (c == '`') {
