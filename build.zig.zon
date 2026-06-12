@@ -35,15 +35,17 @@
         .lsp_kit = .{
             .url = "git+https://github.com/zigtools/lsp-kit.git#b886a2b0d5cee85ecbcc3089b863f7517cc9ff7f",
             .hash = "lsp_kit-0.1.0-bi_PL3IyDACfp1xdTnkiOHEok2YpPCCCJHuuOcNzjl1D",
+        },
+        .isocline = .{
+            .url = "git+https://github.com/daanx/isocline#8d6dc1ef95b1b46711e66eb23d39d4467a0fcdac",
+            .hash = "N-V-__8AAI8vEwDBxs8j_tnNzQ_8MiBQBrR3SXBPbov4JY9z",
             .lazy = true,
         },
     },
     .paths = .{
+        "src/",
         "build.zig",
         "build.zig.zon",
-        "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "LICENSE.txt",
     },
 }

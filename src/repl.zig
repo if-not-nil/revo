@@ -5,9 +5,7 @@ const Allocator = std.mem.Allocator;
 const VM = revo.VM;
 const builtin = @import("builtin");
 
-const isocline_c = if (build_options.isocline) @cImport({
-    @cInclude("isocline.h");
-}) else struct {};
+const isocline_c = @import("isocline");
 
 const signal_c = if (build_options.isocline) @cImport(@cInclude("signal.h")) else struct {};
 const libc = @cImport({
