@@ -36,7 +36,7 @@ pub const StructTypePool = struct {
     types: std.ArrayList(StructDescriptor),
 
     pub fn init(alloc: std.mem.Allocator) StructTypePool {
-        return .{ .alloc = alloc, .types = std.ArrayList(StructDescriptor).initCapacity(alloc, 0) catch unreachable };
+        return .{ .alloc = alloc, .types = .empty };
     }
 
     pub fn deinit(self: *StructTypePool) void {
@@ -125,12 +125,18 @@ pub const StructInstancePool = struct {
     dead: std.ArrayList(StructInstanceID),
 
     pub fn init(alloc: std.mem.Allocator) !StructInstancePool {
-        return .{
+        var self = StructInstancePool{
             .alloc = alloc,
-            .instances = try std.ArrayList(?StructInstance).initCapacity(alloc, 4),
-            .marks = try std.DynamicBitSet.initEmpty(alloc, 64),
-            .dead = try std.ArrayList(StructInstanceID).initCapacity(alloc, 0),
+            .instances = undefined,
+            .marks = undefined,
+            .dead = .empty,
         };
+        self.instances = try std.ArrayList(?StructInstance).initCapacity(alloc, 4);
+        errdefer self.instances.deinit(alloc);
+        self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
+        errdefer self.marks.deinit();
+
+        return self;
     }
 
     pub fn deinit(self: *StructInstancePool) void {

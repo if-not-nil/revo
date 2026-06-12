@@ -31,12 +31,18 @@ pub const TuplePool = struct {
     dead: std.ArrayList(memory.TupleID),
 
     pub fn init(alloc: std.mem.Allocator) !TuplePool {
-        return .{
+        var self = TuplePool{
             .alloc = alloc,
-            .tuples = try std.ArrayList(?Tuple).initCapacity(alloc, 4),
-            .marks = try std.DynamicBitSet.initEmpty(alloc, 64),
-            .dead = try std.ArrayList(memory.TupleID).initCapacity(alloc, 0),
+            .tuples = undefined,
+            .marks = undefined,
+            .dead = .empty,
         };
+        self.tuples = try std.ArrayList(?Tuple).initCapacity(alloc, 4);
+        errdefer self.tuples.deinit(alloc);
+        self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
+        errdefer self.marks.deinit();
+
+        return self;
     }
 
     pub fn deinit(self: *TuplePool) void {

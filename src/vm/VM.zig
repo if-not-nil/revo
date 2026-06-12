@@ -93,23 +93,36 @@ pub const Fiber = struct {
     waiters: std.ArrayList(FiberID),
 
     pub fn init(alloc: std.mem.Allocator, id: FiberID, program: []const Instruction, reg_count: usize) !Fiber {
-        return .{
+        var self = Fiber{
             .id = id,
             .pc = 0,
             .program = program,
             .debug_info_id = null,
-            .registers = try alloc.alloc(Data, reg_count),
-            .frames_hot = try std.ArrayList(FrameHot).initCapacity(alloc, MAX_FRAMES),
-            .frames_cold = try std.ArrayList(FrameCold).initCapacity(alloc, MAX_FRAMES),
-            .open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 8),
+            .registers = undefined,
+            .frames_hot = undefined,
+            .frames_cold = undefined,
+            .open_upvalues = undefined,
             .running = false,
             .state = .ready,
             .in_runq = false,
             .wait = .none,
             .parked_result_slot = null,
-            .waiters = try std.ArrayList(FiberID).initCapacity(alloc, 2),
+            .waiters = undefined,
             .result = revo.core_atoms.data(.nil),
         };
+
+        self.registers = try alloc.alloc(Data, reg_count);
+        errdefer alloc.free(self.registers);
+        self.frames_hot = try std.ArrayList(FrameHot).initCapacity(alloc, MAX_FRAMES);
+        errdefer self.frames_hot.deinit(alloc);
+        self.frames_cold = try std.ArrayList(FrameCold).initCapacity(alloc, MAX_FRAMES);
+        errdefer self.frames_cold.deinit(alloc);
+        self.open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 8);
+        errdefer self.open_upvalues.deinit(alloc);
+        self.waiters = try std.ArrayList(FiberID).initCapacity(alloc, 2);
+        errdefer self.waiters.deinit(alloc);
+
+        return self;
     }
 
     pub fn deinit(self: *Fiber, alloc: std.mem.Allocator) void {
@@ -152,7 +165,7 @@ loading_stack: std.ArrayList([]const u8),
 /// matches type enum order
 metatables: [
     @typeInfo(memory.Type).@"enum".fields.len
-]?mem.TableID = .{null} ** @typeInfo(memory.Type).@"enum".fields.len,
+]?mem.TableID = @splat(null),
 module_cache: ModuleCache,
 package_path: std.ArrayList([]const u8),
 debug_infos: std.ArrayList(DebugInfo),
@@ -197,28 +210,51 @@ pub fn init(runtime: revo.Runtime) !VM {
     errdefer rt.deinitDiagArena();
     var vm: VM = .{
         .runtime = rt,
-        .sched = try Scheduler.init(rt.alloc),
-        .constants = try std.ArrayList(Data).initCapacity(rt.alloc, 16),
+        .sched = undefined,
+        .constants = undefined,
         .stdlib_globals = Globals.init(rt.alloc),
-        .tables = try TablePool.init(rt.alloc),
-        .tuples = try TuplePool.init(rt.alloc),
-        .functions = try FunctionPool.init(rt.alloc),
+        .tables = undefined,
+        .tuples = undefined,
+        .functions = undefined,
         .struct_types = struct_mod.StructTypePool.init(rt.alloc),
-        .struct_instances = try struct_mod.StructInstancePool.init(rt.alloc),
-        .strings = try Interner.init(rt.alloc),
+        .struct_instances = undefined,
+        .strings = undefined,
         .atoms = std.StringHashMap(mem.AtomID).init(rt.alloc),
         .module_cache = ModuleCache.init(rt.alloc),
-        .package_path = try std.ArrayList([]const u8).initCapacity(rt.alloc, 4),
-        .debug_infos = try std.ArrayList(DebugInfo).initCapacity(rt.alloc, 8),
+        .package_path = undefined,
+        .debug_infos = undefined,
         .globals = Globals.init(rt.alloc),
         .const_globals = ConstGlobals.init(rt.alloc),
         .module_dir = null,
-        .loading_stack = try std.ArrayList([]const u8).initCapacity(rt.alloc, 1),
-        .loaded_extensions = try .initCapacity(rt.alloc, 0),
-        .gc_mark_stack = try std.ArrayList(MarkItem).initCapacity(rt.alloc, 256),
+        .loading_stack = undefined,
+        .loaded_extensions = .empty,
+        .gc_mark_stack = undefined,
     };
     try revo.async_backend_impl.init(&vm.runtime.async_backend);
     errdefer revo.async_backend_impl.deinit(&vm.runtime.async_backend);
+
+    vm.sched = try Scheduler.init(rt.alloc);
+    errdefer vm.sched.deinit();
+    vm.constants = try std.ArrayList(Data).initCapacity(rt.alloc, 16);
+    errdefer vm.constants.deinit(rt.alloc);
+    vm.tables = try TablePool.init(rt.alloc);
+    errdefer vm.tables.deinit();
+    vm.tuples = try TuplePool.init(rt.alloc);
+    errdefer vm.tuples.deinit();
+    vm.functions = try FunctionPool.init(rt.alloc);
+    errdefer vm.functions.deinit();
+    vm.struct_instances = try struct_mod.StructInstancePool.init(rt.alloc);
+    errdefer vm.struct_instances.deinit();
+    vm.strings = try Interner.init(rt.alloc);
+    errdefer vm.strings.deinit();
+    vm.package_path = try std.ArrayList([]const u8).initCapacity(rt.alloc, 4);
+    errdefer vm.package_path.deinit(rt.alloc);
+    vm.debug_infos = try std.ArrayList(DebugInfo).initCapacity(rt.alloc, 8);
+    errdefer vm.debug_infos.deinit(rt.alloc);
+    vm.loading_stack = try std.ArrayList([]const u8).initCapacity(rt.alloc, 1);
+    errdefer vm.loading_stack.deinit(rt.alloc);
+    vm.gc_mark_stack = try std.ArrayList(MarkItem).initCapacity(rt.alloc, 256);
+    errdefer vm.gc_mark_stack.deinit(rt.alloc);
 
     // init icache with max pc to force miss
     for (&vm.icache) |*entry| {

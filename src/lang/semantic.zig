@@ -96,17 +96,26 @@ const SemanticChecker = struct {
             .alloc = alloc,
             .source_name = source_name,
             .source = source,
-            .errors = try std.ArrayList(diagnostic.Part).initCapacity(alloc, 8),
-            .scopes = try std.ArrayList(Scope).initCapacity(alloc, 4),
+            .errors = undefined,
+            .scopes = undefined,
             .type_aliases = std.StringHashMap(types_mod.TypeInfo).init(alloc),
             .struct_layouts = std.StringHashMap([]const struct_layout.FieldDef).init(alloc),
-            .fn_sigs = try std.ArrayList(*FnSig).initCapacity(alloc, 4),
-            .return_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(alloc, 4),
+            .fn_sigs = undefined,
+            .return_types = undefined,
             .type_map = type_map,
             .type_annotations = type_annotations,
             .typed_names = std.StringHashMap(void).init(alloc),
             .table_field_map = std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)).init(alloc),
         };
+        checker.errors = try std.ArrayList(diagnostic.Part).initCapacity(alloc, 8);
+        errdefer checker.errors.deinit(alloc);
+        checker.scopes = try std.ArrayList(Scope).initCapacity(alloc, 4);
+        errdefer checker.scopes.deinit(alloc);
+        checker.fn_sigs = try std.ArrayList(*FnSig).initCapacity(alloc, 4);
+        errdefer checker.fn_sigs.deinit(alloc);
+        checker.return_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(alloc, 4);
+        errdefer checker.return_types.deinit(alloc);
+        
         try checker.pushScope();
         // registers builtins
         for (known_globals) |name|

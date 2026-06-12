@@ -33,12 +33,18 @@ pub const TablePool = struct {
     dead: std.ArrayList(memory.TableID),
 
     pub fn init(alloc: std.mem.Allocator) !TablePool {
-        return .{
+        var self = TablePool{
             .alloc = alloc,
-            .tables = try std.ArrayList(?Table).initCapacity(alloc, 4),
-            .marks = try std.DynamicBitSet.initEmpty(alloc, 64),
-            .dead = try std.ArrayList(memory.TableID).initCapacity(alloc, 0),
+            .tables = undefined,
+            .marks = undefined,
+            .dead = .empty,
         };
+        self.tables = try std.ArrayList(?Table).initCapacity(alloc, 4);
+        errdefer self.tables.deinit(alloc);
+        self.marks = try std.DynamicBitSet.initEmpty(alloc, 64);
+        errdefer self.marks.deinit();
+
+        return self;
     }
 
     pub fn deinit(self: *TablePool) void {
@@ -52,11 +58,11 @@ pub const TablePool = struct {
 
     pub fn create(self: *TablePool) !memory.TableID {
         if (self.dead.pop()) |id| {
-            self.tables.items[id] = try Table.init(self.alloc);
+            self.tables.items[id] = Table.init(self.alloc);
             return id;
         }
         const id: memory.TableID = @intCast(self.tables.items.len);
-        try self.tables.append(self.alloc, try Table.init(self.alloc));
+        try self.tables.append(self.alloc, Table.init(self.alloc));
         if (id >= self.marks.capacity()) {
             try self.marks.resize(self.tables.items.len, false);
         }
@@ -336,10 +342,10 @@ pub const Table = struct {
     metatable: ?memory.TableID = null,
     ic_version: usize = 0,
 
-    pub fn init(alloc: std.mem.Allocator) !Table {
+    pub fn init(alloc: std.mem.Allocator) Table {
         return .{
             .alloc = alloc,
-            .array = try std.ArrayList(Data).initCapacity(alloc, 0),
+            .array = .empty,
             .hash = .{},
         };
     }
@@ -544,7 +550,7 @@ test "table float keys stay distinct when non integral" {
 }
 
 test "table push appends positional values" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
     try table.push(Data.new.num(10));
@@ -564,7 +570,7 @@ const tt = revo.lang.testing;
 //
 
 test "putRaw: integer key in range 0..<len overwrites existing element" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
     try table.push(Data.new.num(20));
@@ -578,7 +584,7 @@ test "putRaw: integer key in range 0..<len overwrites existing element" {
 }
 
 test "putRaw: integer key == len appends to array" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
     try table.push(Data.new.num(20));
@@ -589,7 +595,7 @@ test "putRaw: integer key == len appends to array" {
 }
 
 test "putRaw: integer key > len goes to hash" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
 
@@ -599,7 +605,7 @@ test "putRaw: integer key > len goes to hash" {
 }
 
 test "putRaw: negative integer key always goes to hash" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
 
@@ -609,7 +615,7 @@ test "putRaw: negative integer key always goes to hash" {
 }
 
 test "putRaw: float key always goes to hash" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
     try table.putRaw(Data.new.num(1.5), Data.new.num(99));
@@ -618,7 +624,7 @@ test "putRaw: float key always goes to hash" {
 }
 
 test "putRaw: NaN and Infinity keys go to hash" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
     try table.putRaw(Data.new.num(std.math.nan(f64)), Data.new.num(1));
@@ -628,7 +634,7 @@ test "putRaw: NaN and Infinity keys go to hash" {
 }
 
 test "putRaw: getRaw retrieves from array for integer keys" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.push(Data.new.num(10));
     try table.push(Data.new.num(20));
@@ -639,7 +645,7 @@ test "putRaw: getRaw retrieves from array for integer keys" {
 }
 
 test "putRaw: getRaw retrieves from hash for negative and float keys" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
     try table.putRaw(Data.new.num(-1), Data.new.num(42));
     try table.putRaw(Data.new.num(1.5), Data.new.num(99));
@@ -649,7 +655,7 @@ test "putRaw: getRaw retrieves from hash for negative and float keys" {
 }
 
 test "putRaw: integer key > len in empty table goes to hash" {
-    var table = try Table.init(std.testing.allocator);
+    var table = Table.init(std.testing.allocator);
     defer table.deinit();
 
     try table.putRaw(Data.new.num(0), Data.new.num(10));

@@ -106,9 +106,9 @@ pub const EvalFailure = struct {
     kind: EvalErrorKind,
     report: diagnostic.Report,
     part_len: usize = 0,
-    parts: [max_trace_frames + 2]diagnostic.Part = [_]diagnostic.Part{diagnostic.Part{ .@"error" = "" }} ** (max_trace_frames + 2),
+    parts: [max_trace_frames + 2]diagnostic.Part = @splat(diagnostic.Part{ .@"error" = "" }),
     trace_len: usize = 0,
-    trace: [max_trace_frames]TraceFrame = [_]TraceFrame{TraceFrame.empty()} ** max_trace_frames,
+    trace: [max_trace_frames]TraceFrame = @splat(TraceFrame.empty()),
 
     pub fn render(self: EvalFailure, alloc: std.mem.Allocator, writer: *std.Io.Writer, source: []const u8) !void {
         return self.renderAt(alloc, writer, self.report.source_name orelse "<source>", self.report.source orelse source);

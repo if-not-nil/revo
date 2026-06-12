@@ -338,7 +338,9 @@ fn readdir_meth_fn(args: []const Data, vm: *VM) !NativeResult {
     const handle = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
     const path = handle.path;
 
-    const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{}) catch |err| {
+    const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{
+        .iterate = true,
+    }) catch |err| {
         return try NativeResult.Err(vm, mapIOError(err));
     };
     defer open_dir.close(vm.runtime.io);
@@ -428,7 +430,9 @@ fn remove_fn(args: []const Data, vm: *VM) !NativeResult {
 fn readdir_fn(args: []const Data, vm: *VM) !NativeResult {
     const path = vm.stringValue(args[0].asString().?);
 
-    const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{}) catch |err| {
+    const open_dir = Dir.cwd().openDir(vm.runtime.io, path, .{
+        .iterate = true,
+    }) catch |err| {
         return try NativeResult.Err(vm, mapIOError(err));
     };
     defer open_dir.close(vm.runtime.io);

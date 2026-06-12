@@ -23,6 +23,7 @@ pub const IrBuilder = struct {
     pub fn init(alloc: std.mem.Allocator) !IrBuilder {
         return .{
             .alloc = alloc,
+            // 'alloc' will be an arena
             .instructions = try std.ArrayList(*IrInst).initCapacity(alloc, 32),
             .constants = try std.ArrayList([]const u8).initCapacity(alloc, 16),
         };

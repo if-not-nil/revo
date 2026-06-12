@@ -30,12 +30,20 @@ pub const ChannelState = struct {
     recv_head: usize = 0,
 
     pub fn init(alloc: std.mem.Allocator, cap: usize) !ChannelState {
-        return .{
+        var self = ChannelState{
             .cap = cap,
-            .queue = try std.ArrayList(Data).initCapacity(alloc, if (cap == 0) 1 else cap),
-            .send_waiters = try std.ArrayList(ChannelWaiter).initCapacity(alloc, 2),
-            .recv_waiters = try std.ArrayList(ChannelWaiter).initCapacity(alloc, 2),
+            .queue = undefined,
+            .send_waiters = undefined,
+            .recv_waiters = undefined,
         };
+        self.queue = try std.ArrayList(Data).initCapacity(alloc, if (cap == 0) 1 else cap);
+        errdefer self.queue.deinit(alloc);
+        self.send_waiters = try std.ArrayList(ChannelWaiter).initCapacity(alloc, 2);
+        errdefer self.send_waiters.deinit(alloc);
+        self.recv_waiters = try std.ArrayList(ChannelWaiter).initCapacity(alloc, 2);
+        errdefer self.recv_waiters.deinit(alloc);
+
+        return self;
     }
 
     pub fn deinit(self: *ChannelState, alloc: std.mem.Allocator) void {
@@ -194,19 +202,29 @@ waiting_cnt: usize,
 /// init with a 64-slot runq
 pub fn init(alloc: std.mem.Allocator) !@This() {
     const ring_cap = 64;
-    return .{
+    var self = Scheduler{
         .current_fiber = 0,
         .alloc = alloc,
-        .fibers = try std.ArrayList(Fiber).initCapacity(alloc, 1),
-        .ring_buf = try alloc.alloc(FiberID, ring_cap),
+        .fibers = undefined,
+        .ring_buf = undefined,
         .ring_head = 0,
         .ring_tail = 0,
         .ring_mask = ring_cap - 1,
-        .sleepers = try std.ArrayList(SleepWaiter).initCapacity(alloc, 4),
-        .io_waiters = try std.ArrayList(WaitEntry).initCapacity(alloc, 4),
-        .channels = std.AutoHashMap(ChannelID, ChannelState).init(alloc),
+        .sleepers = undefined,
+        .io_waiters = undefined,
+        .channels = .init(alloc),
         .waiting_cnt = 0,
     };
+    self.fibers = try std.ArrayList(Fiber).initCapacity(alloc, 1);
+    errdefer self.fibers.deinit(alloc);
+    self.ring_buf = try alloc.alloc(FiberID, ring_cap);
+    errdefer alloc.free(self.ring_buf);
+    self.sleepers = try std.ArrayList(SleepWaiter).initCapacity(alloc, 4);
+    errdefer self.sleepers.deinit(alloc);
+    self.io_waiters = try std.ArrayList(WaitEntry).initCapacity(alloc, 4);
+    errdefer self.io_waiters.deinit(alloc);
+
+    return self;
 }
 
 pub fn deinit(self: *@This()) void {

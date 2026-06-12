@@ -2,6 +2,8 @@ zig-out
 # all dotfiles
 # .*
 *.so
+# meta.rvo output from examples
+*.rvo
 .priv
 .zig-cache
 /zig-pkg

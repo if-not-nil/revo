@@ -614,11 +614,17 @@ const PatternMatcher = struct {
     arg_idx: usize = 0,
 
     fn init(allocator: std.mem.Allocator, single_cap: usize) !PatternMatcher {
-        return .{
+        var self = PatternMatcher{
             .allocator = allocator,
-            .singles = try std.ArrayList(SingleCapture).initCapacity(allocator, single_cap),
-            .groups = try std.ArrayList(GroupCapture).initCapacity(allocator, 8),
+            .singles = undefined,
+            .groups = undefined,
         };
+        self.singles = try std.ArrayList(SingleCapture).initCapacity(allocator, single_cap);
+        errdefer self.singles.deinit(allocator);
+        self.groups = try std.ArrayList(GroupCapture).initCapacity(allocator, 8);
+        errdefer self.groups.deinit(allocator);
+        
+        return self;
     }
 
     fn deinit(self: *PatternMatcher) void {

@@ -159,17 +159,31 @@ pub const FunctionPool = struct {
     segments: std.ArrayList([]const revo.Instruction),
 
     pub fn init(alloc: std.mem.Allocator) !FunctionPool {
-        return .{
+        var self = FunctionPool{
             .alloc = alloc,
-            .functions = try std.ArrayList(?Function).initCapacity(alloc, 16),
-            .function_marks = try std.DynamicBitSet.initEmpty(alloc, 64),
-            .function_dead = try std.ArrayList(mem.FunctionID).initCapacity(alloc, 0),
-            .prototypes = try std.ArrayList(Prototype).initCapacity(alloc, 16),
-            .upvalues = try std.ArrayList(?Upvalue).initCapacity(alloc, 16),
-            .upvalue_marks = try std.DynamicBitSet.initEmpty(alloc, 64),
-            .upvalue_dead = try std.ArrayList(UpvalueID).initCapacity(alloc, 0),
-            .segments = try std.ArrayList([]const revo.Instruction).initCapacity(alloc, 4),
+            .functions = undefined,
+            .function_marks = undefined,
+            .function_dead = .empty,
+            .prototypes = undefined,
+            .upvalues = undefined,
+            .upvalue_marks = undefined,
+            .upvalue_dead = .empty,
+            .segments = undefined,
         };
+        self.functions = try std.ArrayList(?Function).initCapacity(alloc, 16);
+        errdefer self.functions.deinit(alloc);
+        self.function_marks = try std.DynamicBitSet.initEmpty(alloc, 64);
+        errdefer self.function_marks.deinit();
+        self.prototypes = try std.ArrayList(Prototype).initCapacity(alloc, 16);
+        errdefer self.prototypes.deinit(alloc);
+        self.upvalues = try std.ArrayList(?Upvalue).initCapacity(alloc, 16);
+        errdefer self.upvalues.deinit(alloc);
+        self.upvalue_marks = try std.DynamicBitSet.initEmpty(alloc, 64);
+        errdefer self.upvalue_marks.deinit();
+        self.segments = try std.ArrayList([]const revo.Instruction).initCapacity(alloc, 4);
+        errdefer self.segments.deinit(alloc);
+
+        return self;
     }
 
     pub fn deinit(self: *FunctionPool) void {

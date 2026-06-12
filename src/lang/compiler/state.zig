@@ -49,6 +49,7 @@ pub const FunctionState = struct {
     pub fn init(alloc: std.mem.Allocator) !FunctionState {
         return .{
             .alloc = alloc,
+            // 'alloc' will be an arena
             .locals = try std.ArrayList(LocalVar).initCapacity(alloc, 8),
             .all_locals = try std.ArrayList(LocalVar).initCapacity(alloc, 8),
             .upvalues = try std.ArrayList(UpvalueSpec).initCapacity(alloc, 4),

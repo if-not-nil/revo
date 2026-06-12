@@ -229,15 +229,24 @@ pub const Session = struct {
     project: revo.lang.Project = .{ .mode = .script, .root = "" },
 
     pub fn init(vm: *VM, gpa: Allocator, io: ?std.Io) !Session {
-        var project = if (io) |i| revo.lang.Project.detectFromCwd(i, gpa) else revo.lang.Project{ .mode = .script, .root = "" };
-        errdefer project.deinit(gpa);
-        return .{
+        var self = Session{
             .vm = vm,
             .gpa = gpa,
-            .workspace = try revo.lang.Workspace.initWithVm(vm, gpa),
-            .source_acc = try std.ArrayList(u8).initCapacity(gpa, 256),
-            .project = project,
+            .workspace = undefined,
+            .source_acc = undefined,
+            .project = undefined,
         };
+        self.project = if (io) |i|
+            .detectFromCwd(i, gpa)
+        else
+            .{ .mode = .script, .root = "" };
+        errdefer self.project.deinit(gpa);
+        self.workspace = try revo.lang.Workspace.initWithVm(vm, gpa);
+        errdefer self.workspace.deinit();
+        self.source_acc = try std.ArrayList(u8).initCapacity(gpa, 256);
+        errdefer self.source_acc.deinit(gpa);
+
+        return self;
     }
 
     pub fn deinit(self: *Session) void {
