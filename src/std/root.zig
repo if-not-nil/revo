@@ -303,7 +303,40 @@ pub const root_specs: []const api.FnSpec = &.{
         .variadic = true,
         .f = defineVariadic(&[_]TypeSpec{}, read),
     },
-    .{ .name = "cwd", .placements = &.{api.g}, .params = &.{}, .ret = "string", .doc = "returns current working directory path", .f = define(&[_]TypeSpec{}, cwd) },
+    .{
+        .name = "cwd",
+        .placements = &.{api.g},
+        .params = &.{},
+        .ret = "string",
+        .doc = "returns current working directory path",
+        .f = define(&[_]TypeSpec{}, cwd),
+    },
+    .{
+        .name = "gensym",
+        .placements = &.{api.g},
+        .params = &.{},
+        .ret = "string",
+        .doc =
+        \\ returns a unique interned string for use as an identifier
+        \\
+        \\   # in a proc macro: generate a fresh identifier to avoid name capture
+        \\   proc swap!(iter) do
+        \\     let tmp = gensym()
+        \\     let a = iter:next()
+        \\     let b = iter:next()
+        \\     `((do
+        \\         let %tmp = %a
+        \\         %a = %b
+        \\         %b = %tmp
+        \\       end))
+        \\   end
+        \\
+        \\   let x = 1
+        \\   let y = 2
+        \\   swap!(x, y)
+        ,
+        .f = define(&[_]TypeSpec{}, gensym),
+    },
     .{
         .name = "system",
         .placements = &.{api.g},
@@ -1059,6 +1092,25 @@ pub fn read(args: []const Data, vm: *VM) !NativeResult {
             return resultTuple(vm, .ok, try vm.adoptDataString(try result.toOwnedSlice(vm.runtime.alloc)));
         try result.append(vm.runtime.alloc, buf[0]);
     }
+}
+
+var gensym_counter: u64 = 0;
+
+pub fn gensym(args: []const Data, vm: *VM) !NativeResult {
+    _ = args;
+    const n = gensym_counter;
+    gensym_counter += 1;
+    const name = try std.fmt.allocPrint(vm.runtime.alloc, "__gensym_{d}", .{n});
+    defer vm.runtime.alloc.free(name);
+    return .{ .ok = try vm.ownDataStringNoDedup(name) };
+}
+
+test "gensym produces different values on each call" {
+    try revo.lang.testing.top_atom(
+        \\ const a = gensym()
+        \\ const b = gensym()
+        \\ a != b
+    , "true");
 }
 
 pub fn cwd(args: []const Data, vm: *VM) !NativeResult {
