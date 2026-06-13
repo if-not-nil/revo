@@ -439,6 +439,7 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
             return self.allocExpr(token.span(), .{ .ident = token.text });
         },
         .kw_macro => self.parseMacro(token),
+        .backtick_string => try self.parseQuasiquote(token),
         .eof => return error.UnexpectedToken,
         else => return error.UnexpectedToken,
     };
@@ -901,6 +902,47 @@ fn parseYield(self: *Parser, start: Token) anyerror!*Node {
         start.span(),
         .{ .unary = .{ .op = .yield, .expr = try self.allocExpr(start.span(), .nil) } },
     );
+}
+
+/// quasiquote `(expr with %splices)`
+fn parseQuasiquote(self: *Parser, token: Token) anyerror!*Node {
+    const raw = token.text;
+    var splice_count: usize = 0;
+    var i: usize = 0;
+    while (i < raw.len) {
+        if (raw[i] == '%' and i + 1 < raw.len and lexer.isIdentStart(raw[i + 1])) {
+            splice_count += 1;
+            i += 1;
+            while (i < raw.len and lexer.isIdentContinue(raw[i])) i += 1;
+        } else i += 1;
+    }
+
+    var modified = try std.ArrayList(u8).initCapacity(self.alloc, raw.len);
+    var splices = std.ArrayList([]const u8).initCapacity(self.alloc, splice_count) catch unreachable;
+
+    i = 0;
+    var counter: usize = 0;
+    while (i < raw.len) {
+        if (raw[i] == '%' and i + 1 < raw.len and lexer.isIdentStart(raw[i + 1])) {
+            i += 1;
+            const start = i;
+            while (i < raw.len and lexer.isIdentContinue(raw[i])) i += 1;
+            try splices.append(self.alloc, raw[start..i]);
+            try modified.appendSlice(self.alloc, "__qq_");
+            var buf: [32]u8 = undefined;
+            try modified.appendSlice(self.alloc, try std.fmt.bufPrint(&buf, "{d}", .{counter}));
+            counter += 1;
+        } else {
+            try modified.append(self.alloc, raw[i]);
+            i += 1;
+        }
+    }
+
+    const inner = try lang.parseSource(self.alloc, modified.items);
+    return self.allocExpr(token.span(), .{ .quasiquote = .{
+        .inner = inner,
+        .splices = try splices.toOwnedSlice(self.alloc),
+    } });
 }
 
 /// macro name! `pattern` `template`

@@ -786,6 +786,11 @@ pub const Compiler = struct {
                 expr,
                 "proc must be expanded before compilation",
             ),
+            .quasiquote => return self.fail(
+                .UnsupportedSyntax,
+                expr,
+                "quasiquote must be expanded before compilation",
+            ),
         }
     }
 

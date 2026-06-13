@@ -462,7 +462,7 @@ const SemanticChecker = struct {
                 self.popScope();
                 break :blk types_mod.inferExprType(self, node);
             },
-            .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .macro_expr, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
+            .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .macro_expr, .quasiquote, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
         };
     }
 

@@ -188,11 +188,11 @@ fn substitutePlaceholders(
     return ast.walkExpr(allocator, expr, SubstCtx, .{ .span = span, .replacements = replacements });
 }
 
-const AstSubstituter = struct {
+pub const AstSubstituter = struct {
     allocator: std.mem.Allocator,
     replacements: *const std.StringHashMap(*Node),
 
-    fn substitute(self: *const AstSubstituter, node: *Node) ExpandError!*Node {
+    pub fn substitute(self: *const AstSubstituter, node: *Node) ExpandError!*Node {
         return switch (node.expr) {
             .ident => |name| self.replacements.get(name) orelse node,
             .unary => |u| try self.alloc(node.span, .{
@@ -309,19 +309,17 @@ const AstSubstituter = struct {
             .assign_expr => |a| try self.alloc(node.span, .{
                 .assign_expr = .{ .target = try self.substitute(a.target), .value = try self.substitute(a.value) },
             }),
-            .binding => |b| {
-                try self.alloc(node.span, .{ .binding = .{
-                    .target = try self.substitute(b.target),
-                    .type_name = b.type_name,
-                    .value = try self.substitute(b.value),
-                    .mutable = b.mutable,
-                } });
-            },
+            .binding => |b| try self.alloc(node.span, .{ .binding = .{
+                .target = try self.substitute(b.target),
+                .type_name = b.type_name,
+                .value = try self.substitute(b.value),
+                .mutable = b.mutable,
+            } }),
             .import_expr => |i| try self.alloc(node.span, .{
                 .import_expr = try self.substitute(i),
             }),
 
-            .number, .string, .multiline_string, .hash, .nil, .range_literal, .tuple_pattern, .macro_expr => node,
+            .number, .string, .multiline_string, .hash, .nil, .range_literal, .tuple_pattern, .macro_expr, .quasiquote, .decl, .comp_block, .test_block, .test_suite, .struct_def, .proc_macro, .try_expr, .orelse_expr, .type_alias => node,
         };
     }
 

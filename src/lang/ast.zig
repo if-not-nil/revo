@@ -289,9 +289,15 @@ pub const Expr = union(enum) {
     table: []TableEntry,
     struct_def: struct { name: []const u8, items: []StructItem },
     proc_macro: struct { name: []const u8, param: FnParam, body: *Node },
+    quasiquote: Quasiquote,
     try_expr: *Node, // expr?
     orelse_expr: struct { left: *Node, right: *Node }, // expr orelse 42
     type_alias: struct { name: []const u8, type_expr: *TypeExpr },
+};
+
+pub const Quasiquote = struct {
+    inner: *Node,
+    splices: []const []const u8,
 };
 
 pub const Node = struct {
@@ -612,6 +618,11 @@ pub const Node = struct {
                 try t.type_expr.printAt(writer, null);
                 try close(writer, depth);
             },
+            .quasiquote => |qq| {
+                try writer.writeAll("(quasiquote ");
+                try qq.inner.printAt(writer, depth);
+                try writer.writeAll(")");
+            },
         }
     }
 };
@@ -868,6 +879,7 @@ pub fn walkAST(comptime Visitor: type, visitor: *Visitor, node: *const Node) voi
     if (@hasField(Visitor, "found") and visitor.found) return;
 
     switch (node.expr) {
+        .quasiquote => return,
         inline else => |payload| {
             const ExprType = @TypeOf(payload);
 

@@ -976,6 +976,101 @@ test "custom keyword structure - keywords at multiple positions" {
 }
 
 //
+// quasiquote `template` with %splice
+//
+
+test "quasiquote atom" {
+    try t.top_true(
+        \\let r = `:hello`
+        \\r == (:hash, "hello")
+    );
+}
+
+test "quasiquote number" {
+    try t.top_true(
+        \\let r = `42`
+        \\r == (:number, 42)
+    );
+}
+
+test "quasiquote string" {
+    try t.top_true(
+        \\let r = `"hello"`
+        \\r == (:string, "hello")
+    );
+}
+
+test "quasiquote nil tuple" {
+    try t.top_true(
+        \\let r = `()`
+        \\r == (:nil,)
+    );
+}
+
+test "quasiquote produces tuple" {
+    try t.top_true(
+        \\let r = `(:a, :b)`
+        \\r == (:tuple, ((:hash, "a"), (:hash, "b")))
+    );
+}
+
+test "quasiquote produces table" {
+    try t.top_true(
+        \\let r = `{:a, :b}`
+        \\r == (:table, ((:nil, :false, (:hash, "a")), (:nil, :false, (:hash, "b"))))
+    );
+}
+
+test "quasiquote splice inserts value" {
+    try t.top_true(
+        \\let x = 10
+        \\let r = `(:num, %x)`
+        \\r == (:tuple, ((:hash, "num"), 10))
+    );
+}
+
+test "quasiquote table named key" {
+    try t.top_true(
+        \\let v = 42
+        \\let r = `{key = %v}`
+        \\r == (:table, (((:ident, "key"), :false, 42),))
+    );
+}
+
+test "quasiquote nested splice in table" {
+    try t.top_true(
+        \\let x = 42
+        \\let r = `{(:a, %x)}`
+        \\r == (:table, ((:nil, :false, (:tuple, ((:hash, "a"), 42))),))
+    );
+}
+
+test "quasiquote multiple splices" {
+    try t.top_true(
+        \\let a = 20
+        \\let b = 22
+        \\let r = `(:add, %a, %b)`
+        \\r == (:tuple, ((:hash, "add"), 20, 22))
+    );
+}
+
+test "quasiquote bare ident" {
+    try t.top_true(
+        \\let r = `hello`
+        \\r == (:ident, "hello")
+    );
+}
+
+test "quasiquote table computed key with splice" {
+    try t.top_true(
+        \\let k = 99
+        \\let v = 42
+        \\let r = `{[%k] = %v}`
+        \\r == (:table, ((99, :true, 42),))
+    );
+}
+
+//
 // fns / imports
 //
 

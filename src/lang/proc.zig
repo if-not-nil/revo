@@ -162,6 +162,14 @@ fn expandInEnv(
             });
             break :blk ast.allocNode(allocator, expr.span, .nil);
         },
+        .quasiquote => |qq| blk: {
+            const inner = switch (qq.inner.expr) {
+                .block => |items| if (qq.inner.synthetic_block and items.len == 1) items[0] else qq.inner,
+                else => qq.inner,
+            };
+            const encoded = try encodeExpr(allocator, inner, qq.splices);
+            break :blk try expandInEnv(vm, allocator, encoded, env, mode);
+        },
         else => ast.walkExpr(allocator, expr, ProcCtx, .{ .vm = vm, .env = env, .mode = mode }),
     };
 }
@@ -271,7 +279,7 @@ fn evalProcMacro(
 
     var serialized = try std.ArrayList(*Node).initCapacity(allocator, args.len);
     defer serialized.deinit(allocator);
-    for (args) |arg| try serialized.append(allocator, try encodeExpr(allocator, arg));
+    for (args) |arg| try serialized.append(allocator, try encodeExpr(allocator, arg, &.{}));
 
     const items_list = try listNode(allocator, span, serialized.items);
     const iter_call = try callNode(
@@ -363,8 +371,8 @@ fn decodeProcResult(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data
     if (data.asAtom()) |atom| {
         return if (atom == revo.core_atoms.atom_id(.nil)) ast.allocNode(allocator, span, .nil) else error.InvalidProcReturn;
     }
-    if (data.asTuple()) |tid| {
-        return decodeNodeSequence(vm, allocator, span, (vm.tuples.get(tid) catch return error.InvalidProcReturn).items);
+    if (data.asTuple()) |_| {
+        return decodeExprNode(vm, allocator, span, data);
     }
     if (data.asTable()) |tid| {
         return decodeNodeSequence(vm, allocator, span, (vm.tables.get(tid) catch return error.InvalidProcReturn).array.items);
@@ -388,7 +396,7 @@ fn decodeNodeSequence(
     return ast.allocNode(allocator, span, .{ .block = try out.toOwnedSlice(allocator) });
 }
 
-fn encodeExpr(allocator: std.mem.Allocator, node: *const Node) ExpandError!*Node {
+fn encodeExpr(allocator: std.mem.Allocator, node: *const Node, splices: []const []const u8) ExpandError!*Node {
     if (node.expr == .number) {
         var items = try std.ArrayList(*Node).initCapacity(allocator, if (node.expr.number.is_float) 3 else 2);
         errdefer items.deinit(allocator);
@@ -398,12 +406,29 @@ fn encodeExpr(allocator: std.mem.Allocator, node: *const Node) ExpandError!*Node
         return tupleNode(allocator, node.span, try items.toOwnedSlice(allocator));
     }
 
+    // if this ident is a placeholder, return the actual splice ident
+    // so it compiles as a variable reference instead of an encoded ident node
+    if (node.expr == .ident) {
+        for (splices, 0..) |splice, i| {
+            const ph = try std.fmt.allocPrint(allocator, "__qq_{d}", .{i});
+            if (std.mem.eql(u8, node.expr.ident, ph)) {
+                return ast.allocNode(allocator, node.span, .{ .ident = splice });
+            }
+        }
+    }
+
     const tag_name = @tagName(node.expr);
     const info = @typeInfo(Expr).@"union";
 
     inline for (info.fields) |field| {
         if (std.mem.eql(u8, field.name, tag_name)) {
-            const payload = try encodePayload(allocator, node.span, field.type, @field(node.expr, field.name));
+            const payload = try encodePayload(
+                allocator,
+                node.span,
+                field.type,
+                @field(node.expr, field.name),
+                splices,
+            );
             var items = try std.ArrayList(*Node).initCapacity(allocator, payload.len + 1);
             errdefer items.deinit(allocator);
             try items.append(allocator, try atomNode(allocator, node.span, tag_name));
@@ -419,6 +444,7 @@ fn encodePayload(
     span: Span,
     comptime T: type,
     value: T,
+    splices: []const []const u8,
 ) ExpandError![]*Node {
     const ti = @typeInfo(T);
     if (ti == .void) return try allocator.alloc(*Node, 0);
@@ -427,14 +453,14 @@ fn encodePayload(
         var out = try std.ArrayList(*Node).initCapacity(allocator, ti.@"struct".fields.len);
         errdefer out.deinit(allocator);
         inline for (ti.@"struct".fields) |field| {
-            try out.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name)));
+            try out.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name), splices));
         }
         return out.toOwnedSlice(allocator);
     }
 
     var out = try std.ArrayList(*Node).initCapacity(allocator, 1);
     errdefer out.deinit(allocator);
-    try out.append(allocator, try encodeValue(allocator, span, T, value));
+    try out.append(allocator, try encodeValue(allocator, span, T, value, splices));
     return out.toOwnedSlice(allocator);
 }
 
@@ -443,6 +469,7 @@ fn encodeValue(
     span: Span,
     comptime T: type,
     value: T,
+    splices: []const []const u8,
 ) ExpandError!*Node {
     const ti = @typeInfo(T);
 
@@ -454,18 +481,18 @@ fn encodeValue(
             if (pi.size == .slice) {
                 var items = try std.ArrayList(*Node).initCapacity(allocator, value.len);
                 errdefer items.deinit(allocator);
-                for (value) |item| try items.append(allocator, try encodeValue(allocator, span, pi.child, item));
-                return listNode(allocator, span, try items.toOwnedSlice(allocator));
+                for (value) |item| try items.append(allocator, try encodeValue(allocator, span, pi.child, item, splices));
+                return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
             }
             if (pi.size == .one) {
-                if (pi.child == Node) return encodeExpr(allocator, value);
-                return encodeValue(allocator, span, pi.child, value.*);
+                if (pi.child == Node) return encodeExpr(allocator, value, splices);
+                return encodeValue(allocator, span, pi.child, value.*, splices);
             }
             return error.UnsupportedProcValue;
         },
         .optional => {
             if (value) |inner| {
-                return encodeValue(allocator, span, ti.optional.child, inner);
+                return encodeValue(allocator, span, ti.optional.child, inner, splices);
             } else {
                 return ast.allocNode(allocator, span, .nil);
             }
@@ -479,7 +506,7 @@ fn encodeValue(
         .@"union" => |ui| {
             inline for (ui.fields) |field| {
                 if (std.mem.eql(u8, field.name, @tagName(value))) {
-                    const payload = try encodePayload(allocator, span, field.type, @field(value, field.name));
+                    const payload = try encodePayload(allocator, span, field.type, @field(value, field.name), splices);
                     var items = try std.ArrayList(*Node).initCapacity(allocator, payload.len + 1);
                     errdefer items.deinit(allocator);
                     try items.append(allocator, try atomNode(allocator, span, field.name));
@@ -494,7 +521,7 @@ fn encodeValue(
             var items = try std.ArrayList(*Node).initCapacity(allocator, ti.@"struct".fields.len);
             errdefer items.deinit(allocator);
             inline for (ti.@"struct".fields) |field| {
-                try items.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name)));
+                try items.append(allocator, try encodeValue(allocator, span, field.type, @field(value, field.name), splices));
             }
             return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
         },
@@ -502,8 +529,8 @@ fn encodeValue(
         .array => {
             var items = try std.ArrayList(*Node).initCapacity(allocator, ti.array.len);
             errdefer items.deinit(allocator);
-            inline for (value) |item| try items.append(allocator, try encodeValue(allocator, span, ti.array.child, item));
-            return listNode(allocator, span, try items.toOwnedSlice(allocator));
+            inline for (value) |item| try items.append(allocator, try encodeValue(allocator, span, ti.array.child, item, splices));
+            return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
         },
 
         else => error.UnsupportedProcValue,
@@ -575,7 +602,6 @@ fn decodeValue(
     return switch (@typeInfo(T)) {
         .optional => |opt| {
             if (isNilData(vm, data)) {
-                idx.* -= 1;
                 return null;
             }
             idx.* -= 1;

@@ -328,7 +328,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .break_expr => |val| if (val) |v| inferExprType(ctx, v) else .any,
         .try_expr => |inner| inferExprType(ctx, inner),
         .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
-        .comp_block, .import_expr, .test_block, .test_suite, .macro_expr, .proc_macro => .any,
+        .comp_block, .import_expr, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
         .range_literal => .int,
         .assign_expr => .any,
