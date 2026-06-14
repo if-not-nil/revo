@@ -144,11 +144,12 @@ available on most package managers as `zig`
 
 ## on posix (linux/bsd/mac)
 
-```bash
+```bash 
 git clone https://github.com/if-not-nil/revo --recursive && cd revo
 git submodule update --init --recursive
+zig build --fetch
 # or -Doptimize=ReleaseSmall for a smaller executable
-zig build --fetch -Doptimize=ReleaseFast
+zig build -Doptimize=ReleaseFast
 cp ./zig-out/bin/revo ~/.local/bin/revo
 
 # should output the version
