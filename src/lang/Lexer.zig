@@ -80,6 +80,8 @@ pub const TokenType = enum {
     star_assign,
     slash_assign,
     percent_assign,
+    concat,
+    concat_assign,
     arrow,
     fat_arrow,
     dot,
@@ -348,6 +350,10 @@ fn next(self: *Lexer) !Token {
         else
             self.makeToken(.dot, start, self.pos, line, column),
         '?' => self.makeToken(.huh, start, self.pos, line, column),
+        '~' => if (self.matchChar('='))
+            self.makeToken(.concat_assign, start, self.pos, line, column)
+        else
+            self.makeToken(.concat, start, self.pos, line, column),
         else => {
             if (std.ascii.isDigit(c)) return self.lexNumber(start, line, column);
             if (isIdentStart(c)) return self.lexIdent(start, line, column);

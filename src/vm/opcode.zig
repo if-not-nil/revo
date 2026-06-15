@@ -17,6 +17,7 @@ pub const Opcode = enum(u8) {
     store_upval, // "upvalue[bx] <- R[a]"
     closure, // "R[a] <- closure(prototype=bx)"
     add, // "R[a] <- R[b] + R[c]"
+    concat, // "R[a] <- R[b] ~ R[c]"
     sub, // "R[a] <- R[b] - R[c]"
     mul, // "R[a] <- R[b] * R[c]"
     div, // "R[a] <- R[b] / R[c]"

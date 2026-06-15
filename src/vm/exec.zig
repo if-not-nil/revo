@@ -201,6 +201,35 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
 
             return self.fail(error.IncompatibleTypes, "cannot add {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
         },
+        .concat => {
+            const lhs = regRead(regs, base, instr.b);
+            const rhs = regRead(regs, base, instr.c);
+
+            if (lhs.asStr()) |ls| if (rhs.asStr()) |rs| {
+                const l_str = self.stringValue(ls);
+                const r_str = self.stringValue(rs);
+                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
+                const result_str = try self.adoptDataStringNoDedup(
+                    try std.mem.concat(alloc, u8, &.{ l_str, r_str }),
+                );
+                regWrite(regs, base, instr.a, result_str);
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+
+            if (lhs.asTuple()) |lt| if (rhs.asTuple()) |rt| {
+                const l_tuple = try self.tuples.get(lt);
+                const r_tuple = try self.tuples.get(rt);
+                self.noteGCPressure(l_tuple.items.len * @sizeOf(Data) + r_tuple.items.len * @sizeOf(Data));
+                const combined = try std.mem.concat(alloc, Data, &.{ l_tuple.items, r_tuple.items });
+                defer alloc.free(combined);
+                regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(combined)));
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+
+            return self.fail(error.IncompatibleTypes, "cannot concatenate {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+        },
         .sub => {
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);

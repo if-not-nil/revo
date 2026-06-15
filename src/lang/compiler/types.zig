@@ -215,6 +215,7 @@ pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
             if (isNumeric(l) and isNumeric(r)) break :blk .float;
             break :blk .any;
         },
+        .concat => .any,
         .eq, .neq, .lt, .gt, .lte, .gte => .bool,
     };
 }

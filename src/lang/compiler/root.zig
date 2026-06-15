@@ -325,7 +325,7 @@ pub const Compiler = struct {
         var result_reg: Register = 0;
 
         switch (op) {
-            .add, .sub, .mul, .div, .mod, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
+            .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
                 std.debug.assert(d >= 2);
                 result_reg = try toRegister(d - 2);
                 d -= 1;
@@ -629,6 +629,7 @@ pub const Compiler = struct {
                         .mul => if (any_float) .mul else .mul_int,
                         .div => .div_float,
                         .mod => .mod_int,
+                        .concat => .concat,
                         .eq => .eq_int,
                         .neq => .neq_int,
                         .lt => .lt_int,
