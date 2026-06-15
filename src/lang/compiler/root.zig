@@ -680,15 +680,6 @@ pub const Compiler = struct {
                             if (d.kind != .con) {
                                 return self.fail(.ParseError, expr, "import binding must be const");
                             }
-                            // if (b.type_name != null) {
-                            //     return self.fail(.ParseError, expr, "type annotation on import binding is not supported");
-                            // }
-                            // if (std.mem.endsWith(u8, user_name, "!")) {
-                            //     return self.setFailureParts(.ParseError, .{ .span = b.target.span, .role = .primary, .message = user_name }, "name with ! is reserved for macros", &.{});
-                            // }
-                            // if (std.mem.endsWith(u8, user_name, "?") and !ast.isDiscardName(user_name)) {
-                            //     return self.setFailureParts(.ParseError, .{ .span = b.target.span, .role = .primary, .message = user_name }, "name with ? is reserved for functions returning bool", &.{});
-                            // }
                             // compile import_stmt directly so it handles its own slot
                             // then also bind the user-specified name if it differs
                             try self.compile(b.value, true);
@@ -1341,14 +1332,21 @@ pub const Compiler = struct {
 
         if (binding.target.expr == .ident) {
             const name = binding.target.expr.ident;
-            if (std.mem.endsWith(u8, name, "!"))
+            if (!ast.isDiscardName(name) and std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?") != null)
+                return self.setFailureParts(
+                    .ParseError,
+                    .{ .span = binding.target.span, .role = .primary, .message = name },
+                    "! and ? are only allowed at the end of names",
+                    &.{},
+                );
+            if (std.mem.endsWith(u8, name, "!") and !ast.isDiscardName(name))
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = binding.target.span, .role = .primary, .message = name },
                     "name with ! is reserved for macros",
                     &.{},
                 );
-            if (std.mem.endsWith(u8, name, "?") and !ast.isDiscardName(name) and binding.value.expr != .fn_expr)
+            if (std.mem.endsWith(u8, name, "?") and !ast.isDiscardName(name))
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = binding.target.span, .role = .primary, .message = name },
@@ -1409,35 +1407,28 @@ pub const Compiler = struct {
         loop_sym: ?revo.AtomID,
     ) InternalLowerError!void {
         if (!ast.isDiscardName(name) and !std.mem.eql(u8, name, "<fn>")) {
-            if (std.mem.endsWith(u8, name, "!"))
+            if (std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?")) |_|
+                return self.setFailureParts(
+                    .ParseError,
+                    .{ .span = body.span, .role = .primary, .message = name },
+                    "! and ? are only allowed at the end of names",
+                    &.{},
+                )
+            else if (std.mem.endsWith(u8, name, "!"))
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = body.span, .role = .primary, .message = name },
                     "function name with ! is reserved for macros",
                     &.{},
+                )
+            else if (std.mem.endsWith(u8, name, "?"))
+                return self.setFailureParts(
+                    .ParseError,
+                    .{ .span = body.span, .role = .primary, .message = name },
+                    "name with ? is reserved for functions returning bool",
+                    &.{},
                 );
-            if (std.mem.endsWith(u8, name, "?")) {
-                if (return_type) |rt| {
-                    const rt_name = switch (rt.kind) {
-                        .named => |n| n,
-                        else => @tagName(rt.kind),
-                    };
-                    if (!std.mem.eql(u8, rt_name, "bool"))
-                        return self.setFailureParts(
-                            .ParseError,
-                            .{ .span = body.span, .role = .primary, .message = name },
-                            "function ending with ? must return bool",
-                            &.{},
-                        );
-                }
-            }
         }
-
-        // names ending with ? must return bool (forced if not explicit)
-        const effective_return_type: ?*ast.TypeExpr = if (std.mem.endsWith(u8, name, "?") and !ast.isDiscardName(name) and !std.mem.eql(u8, name, "<fn>"))
-            if (return_type) |rt| rt else try ast.allocTypeExpr(self.alloc, body.span, .{ .named = "bool" })
-        else
-            return_type;
 
         const jump_over = try self.jump(.jump);
         const body_addr: ProgramCounter = @intCast(self.irLen());
@@ -1451,10 +1442,10 @@ pub const Compiler = struct {
         }
 
         const own_sig = !(ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>"));
-        const sig = try state_mod.allocFnSig(self, params, effective_return_type);
+        const sig = try state_mod.allocFnSig(self, params, return_type);
 
         var s = try FunctionState.init(self.alloc);
-        s.return_type = if (effective_return_type) |rt| switch (rt.kind) {
+        s.return_type = if (return_type) |rt| switch (rt.kind) {
             .named => |n| n,
             else => @tagName(rt.kind),
         } else null;
@@ -1518,13 +1509,13 @@ pub const Compiler = struct {
         self.max_registers = params.len;
         self.upvalue_cache.clearRetainingCapacity();
         if (own_sig) try s.fn_signatures.put(name, sig);
-        self.fn_return_type = if (effective_return_type) |rt| switch (rt.kind) {
+        self.fn_return_type = if (return_type) |rt| switch (rt.kind) {
             .named => |n| n,
             else => @tagName(rt.kind),
         } else null;
         defer self.fn_return_type = null;
         try self.compile(body, true);
-        if (effective_return_type) |rt| {
+        if (return_type) |rt| {
             _ = rt;
         } else {
             const inferred_type = type_check.inferExprType(self, body);

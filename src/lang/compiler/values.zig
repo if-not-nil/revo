@@ -23,14 +23,21 @@ pub fn compileLocalBinding(
     mutable: bool,
     type_name: ?*ast.TypeExpr,
 ) !void {
-    if (ast.isDiscardName(name)) {} else if (std.mem.endsWith(u8, name, "!"))
+    if (ast.isDiscardName(name)) {} else if (std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?")) |_|
+        return self.setFailureParts(
+            .ParseError,
+            .{ .span = value.span, .role = .primary, .message = name },
+            "! and ? are only allowed at the end of names",
+            &.{},
+        )
+    else if (std.mem.endsWith(u8, name, "!"))
         return self.setFailureParts(
             .ParseError,
             .{ .span = value.span, .role = .primary, .message = name },
             "name with ! is reserved for macros",
             &.{},
         )
-    else if (std.mem.endsWith(u8, name, "?") and value.expr != .fn_expr)
+    else if (std.mem.endsWith(u8, name, "?"))
         return self.setFailureParts(
             .ParseError,
             .{ .span = value.span, .role = .primary, .message = name },
