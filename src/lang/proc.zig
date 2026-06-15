@@ -275,10 +275,6 @@ const ProcCtx = struct {
     pub fn walk(self: ProcCtx, allocator: std.mem.Allocator, expr: *Node, _: ProcCtx) ExpandError!*Node {
         return expandInEnv(self.vm, allocator, expr, self.env, self.mode);
     }
-
-    pub fn walkSlice(self: ProcCtx, allocator: std.mem.Allocator, items: []const *Node, _: ProcCtx) ExpandError![]*Node {
-        return ast.walkSliceWith(allocator, items, ProcCtx, self);
-    }
 };
 
 /// could not for my life figure out how to comptimeize further

@@ -74,10 +74,6 @@ const ExpandCtx = struct {
     pub fn walk(self: ExpandCtx, allocator: std.mem.Allocator, expr: *Node, _: ExpandCtx) ExpandError!*Node {
         return expandInEnv(allocator, expr, self.env);
     }
-
-    pub fn walkSlice(self: ExpandCtx, allocator: std.mem.Allocator, items: []const *Node, _: ExpandCtx) ExpandError![]*Node {
-        return ast.walkSliceWith(allocator, items, ExpandCtx, self);
-    }
 };
 
 fn expandInEnv(allocator: std.mem.Allocator, expr: *Node, env: *MacroEnv) ExpandError!*Node {
@@ -200,10 +196,6 @@ const SubstCtx = struct {
 
     pub fn walk(self: SubstCtx, allocator: std.mem.Allocator, expr: *Node, _: SubstCtx) ExpandError!*Node {
         return substitutePlaceholders(allocator, self.span, expr, self.replacements);
-    }
-
-    pub fn walkSlice(self: SubstCtx, allocator: std.mem.Allocator, items: []const *Node, _: SubstCtx) ExpandError![]*Node {
-        return ast.walkSliceWith(allocator, items, SubstCtx, self);
     }
 };
 

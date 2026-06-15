@@ -372,12 +372,6 @@ pub fn invalidateModuleCache(self: *VM, path: []const u8) bool {
     return false;
 }
 
-pub fn clearModuleCache(self: *VM) void {
-    var it = self.module_cache.iterator();
-    while (it.next()) |entry| self.runtime.alloc.free(entry.key_ptr.*);
-    self.module_cache.clearRetainingCapacity();
-}
-
 pub fn addConstant(self: *VM, val: Data) !ConstantID {
     const idx: ConstantID = @intCast(self.constants.items.len);
     try self.constants.append(self.runtime.alloc, val);
@@ -502,25 +496,6 @@ fn ensureAbsoluteSlot(self: *VM, slot: usize) !void {
     fiber.registers_len = slot + 1;
 }
 
-pub fn readRegister(self: *VM, reg: opcode.Register) !Data {
-    const slot = try self.absoluteRegisterIndex(reg);
-    if (slot >= self.currentFiber().registers_len)
-        return revo.core_atoms.data(.missing);
-
-    return self.currentFiber().registers[slot];
-}
-
-pub fn writeRegister(self: *VM, reg: opcode.Register, value: Data) !void {
-    const slot = try self.absoluteRegisterIndex(reg);
-    try self.ensureAbsoluteSlot(slot);
-    self.currentFiber().registers[slot] = value;
-}
-
-/// call when 0 <= slot < slots.len
-pub inline fn readRegisterUnsafe(self: *VM, slot: usize) Data {
-    return self.currentFiber().registers[slot];
-}
-
 /// call when slot is valid and capacity is enough
 pub inline fn writeRegisterUnsafe(self: *VM, slot: usize, value: Data) void {
     self.currentFiber().registers[slot] = value;
@@ -533,10 +508,6 @@ pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Da
         if (slot >= slots.len)
             return revo.core_atoms.data(.missing);
     }
-    return slots[base + reg];
-}
-
-pub inline fn regReadUnchecked(slots: []const Data, base: usize, reg: opcode.Register) Data {
     return slots[base + reg];
 }
 

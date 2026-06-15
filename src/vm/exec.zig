@@ -995,30 +995,10 @@ inline fn fetchNext(fiber: *VM.Fiber, instr: *Instruction) bool {
     return true;
 }
 
-pub inline fn fetch(self: *VM) !Instruction {
-    const fiber = self.currentFiber();
-    if (fiber.pc >= fiber.program.len)
-        return error.ProgramEnd;
-
-    const instr = fiber.program[fiber.pc];
-    fiber.pc += 1;
-    return instr;
-}
-
 pub fn trace(self: *VM, instr: Instruction) void {
     const fiber = self.currentFiber();
     std.debug.print("[{d:>4}] {s:<16}\n", .{
         fiber.pc - 1,
         @tagName(instr.op),
     });
-}
-
-pub fn dumpStack(self: *VM) void {
-    const fiber = self.currentFiber();
-    std.debug.print("       stack: [ ", .{});
-    for (fiber.registers[0..fiber.registers_len]) |item| {
-        item.print(self);
-        std.debug.print(" ", .{});
-    }
-    std.debug.print("]\n", .{});
 }

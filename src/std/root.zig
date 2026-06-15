@@ -511,10 +511,6 @@ pub fn tupleTag(value: Data, vm: *VM) ?mem.AtomID {
     return tuple.items[0].asAtom();
 }
 
-pub fn isResultTag(value: Data, expected: mem.AtomID, vm: *VM) bool {
-    return tupleTag(value, vm) == expected;
-}
-
 /// > fmt(format: string, args: any...) -> string
 /// format string with %v, %d, %? specifiers
 /// %v: display value, %d: as number, %?: debug repr

@@ -391,16 +391,6 @@ fn syncLocalTableFields(
     }
 }
 
-fn compileAssignIntoTableAtom(
-    self: *Compiler,
-    key_atom: revo.AtomID,
-    value: *const Node,
-) !void {
-    try self.compile(value, true);
-    try self.emit(.table_set_atom, key_atom);
-    try self.regRelease();
-}
-
 fn compileFieldAssign(
     self: *Compiler,
     field_obj: *const Node,

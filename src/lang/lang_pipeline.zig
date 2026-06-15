@@ -550,14 +550,6 @@ pub fn expand(allocator: std.mem.Allocator, parsed: Parsed) !ExpandResult {
     return .{ .ok = .{ .root = final } };
 }
 
-pub fn expandWithVm(vm: *VM, allocator: std.mem.Allocator, parsed: Parsed) !ExpandResult {
-    const result = expandWithVmSource(vm, allocator, parsed, "", "") catch |err| return err;
-    return switch (result) {
-        .ok => |ok| .{ .ok = ok },
-        .proc_err => |report| .{ .err = .{ .expand = .{ .report = report } } },
-    };
-}
-
 pub fn expandWithVmSource(vm: *VM, allocator: std.mem.Allocator, parsed: Parsed, source_name: []const u8, source: []const u8) !ExpandWithVmResult {
     const template_expanded = try expander.expandExpr(allocator, parsed.root);
     const proc_result = try proc.expandExprWithSource(vm, allocator, template_expanded, source_name, source);

@@ -72,16 +72,6 @@ pub const specs: []const api.FnSpec = &.{
         .f = root.defineVariadic(&.{.table}, push),
     },
     .{
-        .name = "as_tuple",
-        .placements = &.{ api.mod("table"), api.method("table", .table) },
-        .params = &.{
-            .{ "self", "table" },
-        },
-        .ret = "tuple",
-        .doc = "converts table array part to tuple",
-        .f = root.define(&.{.table}, as_tuple),
-    },
-    .{
         .name = "remove",
         .placements = &.{ api.mod("table"), api.method("table", .table) },
         .params = &.{
@@ -301,28 +291,6 @@ pub fn @"try"(args: []const Data, vm: *VM) !NativeResult {
         },
         else => .errType(0, "tuple starting with atom", "tuple starting with non-atom"),
     };
-}
-
-/// > table:as_tuple() -> tuple
-/// converts table array part to tuple
-fn as_tuple(args: []const Data, vm: *VM) !NativeResult {
-    const table_id = args[0].asTable().?;
-
-    const table = try vm.tables.get(table_id);
-
-    var values_list = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, table.array.items.len + 10);
-
-    defer values_list.deinit(vm.runtime.alloc);
-
-    for (table.array.items) |val|
-        try values_list.append(vm.runtime.alloc, val);
-
-    const values_slice = try values_list.toOwnedSlice(vm.runtime.alloc);
-    defer vm.runtime.alloc.free(values_slice);
-
-    const result_tuple = try vm.tuples.create(values_slice);
-
-    return .okData(Data.new.tuple(result_tuple));
 }
 
 /// > table:insert(pos: number, value: any) -> atom

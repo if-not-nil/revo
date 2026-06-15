@@ -106,24 +106,6 @@ fn mul(args: []const Data, vm: *VM) !NativeResult {
     return .okData(Data.new.tuple(try vm.tuples.create(items.items)));
 }
 
-fn _tostring(args: []const Data, vm: *VM) !NativeResult {
-    var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer buf.deinit();
-    try args[0].write(&buf.writer, vm, .display);
-    const str = try buf.toOwnedSlice();
-    return .{ .ok = try vm.adoptDataString(str) };
-}
-
-fn _debug(args: []const Data, vm: *VM) !NativeResult {
-    const id = args[0].asTuple() orelse return .errType(0, "tuple", root.dataToString(args[0]));
-    const tuple = try vm.tuples.get(id);
-    var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-    defer buf.deinit();
-    try tuple.write(&buf.writer, vm, .debug);
-    const str = try buf.toOwnedSlice();
-    return .{ .ok = try vm.adoptDataString(str) };
-}
-
 const std = @import("std");
 
 const revo = @import("../root.zig");

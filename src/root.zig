@@ -161,11 +161,6 @@ pub const path_utils = struct {
         defer alloc.free(root_dir);
         return std.fs.path.resolve(alloc, &.{ root_dir, raw_path }) catch return error.OutOfMemory;
     }
-
-    pub fn withDefaultExtension(path: []const u8, ext: []const u8, alloc: std.mem.Allocator) Error![]u8 {
-        if (std.fs.path.extension(path).len != 0) return alloc.dupe(u8, path) catch return error.OutOfMemory;
-        return std.fmt.allocPrint(alloc, "{s}.{s}", .{ path, ext }) catch return error.OutOfMemory;
-    }
 };
 
 /// guaranteed IDs
@@ -253,17 +248,6 @@ pub inline fn isFalse(val: Data) bool {
     if (val.asNum()) |n| return n == 0;
     if (val.asAtom()) |id| return id <= core_atoms.lastFalse;
     return false;
-}
-
-pub fn renderFailureAt(
-    alloc: std.mem.Allocator,
-    writer: *std.Io.Writer,
-    source_name: []const u8,
-    source: []const u8,
-    span: ?lang.Span,
-    message: []const u8,
-) !void {
-    try diagnostic.renderAt(alloc, writer, source_name, source, span, message, &.{}, &.{});
 }
 
 pub fn printBuildError(gpa: std.mem.Allocator, source_info: lang.Source, err: lang.Error) void {

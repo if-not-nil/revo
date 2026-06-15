@@ -496,18 +496,6 @@ pub fn analyzeDetailed(
     };
 }
 
-/// convenience: open + analyze
-pub fn analyzeSource(
-    self: *Workspace,
-    alloc: std.mem.Allocator,
-    name: []const u8,
-    text: []const u8,
-    opts: lang.BuildOptions,
-) !lang.BuildResult {
-    const id = try self.open(name, text);
-    return self.analyze(alloc, id, opts);
-}
-
 /// get diagnostics for a file (or null if clean)
 /// runs both semantic and full compile to catch all errors
 pub fn diagnostics(

@@ -76,22 +76,6 @@ pub const StructTypePool = struct {
         }
         return null;
     }
-
-    pub fn findField(self: *StructTypePool, type_id: StructTypeID, name_atom: memory.AtomID) ?usize {
-        const desc = self.getType(type_id) orelse return null;
-        return desc.fieldIndex(name_atom);
-    }
-
-    pub fn getFieldName(self: *StructTypePool, type_id: StructTypeID, idx: usize) ?memory.AtomID {
-        const desc = self.getType(type_id) orelse return null;
-        if (idx >= desc.fields.len) return null;
-        return desc.fields[idx].name_atom;
-    }
-
-    pub fn fieldCount(self: *StructTypePool, type_id: StructTypeID) ?usize {
-        const desc = self.getType(type_id) orelse return null;
-        return desc.fields.len;
-    }
 };
 
 pub const StructInstanceID = usize;
