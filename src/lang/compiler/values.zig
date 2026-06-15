@@ -36,7 +36,17 @@ pub fn compileLocalBinding(
             .{ .span = value.span, .role = .primary, .message = name },
             "name with ? is reserved for functions returning bool",
             &.{},
-        );
+        )
+    else if (!ast.isDiscardName(name))
+        if (state.currentFunctionState(self)) |fn_state|
+            for (fn_state.import_locals.items) |il|
+                if (std.mem.eql(u8, il.name, name))
+                    return self.setFailureParts(
+                        .ParseError,
+                        .{ .span = value.span, .role = .primary, .message = name },
+                        "name conflicts with an import",
+                        &.{},
+                    );
     // fn slots can be reused if not initialized
     const slot = if (value.expr == .fn_expr)
         try state.reuseOrDeclareLocal(self, name, mutable)

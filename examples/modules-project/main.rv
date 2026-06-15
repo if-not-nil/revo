@@ -1,0 +1,9 @@
+# bare import resolves lib/init.rv via project_root -> package_path
+import "lib"
+
+# macros extracted at preload time, module tables at runtime
+import "mac/repeat"
+
+print(lib.greeting)
+print(lib.add(2, 3))
+print(repeat.double!(21))

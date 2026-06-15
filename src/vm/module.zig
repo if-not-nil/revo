@@ -5,17 +5,12 @@ const lang = revo.lang;
 const testing = revo.lang.testing;
 const Data = revo.Data;
 
-pub fn runModule(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.Data {
-    const result = try runModuleReport(vm, source_path, source);
-    if (result == .err) return error.RuntimeFailure;
-    return vm.currentFiber().result;
-}
-
-pub fn runModuleReport(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.EvalResult {
-    const artifact = switch (try lang.build(vm, .{ .name = source_path, .text = source }, .{})) {
+fn buildAndRun(vm: *revo.VM, source_path: []const u8, source: []const u8, module_scope: bool) !revo.EvalResult {
+    const opts: lang.BuildOptions = if (module_scope) .{ .module_scope = true } else .{};
+    const artifact = switch (try lang.build(vm, .{ .name = source_path, .text = source }, opts)) {
         .ok => |ok| ok,
         .err => |lang_err| {
-            revo.printBuildError(vm.runtime.alloc, .{ .name = source_path, .text = source }, lang_err);
+            revo.printBuildError(vm.runtime.diagAlloc(), .{ .name = source_path, .text = source }, lang_err);
             vm.runtime.resetDiagArena();
             return error.ParseError;
         },
@@ -25,8 +20,18 @@ pub fn runModuleReport(vm: *revo.VM, source_path: []const u8, source: []const u8
     return runCompiledModuleReport(vm, source_path, artifact.instructions);
 }
 
+pub fn runModule(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.Data {
+    const result = try buildAndRun(vm, source_path, source, false);
+    if (result == .err) return error.RuntimeFailure;
+    return vm.currentFiber().result;
+}
+
+pub fn runModuleReport(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.EvalResult {
+    return buildAndRun(vm, source_path, source, false);
+}
+
 pub fn runImportedModule(vm: *revo.VM, source_path: []const u8, source: []const u8) !revo.Data {
-    const result = try runModuleReport(vm, source_path, source);
+    const result = try buildAndRun(vm, source_path, source, true);
     if (result == .err) return error.RuntimeFailure;
     return vm.currentFiber().result;
 }
@@ -60,11 +65,6 @@ pub fn runCompiledModuleReport(
 ) !revo.EvalResult {
     try vm.setProgramSourceName(source_path);
 
-    const module_dir = std.fs.path.dirname(source_path) orelse ".";
-    const prev_module_dir = vm.module_dir;
-    vm.module_dir = module_dir;
-    defer vm.module_dir = prev_module_dir;
-
     var r = try swapFiberAndRun(vm, source_path, program);
     defer {
         var finished = vm.swapFiber(r.prev);
@@ -74,27 +74,14 @@ pub fn runCompiledModuleReport(
     return r.result;
 }
 
-/// run compiled code in the current vm globals or constglobals context
-/// intended for repl
+///
+/// run compiled code without clearing globals; intended for repl
 pub fn runCompiledSessionReport(
     vm: *revo.VM,
     source_path: []const u8,
     program: []const revo.Instruction,
 ) !revo.EvalResult {
-    try vm.setProgramSourceName(source_path);
-
-    const module_dir = std.fs.path.dirname(source_path) orelse ".";
-    const prev_module_dir = vm.module_dir;
-    vm.module_dir = module_dir;
-    defer vm.module_dir = prev_module_dir;
-
-    var r = try swapFiberAndRun(vm, source_path, program);
-    defer {
-        var finished = vm.swapFiber(r.prev);
-        revo.VM.Fiber.deinit(&finished, vm.runtime.alloc);
-    }
-    if (r.result == .ok) r.prev.result = vm.currentResult();
-    return r.result;
+    return runCompiledModuleReport(vm, source_path, program);
 }
 
 test "module message setters clear previous values" {
@@ -141,7 +128,7 @@ test "module hot reload cache" {
     defer alloc.free(source_name);
 
     const code =
-        \\ const ns = import "hot"
+        \\ const ns = import "./hot"
         \\ ns
     ;
 
@@ -151,10 +138,7 @@ test "module hot reload cache" {
 
     const artifact = switch (try lang.build(&vm, .{ .name = source_name, .text = code }, .{})) {
         .ok => |ok| ok,
-        .err => |lang_err| {
-            defer lang.deinitError(alloc, lang_err);
-            return error.ParseError;
-        },
+        .err => return error.ParseError,
     };
     defer vm.runtime.alloc.free(artifact.instructions);
     defer vm.runtime.alloc.free(artifact.spans);

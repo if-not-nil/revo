@@ -194,7 +194,7 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
 }
 
 fn drain_pipe(vm: *revo.VM, bs: *BackendState) !bool {
-    var buf_arr: [@sizeOf(CompletionRecord)]u8 = undefined;
+    var buf_arr: [@sizeOf(CompletionRecord)]u8 align(@alignOf(CompletionRecord)) = undefined;
     var any = false;
     while (true) {
         const n = std.c.read(bs.control_r, &buf_arr, @sizeOf(CompletionRecord));

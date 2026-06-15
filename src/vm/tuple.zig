@@ -115,26 +115,6 @@ pub const TuplePool = struct {
     pub fn capacity(self: *const TuplePool) usize {
         return self.tuples.items.len;
     }
-
-    pub fn sweepStep(self: *TuplePool, cursor: usize, limit: usize) usize {
-        if (cursor >= self.tuples.items.len) return 0;
-
-        const end = @min(cursor + limit, self.tuples.items.len);
-        var processed: usize = 0;
-
-        for (cursor..end) |i| {
-            if (self.tuples.items[i]) |*t| {
-                if (!self.marks.isSet(i)) {
-                    t.deinit();
-                    self.tuples.items[i] = null;
-                    self.dead.append(self.alloc, @intCast(i)) catch {};
-                }
-            }
-            processed += 1;
-        }
-
-        return processed;
-    }
 };
 
 test "parses tuple literals and keeps paren grouping distinct" {

@@ -1,0 +1,8 @@
+import {
+  "proc_lib",
+  m = "math_lib",
+}
+
+proc_lib.add_one!(m.pi)
+  |> m.double()
+  |> inspect

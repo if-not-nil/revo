@@ -384,50 +384,6 @@ pub const FunctionPool = struct {
     pub fn capacity(self: *const FunctionPool) usize {
         return self.functions.items.len;
     }
-
-    pub fn sweepStep(self: *FunctionPool, cursor: usize, limit: usize) usize {
-        if (cursor >= self.functions.items.len) return 0;
-
-        const end = @min(cursor + limit, self.functions.items.len);
-        var processed: usize = 0;
-
-        for (cursor..end) |i| {
-            if (self.functions.items[i]) |*f| {
-                if (!self.function_marks.isSet(i)) {
-                    switch (f.*) {
-                        .closure => |closure| self.alloc.free(closure.upvalues),
-                        .native, .c_function => {},
-                    }
-                    self.functions.items[i] = null; // mark as dead/free
-                    self.function_dead.append(self.alloc, @intCast(i)) catch {};
-                }
-            }
-            processed += 1;
-        }
-
-        return processed;
-    }
-
-    pub fn upvalueCapacity(self: *const FunctionPool) usize {
-        return self.upvalues.items.len;
-    }
-
-    pub fn sweepUpvalueStep(self: *FunctionPool, cursor: usize, limit: usize) usize {
-        if (cursor >= self.upvalues.items.len) return 0;
-
-        const end = @min(cursor + limit, self.upvalues.items.len);
-        var processed: usize = 0;
-
-        for (cursor..end) |i| {
-            if (self.upvalues.items[i] != null and !self.upvalue_marks.isSet(i)) {
-                self.upvalues.items[i] = null;
-                self.upvalue_dead.append(self.alloc, @intCast(i)) catch {};
-            }
-            processed += 1;
-        }
-
-        return processed;
-    }
 };
 
 test "functions call with lexical locals" {

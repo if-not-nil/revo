@@ -115,7 +115,7 @@ const SemanticChecker = struct {
         errdefer checker.fn_sigs.deinit(alloc);
         checker.return_types = try std.ArrayList(types_mod.TypeInfo).initCapacity(alloc, 4);
         errdefer checker.return_types.deinit(alloc);
-        
+
         try checker.pushScope();
         // registers builtins
         for (known_globals) |name|
@@ -333,7 +333,17 @@ const SemanticChecker = struct {
             .struct_def => |def| try self.analyzeStruct(def, node.span),
             .type_alias => |alias| try self.analyzeTypeAlias(alias, node.span),
             .fn_expr => |fn_expr| try self.analyzeFnExpr(fn_expr, node.span),
-            .block => |exprs| try self.analyzeBlock(exprs, node.span),
+            .block => |exprs| blk: {
+                // synthetic blocks (e.g. from multi-import) don't create a scope
+                if (node.synthetic_block) {
+                    var last: types_mod.TypeInfo = .any;
+                    for (exprs) |expr| {
+                        last = try self.analyzeNode(expr);
+                    }
+                    break :blk last;
+                }
+                break :blk try self.analyzeBlock(exprs, node.span);
+            },
             .assign_expr => |assign| try self.analyzeAssign(assign, node.span),
             .return_expr => |val| try self.analyzeReturn(val, node.span),
             .call => |call| try self.analyzeCall(call, node.span),
@@ -401,10 +411,6 @@ const SemanticChecker = struct {
                 _ = try self.analyzeNode(v.expr);
                 break :blk types_mod.inferExprType(self, node);
             },
-            .import_expr => |path| blk: {
-                _ = try self.analyzeNode(path);
-                break :blk types_mod.inferExprType(self, node);
-            },
             .break_expr => |val| blk: {
                 if (val) |v| _ = try self.analyzeNode(v);
                 break :blk types_mod.inferExprType(self, node);
@@ -461,6 +467,10 @@ const SemanticChecker = struct {
                 _ = try self.analyzeNode(v.body);
                 self.popScope();
                 break :blk types_mod.inferExprType(self, node);
+            },
+            .import_stmt => |stmt| blk: {
+                try self.declare(stmt.name, .any);
+                break :blk .any;
             },
             .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .macro_expr, .quasiquote, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
         };

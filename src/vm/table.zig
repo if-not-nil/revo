@@ -116,29 +116,6 @@ pub const TablePool = struct {
     pub fn capacity(self: *const TablePool) usize {
         return self.tables.items.len;
     }
-
-    /// process up to `limit` items starting from `cursor`
-    /// ret n of processed
-    pub fn sweepStep(self: *TablePool, cursor: usize, limit: usize) usize {
-        if (cursor >= self.tables.items.len) return 0;
-
-        const end = @min(cursor + limit, self.tables.items.len);
-        var processed: usize = 0;
-
-        var i = cursor;
-        while (i < end) : (i += 1) {
-            if (self.tables.items[i]) |*t| {
-                if (!self.marks.isSet(i)) {
-                    t.deinit();
-                    self.tables.items[i] = null;
-                    self.dead.append(self.alloc, @intCast(i)) catch {};
-                }
-            }
-            processed += 1;
-        }
-
-        return processed;
-    }
 };
 
 pub const Table = struct {

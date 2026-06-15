@@ -159,7 +159,7 @@ fn runMain(init: std.process.Init) !void {
                 return error.FileError;
             };
             try handleSource(init, init.gpa, init.arena.allocator(), "<stdin>", source, config);
-            if (!config.interactive) return;
+            if (!config.interactive and config.inline_code == null) return;
         }
     }
 
@@ -243,6 +243,10 @@ fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: [
 
     var project = revo.lang.Project.detect(source_name, init.io, gpa);
     defer project.deinit(gpa);
+
+    if (project.mode == .project and project.root.len > 0)
+        vm.project_root = try gpa.dupe(u8, project.root);
+
     const file_id = try project.open(&ws, source_name, source_text);
     var analysis = ws.analyzeDetailed(gpa, file_id, .{ .test_mode = test_mode, .mode = project.mode }) catch |err| {
         printError(init, "compilation - {}", .{err});
@@ -252,6 +256,7 @@ fn compileSource(init: std.process.Init, vm: *VM, gpa: Allocator, source_name: [
 
     if (analysis.diagnostics) |lang_err| {
         handleBuildError(init, gpa, source_name, source_text, lang_err);
+        // revo.lang.deinitError(gpa, lang_err);
         analysis.diagnostics = null;
         vm.runtime.resetDiagArena();
         return error.CompilationError;

@@ -83,9 +83,16 @@ const ExpandCtx = struct {
 fn expandInEnv(allocator: std.mem.Allocator, expr: *Node, env: *MacroEnv) ExpandError!*Node {
     return switch (expr.expr) {
         .block => |items| blk: {
+            if (expr.synthetic_block) {
+                const n = try ast.allocNode(allocator, expr.span, .{
+                    .block = try ast.walkSliceWith(allocator, items, ExpandCtx, .{ .env = env }),
+                });
+                n.synthetic_block = true;
+                break :blk n;
+            }
             var child = try env.clone();
             defer child.deinit();
-            break :blk ast.allocNode(allocator, expr.span, .{
+            break :blk try ast.allocNode(allocator, expr.span, .{
                 .block = try ast.walkSliceWith(allocator, items, ExpandCtx, .{ .env = &child }),
             });
         },
@@ -95,7 +102,11 @@ fn expandInEnv(allocator: std.mem.Allocator, expr: *Node, env: *MacroEnv) Expand
             break :blk ast.allocNode(allocator, Span{ .start = 0, .end = 0, .line = 0, .column = 0 }, .nil);
         },
         .binding => |binding| expandCon(allocator, expr.span, binding, env),
-        .decl => |d| ast.allocNode(allocator, expr.span, .{ .decl = .{ .inner = try expandInEnv(allocator, d.inner, env), .kind = d.kind } }),
+        .decl => |d| ast.allocNode(allocator, expr.span, .{ .decl = .{
+            .inner = try expandInEnv(allocator, d.inner, env),
+            .kind = d.kind,
+            .pub_ = d.pub_,
+        } }),
         .call => |call| maybeExpandCall(allocator, expr.span, call.callee, call.args, call.implicit_self, env),
         .ident => |name| expandIdent(expr, name, env),
         else => ast.walkExpr(allocator, expr, ExpandCtx, .{ .env = env }),
@@ -139,6 +150,26 @@ fn maybeExpandCall(
 ) ExpandError!*Node {
     const expanded_callee = try expandInEnv(allocator, callee, env);
     const expanded_args = try ast.walkSliceWith(allocator, args, ExpandCtx, .{ .env = env });
+
+    // qualified module macro
+    //     mod_name.macro_name!
+    if (expanded_callee.expr == .field) {
+        const f = expanded_callee.expr.field;
+        if (f.object.expr == .ident and std.mem.endsWith(u8, f.name, "!")) {
+            const qualified = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ f.object.expr.ident, f.name });
+            defer allocator.free(qualified);
+            if (env.map.get(qualified)) |def| {
+                if (matchPattern(allocator, def.pattern, expanded_args)) |result| {
+                    return instantiateTemplate(allocator, span, def.template, result.singles, result.groups);
+                }
+                if (expanded_args.len == 1) {
+                    if (matchExprPattern(allocator, def.pattern, expanded_args[0])) |result| {
+                        return instantiateTemplate(allocator, span, def.template, result.singles, result.groups);
+                    }
+                }
+            }
+        }
+    }
 
     if (expanded_callee.expr == .ident) {
         if (env.map.get(expanded_callee.expr.ident)) |def| {
@@ -249,7 +280,9 @@ pub const AstSubstituter = struct {
                 var out = try std.ArrayList(*Node).initCapacity(self.allocator, items.len);
                 defer out.deinit(self.allocator);
                 for (items) |item| try out.append(self.allocator, try self.substitute(item));
-                break :blk try self.alloc(node.span, .{ .block = try out.toOwnedSlice(self.allocator) });
+                const n = try self.alloc(node.span, .{ .block = try out.toOwnedSlice(self.allocator) });
+                n.synthetic_block = node.synthetic_block;
+                break :blk n;
             },
             .tuple => |items| blk: {
                 var out = try std.ArrayList(*Node).initCapacity(self.allocator, items.len);
@@ -315,11 +348,7 @@ pub const AstSubstituter = struct {
                 .value = try self.substitute(b.value),
                 .mutable = b.mutable,
             } }),
-            .import_expr => |i| try self.alloc(node.span, .{
-                .import_expr = try self.substitute(i),
-            }),
-
-            .number, .string, .multiline_string, .hash, .nil, .range_literal, .tuple_pattern, .macro_expr, .quasiquote, .decl, .comp_block, .test_block, .test_suite, .struct_def, .proc_macro, .try_expr, .orelse_expr, .type_alias => node,
+            .number, .string, .multiline_string, .hash, .nil, .range_literal, .tuple_pattern, .macro_expr, .quasiquote, .decl, .comp_block, .test_block, .test_suite, .struct_def, .proc_macro, .try_expr, .orelse_expr, .type_alias, .import_stmt => node,
         };
     }
 
@@ -348,7 +377,12 @@ fn instantiateTemplate(
     var builder = TemplateBuilder.init(allocator, singles, groups, &replacements);
     const source = try builder.build(template);
     const parsed = pipeline.parseSource(allocator, source) catch return error.ParseFailed;
-    return substitutePlaceholders(allocator, span, parsed, &replacements);
+    const result = try substitutePlaceholders(allocator, span, parsed, &replacements);
+    // macro template blocks must create their own scope (synthetic blocks from single-expr templates
+    // don't have this flag; multi-expr templates from parse do, but we clear it so the semantic
+    // checker creates proper scope isolation)
+    if (result.expr == .block) result.synthetic_block = false;
+    return result;
 }
 
 const TemplateBuilder = struct {
@@ -621,7 +655,7 @@ const PatternMatcher = struct {
         errdefer self.singles.deinit(allocator);
         self.groups = try std.ArrayList(GroupCapture).initCapacity(allocator, 8);
         errdefer self.groups.deinit(allocator);
-        
+
         return self;
     }
 

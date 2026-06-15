@@ -62,6 +62,7 @@ pub const TokenType = enum {
     kw_comp,
     kw_proc,
     kw_orelse,
+    kw_pub,
     plus,
     minus,
     star,
@@ -131,6 +132,7 @@ pub const TokenType = enum {
         .{ "or", .kw_or },
         .{ "not", .kw_not },
         .{ "orelse", .kw_orelse },
+        .{ "pub", .kw_pub },
     });
 };
 
@@ -1196,4 +1198,8 @@ test "lexes string with unknown escape passed through" {
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
     try std.testing.expectEqualStrings("hello\\qworld", tokens[0].text);
+}
+
+test "lexes pub keyword" {
+    try testing.expectTypes("pub const x = 1", &.{ .kw_pub, .kw_const, .ident, .assign, .number, .eof });
 }

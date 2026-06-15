@@ -184,13 +184,13 @@ pub const DeclKind = enum {
     struct_decl,
     test_decl,
     suite_decl,
-    proc_decl,
     type_alias_decl,
 };
 
 pub const DeclNode = struct {
     inner: *Node,
     kind: DeclKind,
+    pub_: bool = false,
 };
 
 pub const MatchMatcher = union(enum) {
@@ -279,7 +279,7 @@ pub const Expr = union(enum) {
         // TODO: ...< for exclusive. but prolly not
         // inclusive: bool = true,
     },
-    import_expr: *Node,
+    import_stmt: struct { name: []const u8, path: []const u8, pub_: bool = false },
     macro_expr: struct { name: []const u8, pattern: []const u8, template: []const u8 },
     test_block: struct { name: []const u8, body: *Node, skip: bool = false },
     test_suite: struct { name: []const u8, body: *Node },
@@ -529,11 +529,8 @@ pub const Node = struct {
                     try writer.writeAll("(return)");
                 }
             },
-            .import_expr => |path| {
-                try writer.writeAll("(import");
-                try sep(writer, depth, 1);
-                try path.printAt(writer, child(depth));
-                try close(writer, depth);
+            .import_stmt => |is| {
+                try writer.print("(import_stmt {s} {s})", .{ is.name, is.path });
             },
             .comp_block => |cb| {
                 try writer.writeAll("(comp");
@@ -1128,10 +1125,10 @@ pub fn walkExpr(
         .return_expr => |v| allocNode(allocator, expr.span, .{
             .return_expr = if (v) |inner| try ctx.walk(allocator, inner, ctx) else null,
         }),
-        .import_expr => |v| allocNode(allocator, expr.span, .{
-            .import_expr = try ctx.walk(allocator, v, ctx),
+        .import_stmt => |v| allocNode(allocator, expr.span, .{
+            .import_stmt = .{ .name = v.name, .path = v.path, .pub_ = v.pub_ },
         }),
-        .decl => |d| allocNode(allocator, expr.span, .{ .decl = .{ .inner = try ctx.walk(allocator, d.inner, ctx), .kind = d.kind } }),
+        .decl => |d| allocNode(allocator, expr.span, .{ .decl = .{ .inner = try ctx.walk(allocator, d.inner, ctx), .kind = d.kind, .pub_ = d.pub_ } }),
 
         .comp_block => |cb| allocNode(allocator, expr.span, .{ .comp_block = .{
             .expr = try ctx.walk(allocator, cb.expr, ctx),
@@ -1149,9 +1146,13 @@ pub fn walkExpr(
         .tuple_pattern => |items| allocNode(allocator, expr.span, .{
             .tuple_pattern = try walkSliceWith(allocator, items, Transform, ctx),
         }),
-        .block => |items| allocNode(allocator, expr.span, .{
-            .block = try walkSliceWith(allocator, items, Transform, ctx),
-        }),
+        .block => |items| {
+            const n = try allocNode(allocator, expr.span, .{
+                .block = try walkSliceWith(allocator, items, Transform, ctx),
+            });
+            n.synthetic_block = expr.synthetic_block;
+            return n;
+        },
         .call => |v| allocNode(allocator, expr.span, .{ .call = .{
             .callee = try ctx.walk(allocator, v.callee, ctx),
             .args = try walkSliceWith(allocator, v.args, Transform, ctx),

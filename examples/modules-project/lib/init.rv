@@ -1,0 +1,2 @@
+pub const greeting = "hello from lib"
+pub fn add(a, b) a + b

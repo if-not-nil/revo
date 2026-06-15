@@ -1,9 +1,0 @@
-# still gets executed
-print("hi")
-
-# all top-level bindings are global
-const f = fn() 1
-const val = 10
-
-fn g() 2 # asdf
-const val_priv = 12

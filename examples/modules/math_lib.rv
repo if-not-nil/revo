@@ -1,0 +1,5 @@
+pub const pi = 3.14159
+
+pub fn double(n) n * 2
+
+pub fn square(n) n * n

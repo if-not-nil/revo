@@ -674,6 +674,32 @@ pub const Compiler = struct {
             .decl => |d| {
                 switch (d.inner.expr) {
                     .binding => |*b| {
+                        if (b.value.expr == .import_stmt and b.target.expr == .ident) {
+                            // imports must be const, no type annotations
+                            const user_name = b.target.expr.ident;
+                            if (d.kind != .con) {
+                                return self.fail(.ParseError, expr, "import binding must be const");
+                            }
+                            // if (b.type_name != null) {
+                            //     return self.fail(.ParseError, expr, "type annotation on import binding is not supported");
+                            // }
+                            // if (std.mem.endsWith(u8, user_name, "!")) {
+                            //     return self.setFailureParts(.ParseError, .{ .span = b.target.span, .role = .primary, .message = user_name }, "name with ! is reserved for macros", &.{});
+                            // }
+                            // if (std.mem.endsWith(u8, user_name, "?") and !ast.isDiscardName(user_name)) {
+                            //     return self.setFailureParts(.ParseError, .{ .span = b.target.span, .role = .primary, .message = user_name }, "name with ? is reserved for functions returning bool", &.{});
+                            // }
+                            // compile import_stmt directly so it handles its own slot
+                            // then also bind the user-specified name if it differs
+                            try self.compile(b.value, true);
+                            if (!std.mem.eql(u8, user_name, b.value.expr.import_stmt.name)) {
+                                const slot = try state_mod.declareLocal(self, user_name, false);
+                                state_mod.reserveLocalSlots(self);
+                                try self.regDupe();
+                                try self.emit(.bind_local, slot);
+                            }
+                            return;
+                        }
                         const kind: values.BindingKind = switch (d.kind) {
                             .con => .con,
                             .let => .let,
@@ -700,10 +726,39 @@ pub const Compiler = struct {
                 } else try self.pushNil();
                 try self.emit(.ret, 1);
             },
-            .import_expr => |path| {
+            .import_stmt => |is| {
+                const fn_state = state_mod.currentFunctionState(self) orelse return self.fail(
+                    .ParseError,
+                    expr,
+                    "import statement outside function context",
+                );
+                if (state_mod.findLocalInCurrentScope(self, is.name)) |_| {
+                    const msg = try std.fmt.allocPrint(self.runtime_alloc, "name `{s}` is already defined", .{is.name});
+                    return self.fail(.ParseError, expr, msg);
+                }
+                // also check import_locals to prevent double import of same name
+                for (fn_state.import_locals.items) |il| {
+                    if (std.mem.eql(u8, il.name, is.name)) {
+                        const msg = try std.fmt.allocPrint(self.runtime_alloc, "name `{s}` is already defined by another import", .{is.name});
+                        return self.fail(.ParseError, expr, msg);
+                    }
+                }
+                const slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
+                self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
+
+                const import_local = LocalVar{ .name = is.name, .slot = slot, .mutable = false, .initialized = true };
+                try fn_state.import_locals.append(self.alloc, import_local);
+                try fn_state.all_locals.append(self.alloc, import_local);
+
+                state_mod.reserveLocalSlots(self);
+
                 try self.emit(.load_global, revo.core_atoms.import.atom_id());
-                try self.compile(path, true);
+                try self.@"const"(try self.vm.ownDataString(is.path));
+
                 try self.emit(.call, 1);
+                try self.regDupe();
+
+                try self.emit(.bind_local, slot);
             },
             .comp_block => |cb| try self.compileComp(cb.expr),
             .loop_expr => |v| try flow.compileLoop(self, v.body),

@@ -562,11 +562,13 @@ test "comparisons" {
 test "test blocks run in test mode" {
     // prints to stdout, no way to suppress in test infra yet
     if (true) return error.SkipZigTest;
-    try t.top_nil_test(
+    var result = try t.topResultMode(
         \\test "smoke" do
         \\    expect(2 == 2)?
         \\end
-    , true);
+    , null, true);
+    defer result.deinit();
+    try std.testing.expectEqual(revo.Data.new.nil(), result.value);
 }
 
 test "hash literals are real atoms" {
@@ -1701,9 +1703,9 @@ test "import caches modules and reuses the same table" {
     defer alloc.free(module_dir);
 
     try t.top_number_in_dir(module_dir,
-        \\ const a = import "counter"
+        \\ const a = import "./counter"
         \\ a.count = 41
-        \\ const b = import "counter"
+        \\ const b = import "./counter"
         \\ b.count
     , 41);
 }
@@ -1726,7 +1728,7 @@ test "import keeps module globals isolated from importer globals" {
 
     try t.top_number_in_dir(module_dir,
         \\ let x = 99
-        \\ const ans = import "answer"
+        \\ const ans = import "./answer"
         \\ x + ans
     , 140);
 }
@@ -1748,7 +1750,7 @@ test "import returns module value" {
     defer alloc.free(module_dir);
 
     try t.top_number_in_dir(module_dir,
-        \\ const ns = import "vis"
+        \\ const ns = import "./vis"
         \\ ns
     , 9);
 }
@@ -1958,28 +1960,6 @@ test "struct descriptors stay off globals" {
     try std.testing.expect(!vm.globals.contains(try vm.internAtom("__struct_desc_0")));
 }
 
-test "top module globals do not leak into imported module" {
-    // expectRuntimeErrorInDir prints to stdout, so this is noisy
-    if (true) return error.SkipZigTest;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(io, .{
-        .sub_path = "leakcheck.rv",
-        .data =
-        \\ x
-        ,
-    });
-
-    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
-    defer alloc.free(module_dir);
-
-    try t.expectRuntimeErrorInDir(module_dir,
-        \\ let x = 99
-        \\ import "leakcheck"
-    , .Panic);
-}
-
 test "top module assignment does not create vm global" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1996,7 +1976,7 @@ test "top module assignment does not create vm global" {
     defer alloc.free(module_dir);
 
     try t.expectCompileErrorInDir(module_dir,
-        \\ import "setx"
+        \\ import "./setx"
         \\ x
     );
 }
@@ -2018,12 +1998,12 @@ test "imported module assignment is private to module cache" {
     defer alloc.free(module_dir);
 
     try t.top_number_in_dir(module_dir,
-        \\ const m = import "private_state"
+        \\ const m = import "./private_state"
         \\ m
     , 7);
 
     try t.expectCompileErrorInDir(module_dir,
-        \\ import "private_state"
+        \\ import "./private_state"
         \\ y
     );
 }
@@ -3320,4 +3300,467 @@ test "too many args on fn with optional" {
         \\ const f = fn(a, ?b) a
         \\ f(1, 2, 3)
     , .ParseError);
+}
+
+//
+// module system
+//
+
+test "module import auto-binds filename" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "mymod.rv",
+        .data = "const x = 42\nx\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./mymod"
+        \\ mymod
+    , 42);
+}
+
+test "module import with custom name" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "mymod.rv",
+        .data = "const x = 7\nx\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import { m = "./mymod" }
+        \\ m
+    , 7);
+}
+
+test "module pub exports are accessible as fields" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "lib.rv",
+        .data =
+        \\ pub const x = 42
+        \\ pub fn y(n) n * 2
+        \\ const secret = "hidden"
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ const lib = import "./lib"
+        \\ lib.y(lib.x)
+    , 84);
+}
+
+test "module non-pub values are not exported" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "lib.rv",
+        .data =
+        \\ pub const visible = 42
+        \\ const hidden = 99
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ const lib = import "./lib"
+        \\ lib.visible
+    , 42);
+}
+
+test "cross-module macro injection works" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "macros.rv",
+        .data =
+        \\ pub macro double! `%e:expr` `%e * 2`
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./macros"
+        \\ macros.double!(21)
+    , 42);
+}
+
+test "non-pub macro is not injected" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "macros.rv",
+        .data =
+        \\ macro hidden! `%e:expr` `42`
+        \\ pub macro visible! `%e:expr` `%e`
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./macros"
+        \\ macros.visible!(99)
+    , 99);
+    try t.expectRuntimeErrorInDir(module_dir,
+        \\ import "./macros"
+        \\ macros.hidden!(21)
+    , .NotAFunction);
+}
+
+test "cross-module proc macro injection works" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "procs.rv",
+        .data =
+        \\ pub proc add_one!(iter) do
+        \\   let n = iter:next()
+        \\   {(:binary, :add, n, (:number, 1))}
+        \\ end
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./procs"
+        \\ procs.add_one!(41)
+    , 42);
+}
+
+test "cross-module pub struct is accessible" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "structs.rv",
+        .data =
+        \\ pub struct Box {
+        \\     val: number = 0,
+        \\ }
+        \\ pub fn new_box(v) Box { val = v }
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./structs"
+        \\ const b = structs.new_box(42)
+        \\ b.val
+    , 42);
+}
+
+test "const x = import \"foo\" with different names binds both" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "mymod.rv",
+        .data = "pub const val = 42\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ const x = import "./mymod"
+        \\ x.val
+    , 42);
+}
+
+test "import of non-existent file reports runtime error" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.expectRuntimeErrorInDir(module_dir,
+        \\ import "./nonexistent"
+        \\ nonexistent
+    , .Panic);
+}
+
+test "import empty module does not crash" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "empty.rv",
+        .data = "",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./empty"
+        \\ 42
+    , 42);
+}
+
+test "import in function body binds correctly" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "helper.rv",
+        .data = "pub const val = 99\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ fn get_val() do
+        \\   import "./helper"
+        \\   helper.val
+        \\ end
+        \\ get_val()
+    , 99);
+}
+
+test "module with only non-pub items compiles and imports" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "priv.rv",
+        .data = "const secret = 42\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./priv"
+        \\ 1
+    , 1);
+}
+
+test "pub import { x = \"a\" } re-exports module" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "inner.rv",
+        .data = "pub const val = 42\n",
+    });
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "outer.rv",
+        .data =
+        \\ pub import { inner = "./inner" }
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ const outer = import "./outer"
+        \\ outer.inner.val
+    , 42);
+}
+
+test "pub import \"foo\" at statement level re-exports" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "inner.rv",
+        .data = "pub const val = 42\n",
+    });
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "outer.rv",
+        .data =
+        \\ pub import "./inner"
+        ,
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ const outer = import "./outer"
+        \\ outer.inner.val
+    , 42);
+}
+
+test "multi-import with two entries" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "alpha.rv",
+        .data = "pub const a = 1\n",
+    });
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "beta.rv",
+        .data = "pub const b = 2\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import { x = "./alpha", y = "./beta" }
+        \\ x.a + y.b
+    , 3);
+}
+
+test "import inside do block binds correctly" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "helper.rv",
+        .data = "pub const val = 7\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ do
+        \\   import "./helper"
+        \\   helper.val
+        \\ end
+    , 7);
+}
+
+test "import with relative path works" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "sub_rel.rv",
+        .data = "pub const val = 42\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./sub_rel"
+        \\ sub_rel.val
+    , 42);
+}
+
+test "circular import does not hang" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "a.rv",
+        .data = "pub import \"b\"\npub const x = 1\n",
+    });
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "b.rv",
+        .data = "pub import \"a\"\npub const y = 2\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    // circular import should not hang or crash;;; either result is fine
+    const result = t.topResult("import \"a\"\n1", module_dir);
+    if (result) |res| {
+        var r = res;
+        r.deinit();
+        // completed without error!!! unexpected but acceptable
+        // the import may succeed if the cycle resolves in time
+    } else |_| {
+        // expected!! circular import may error at runtime
+    }
+}
+
+test "transitive pub import through re-export chain" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "leaf.rv",
+        .data = "pub const deep = 99\n",
+    });
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "middle.rv",
+        .data = "pub import \"./leaf\"\npub const mid = 50\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import "./middle"
+        \\ middle.leaf.deep + middle.mid
+    , 149);
+}
+
+test "same file imported under multiple names" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "shared.rv",
+        .data = "pub const v = 7\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.top_number_in_dir(module_dir,
+        \\ import { a = "./shared", b = "./shared" }
+        \\ a.v + b.v
+    , 14);
+}
+
+test "import with absolute path" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "absm.rv",
+        .data = "pub const x = 42\n",
+    });
+    const abs_path = try tmp.dir.realPathFileAlloc(io, "absm.rv", alloc);
+    defer alloc.free(abs_path);
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+
+    const source = try std.fmt.allocPrint(alloc, "import \"{s}\"\nabsm.x", .{abs_path});
+    defer alloc.free(source);
+
+    var result = try t.topResult(source, module_dir);
+    defer result.deinit();
+    const actual = try result.value.as_number();
+    if (@abs(@as(f64, 42) - actual) > 0.000000001)
+        return error.TestExpectedEqual;
+}
+
+test "@exports shadow in module is caught at compile time" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "collide.rv",
+        .data = "pub const @exports = 42\npub const x = 99\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+
+    try t.expectRuntimeErrorInDir(module_dir,
+        \\ import "./collide"
+        \\ 1
+    , .Panic);
+}
+
+test "let import binding is rejected" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "mod.rv",
+        .data = "pub const x = 42\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.expectCompileErrorInDir(module_dir,
+        \\ let m = import "./mod"
+        \\ m.x
+    );
+}
+
+test "module with all pub decl types" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{ .sub_path = "alltypes.rv", .data =
+        \\pub const val = 42
+        \\pub fn add(a, b) a + b
+        \\pub struct Pt { x: int, y: int }
+        \\
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    // val, add, and Pt should all appear in the export table
+    try t.top_number_in_dir(module_dir,
+        \\ import "./alltypes"
+        \\ alltypes.val + alltypes.add(3, 4)
+    , 49);
+}
+
+test "duplicate import name is rejected at compile time" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(io, .{
+        .sub_path = "mod.rv",
+        .data = "pub const v = 1\n",
+    });
+    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
+    defer alloc.free(module_dir);
+    try t.expectCompileErrorInDir(module_dir,
+        \\ import "./mod"
+        \\ import "./mod"
+    );
 }

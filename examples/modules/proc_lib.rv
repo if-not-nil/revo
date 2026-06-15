@@ -1,0 +1,4 @@
+pub proc add_one!(iter) do
+  let n = iter:next()
+  {(:binary, :add, n, (:number, 1))}
+end

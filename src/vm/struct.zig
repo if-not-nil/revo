@@ -214,25 +214,4 @@ pub const StructInstancePool = struct {
     pub fn capacity(self: *const StructInstancePool) usize {
         return self.instances.items.len;
     }
-
-    pub fn sweepStep(self: *StructInstancePool, cursor: usize, limit: usize) usize {
-        if (cursor >= self.instances.items.len) return 0;
-
-        const end = @min(cursor + limit, self.instances.items.len);
-        var processed: usize = 0;
-
-        var i = cursor;
-        while (i < end) : (i += 1) {
-            if (self.instances.items[i]) |*s| {
-                if (!self.marks.isSet(i)) {
-                    s.deinit(self.alloc);
-                    self.instances.items[i] = null;
-                    self.dead.append(self.alloc, @intCast(i)) catch {};
-                }
-            }
-            processed += 1;
-        }
-
-        return processed;
-    }
 };

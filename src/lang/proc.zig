@@ -142,6 +142,13 @@ fn expandInEnv(
 ) ExpandError!*Node {
     return switch (expr.expr) {
         .block => |items| blk: {
+            if (expr.synthetic_block) {
+                const n = try ast.allocNode(allocator, expr.span, .{
+                    .block = try ast.walkSliceWith(allocator, items, ProcCtx, .{ .vm = vm, .env = env, .mode = mode }),
+                });
+                n.synthetic_block = true;
+                break :blk n;
+            }
             var child = try env.clone();
             defer child.deinit();
             const walked = ast.walkSliceWith(allocator, items, ProcCtx, .{ .vm = vm, .env = &child, .mode = mode }) catch |err| {
@@ -222,6 +229,24 @@ fn maybeExpandCall(
 ) ExpandError!*Node {
     const expanded_callee = try expandInEnv(vm, allocator, callee, env, mode);
     const expanded_args = try ast.walkSliceWith(allocator, args, ProcCtx, .{ .vm = vm, .env = env, .mode = mode });
+
+    // qualified module macro: mod_name.macro_name!
+    if (expanded_callee.expr == .field) {
+        const f = expanded_callee.expr.field;
+        if (f.object.expr == .ident and std.mem.endsWith(u8, f.name, "!")) {
+            const qualified = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ f.object.expr.ident, f.name });
+            defer allocator.free(qualified);
+            if (env.map.get(qualified)) |def| {
+                if (mode == .runtimeize) return makeRuntimeProcCall(allocator, span, def, expanded_args);
+                return evalProcMacro(vm, span, def, expanded_args, env) catch |err| {
+                    if (err != error.RecursiveProcMacro) {
+                        reportProcExpandError(env, def.name, span, err);
+                    }
+                    return err;
+                };
+            }
+        }
+    }
 
     if (expanded_callee.expr == .ident) {
         if (env.map.get(expanded_callee.expr.ident)) |def| {

@@ -160,6 +160,7 @@ debug: DebugOptions = .{},
 globals: Globals,
 const_globals: ConstGlobals,
 module_dir: ?[]const u8,
+project_root: []const u8 = "",
 loading_stack: std.ArrayList([]const u8),
 
 /// matches type enum order
@@ -295,36 +296,16 @@ pub fn init(runtime: revo.Runtime) !VM {
     return vm;
 }
 
-pub inline fn noteGCPressure(self: *VM, bytes: usize) void {
-    vm_gc.noteGCPressure(self, bytes);
-}
-
-pub fn maybeCollectGarbage(self: *VM) void {
-    vm_gc.maybeCollectGarbage(self);
-}
-
 //
 // probably shouldnt be here but its fine
 //
-pub inline fn pushMarkTable(self: *VM, id: mem.TableID) void {
-    vm_gc.pushMarkTable(self, id);
-}
-
-pub inline fn pushMarkTuple(self: *VM, id: mem.TupleID) void {
-    vm_gc.pushMarkTuple(self, id);
-}
-
-pub inline fn pushMarkFunction(self: *VM, id: mem.FunctionID) void {
-    vm_gc.pushMarkFunction(self, id);
-}
-
-pub inline fn pushMarkUpvalue(self: *VM, id: root.functions.UpvalueID) void {
-    vm_gc.pushMarkUpvalue(self, id);
-}
-
-pub inline fn pushMarkStructInstance(self: *VM, id: struct_mod.StructInstanceID) void {
-    vm_gc.pushMarkStructInstance(self, id);
-}
+pub const maybeCollectGarbage = vm_gc.maybeCollectGarbage;
+pub const noteGCPressure = vm_gc.noteGCPressure;
+pub const pushMarkTable = vm_gc.pushMarkTable;
+pub const pushMarkTuple = vm_gc.pushMarkTuple;
+pub const pushMarkFunction = vm_gc.pushMarkFunction;
+pub const pushMarkUpvalue = vm_gc.pushMarkUpvalue;
+pub const pushMarkStructInstance = vm_gc.pushMarkStructInstance;
 
 pub fn deinit(self: *VM) void {
     self.clearProgramDebugInfo();
@@ -356,6 +337,7 @@ pub fn deinit(self: *VM) void {
     }
     self.debug_infos.deinit(self.runtime.alloc);
     self.package_path.deinit(self.runtime.alloc);
+    if (self.project_root.len > 0) self.runtime.alloc.free(self.project_root);
 
     var cache_it = self.module_cache.keyIterator();
     while (cache_it.next()) |key|

@@ -190,18 +190,6 @@ pub fn top_string_in_dir(module_dir: []const u8, source: []const u8, expected: [
     try expectTopString(&result, expected);
 }
 
-pub fn top_atom_in_dir(module_dir: []const u8, source: []const u8, expected: []const u8) !void {
-    var result = try topResult(source, module_dir);
-    defer result.deinit();
-    try expectTopAtom(&result, expected);
-}
-
-pub fn top_type_in_dir(module_dir: []const u8, source: []const u8, expected: revo.memory.Type) !void {
-    var result = try topResult(source, module_dir);
-    defer result.deinit();
-    try expectTopTypeValue(&result, expected);
-}
-
 pub fn top_type(source: []const u8, expected: revo.memory.Type) !void {
     var result = try topResult(source, null);
     defer result.deinit();
@@ -210,12 +198,6 @@ pub fn top_type(source: []const u8, expected: revo.memory.Type) !void {
 
 pub fn top_nil(source: []const u8) !void {
     var result = try topResult(source, null);
-    defer result.deinit();
-    try std.testing.expectEqual(revo.Data.new.nil(), result.value);
-}
-
-pub fn top_nil_test(source: []const u8, test_mode: bool) !void {
-    var result = try topResultMode(source, null, test_mode);
     defer result.deinit();
     try std.testing.expectEqual(revo.Data.new.nil(), result.value);
 }
@@ -277,10 +259,10 @@ pub fn expectCompileErrorInDir(module_dir: []const u8, source: []const u8) !void
             return error.ExpectedCompileFailure;
         },
         .err => |failure| switch (failure) {
-            .semantic => {
+            .semantic, .lower => {
                 vm.runtime.resetDiagArena();
             },
-            .lower, .expand, .parse => {
+            .expand, .parse => {
                 vm.runtime.resetDiagArena();
                 return error.ExpectedCompileFailure;
             },

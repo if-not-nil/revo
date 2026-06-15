@@ -145,28 +145,6 @@ pub fn capacity(self: *const Interner) usize {
     return self.slots.items.len;
 }
 
-pub fn sweepStep(self: *Interner, cursor: usize, limit: usize) usize {
-    if (cursor >= self.slots.items.len) return 0;
-
-    const end = @min(cursor + limit, self.slots.items.len);
-    var processed: usize = 0;
-
-    var i = cursor;
-    while (i < end) : (i += 1) {
-        if (self.slots.items[i]) |s| {
-            if (!self.marks.isSet(i)) {
-                _ = self.by_name.remove(s);
-                self.alloc.free(s);
-                self.slots.items[i] = null;
-                self.dead.append(self.alloc, @intCast(i)) catch {};
-            }
-        }
-        processed += 1;
-    }
-
-    return processed;
-}
-
 test "string literals survive source free" {
     var vm = try VM.init(lang_testing.runtime());
     defer vm.deinit();

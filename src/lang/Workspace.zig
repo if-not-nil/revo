@@ -1109,6 +1109,7 @@ fn clearFiles(self: *Workspace) void {
         const entry = self.files.pop() orelse unreachable;
         self.alloc.free(entry.name);
         self.alloc.free(entry.text);
+        if (entry.project_root.len > 0) self.alloc.free(entry.project_root);
     }
 }
 
@@ -1713,15 +1714,10 @@ const ImportVisitor = struct {
     project_root: []const u8,
     failed: bool,
 
-    // walk the AST; collect import exprs and resolve them
+    // walk the AST; collect import statements and resolve them
     pub fn visit(self: *@This(), node: *const lang.Node) void {
-        if (node.expr == .import_expr) {
-            const path = node.expr.import_expr;
-            const raw = switch (path.expr) {
-                .string => path.expr.string,
-                .multiline_string => path.expr.multiline_string,
-                else => "",
-            };
+        if (node.expr == .import_stmt) {
+            const raw = node.expr.import_stmt.path;
             if (raw.len != 0) {
                 if (self.ws.resolveOpenImport(self.base, raw, self.mode, self.project_root)) |id| {
                     if (!containsId(self.out.items, id)) {

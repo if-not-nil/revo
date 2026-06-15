@@ -415,7 +415,8 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
             self.parseDocAttr(token)
         else
             self.allocExpr(token.span(), .{ .ident = token.text }),
-        .kw_const, .kw_global, .kw_let, .kw_struct, .kw_test, .kw_suite, .kw_proc => self.parseDecl(token),
+        .kw_const, .kw_global, .kw_let, .kw_struct, .kw_test, .kw_suite => self.parseDecl(token),
+        .kw_proc => self.parseProc(token),
         .kw_fn => self.parseFn(token),
         .minus => self.parseUnary(.negate, 60, token),
         .kw_not => self.parseUnary(.not, 35, token),
@@ -439,6 +440,7 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
             return self.allocExpr(token.span(), .{ .ident = token.text });
         },
         .kw_macro => self.parseMacro(token),
+        .kw_pub => self.parsePubPrefix(token),
         .backtick_string => try self.parseQuasiquote(token),
         .eof => return error.UnexpectedToken,
         else => return error.UnexpectedToken,
@@ -781,6 +783,12 @@ fn parseBinding(self: *Parser, comptime kind: ast.DeclKind, start: Token) anyerr
     _ = try self.expect(.assign);
     binding.value = try self.parseStatementExpression(0);
 
+    // for const x = import "foo", use binding name as module name
+    // so macros qualify as x.macro! instead of foo.macro!
+    if (binding.value.expr == .import_stmt and binding.target.expr == .ident) {
+        binding.value.expr.import_stmt.name = binding.target.expr.ident;
+    }
+
     const span = Span.merge(start.span(), binding.value.span);
     const binding_node = try self.allocExpr(span, .{ .binding = binding });
 
@@ -813,13 +821,10 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*Node {
             const suite = try self.parseSuite(start);
             return self.allocExpr(start.span(), .{ .decl = .{ .inner = suite, .kind = ast.DeclKind.suite_decl } });
         },
-        .kw_proc => {
-            const proc_macro = try self.parseProc(start);
-            return self.allocExpr(start.span(), .{ .decl = .{ .inner = proc_macro, .kind = ast.DeclKind.proc_decl } });
-        },
         .kw_type => {
             if (!self.check(.ident)) return error.UnexpectedToken;
-            return try self.parseTypeAlias(start);
+            const type_alias = try self.parseTypeAlias(start);
+            return self.allocExpr(start.span(), .{ .decl = .{ .inner = type_alias, .kind = ast.DeclKind.type_alias_decl } });
         },
         else => return error.UnexpectedToken,
     };
@@ -869,15 +874,97 @@ fn parseExitExpr(self: *Parser, comptime tag: std.meta.Tag(Expr), start: Token) 
     return self.allocExpr(span, @unionInit(Expr, @tagName(tag), value));
 }
 
-/// import expr
-fn parseImport(self: *Parser, start: Token) anyerror!*Node {
-    const path = try self.parseExpression(0);
-    return self.allocExpr(
-        Span.merge(start.span(), path.span),
-        .{ .import_expr = path },
-    );
+/// pub prefix on declarations
+fn parsePubPrefix(self: *Parser, _: Token) anyerror!*Node {
+    const pub_keywords = comptime [_]TokenType{ .kw_const, .kw_let, .kw_fn, .kw_struct, .kw_test, .kw_suite, .kw_proc, .kw_type, .kw_macro, .kw_import };
+    var found = false;
+    inline for (pub_keywords) |kt| {
+        if (self.check(kt)) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) return error.UnexpectedToken;
+    const decl_start = self.advance();
+
+    // TODO: import and macro are not decl nodes
+    if (decl_start.type == .kw_import) {
+        var node = try self.parseImport(decl_start);
+        if (node.expr == .import_stmt) {
+            node.expr.import_stmt.pub_ = true;
+        } else if (node.expr == .block) {
+            for (node.expr.block) |item| {
+                if (item.expr == .import_stmt) item.expr.import_stmt.pub_ = true;
+            }
+        }
+        return node;
+    }
+
+    if (decl_start.type == .kw_macro) {
+        const node = try self.parseMacro(decl_start);
+        return self.allocExpr(node.span, .{ .decl = .{ .inner = node, .kind = .con, .pub_ = true } });
+    }
+
+    if (decl_start.type == .kw_proc) {
+        const node = try self.parseProc(decl_start);
+        return self.allocExpr(node.span, .{ .decl = .{ .inner = node, .kind = .con, .pub_ = true } });
+    }
+
+    var node = try self.parseDecl(decl_start);
+    if (node.expr == .decl) node.expr.decl.pub_ = true;
+    return node;
 }
 
+fn importPathName(alloc: std.mem.Allocator, path: []const u8) ![]const u8 {
+    const basename = if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| path[i + 1 ..] else path;
+    return if (std.mem.lastIndexOf(u8, basename, ".")) |i| try alloc.dupe(u8, basename[0..i]) else try alloc.dupe(u8, basename);
+}
+
+/// import "path" or import { ... }
+fn parseImport(self: *Parser, start: Token) anyerror!*Node {
+    // import { m1 = "mod1", "mod2" }
+    if (self.peek().type == .lsquiggly) {
+        _ = try self.expect(.lsquiggly);
+        var import_nodes = try std.ArrayList(*Node).initCapacity(self.alloc, 4);
+
+        while (self.peek().type != .rsquiggly) {
+            if (self.peek().type == .string) {
+                // "path", auto-bind
+                const path_token = try self.expect(.string);
+                const name = try importPathName(self.alloc, path_token.text);
+                try import_nodes.append(self.alloc, try self.allocExpr(
+                    Span.merge(start.span(), path_token.span()),
+                    .{ .import_stmt = .{ .name = name, .path = path_token.text } },
+                ));
+            } else {
+                // ident = "path", custom name
+                const name_token = try self.expect(.ident);
+                _ = try self.expect(.assign);
+                const path_token = try self.expect(.string);
+                try import_nodes.append(self.alloc, try self.allocExpr(
+                    Span.merge(start.span(), path_token.span()),
+                    .{ .import_stmt = .{ .name = name_token.text, .path = path_token.text } },
+                ));
+            }
+            if (self.peek().type != .rsquiggly) _ = try self.expect(.comma);
+        }
+        _ = try self.expect(.rsquiggly);
+
+        const blk = try self.allocExpr(start.span(), .{ .block = try import_nodes.toOwnedSlice(self.alloc) });
+        blk.synthetic_block = true;
+        return blk;
+    }
+
+    // import "path" autobind
+    {
+        const path_token = try self.expect(.string);
+        const name = try importPathName(self.alloc, path_token.text);
+        return self.allocExpr(
+            Span.merge(start.span(), path_token.span()),
+            .{ .import_stmt = .{ .name = name, .path = path_token.text } },
+        );
+    }
+}
 /// spawn expr
 fn parseSpawn(self: *Parser, start: Token) anyerror!*Node {
     const value = try self.parseExpression(60);
@@ -1613,7 +1700,7 @@ const expr_start_tokens = makeTokenSet(&.{
     .kw_not,    .pipe_forward, .lparen,           .kw_fn,     .kw_if,
     .kw_match,  .kw_do,        .kw_loop,          .kw_break,  .kw_return,
     .kw_import, .kw_spawn,     .kw_join,          .kw_yield,  .lsquiggly,
-    .kw_type,   .eof,
+    .kw_type,   .kw_pub,       .eof,
 });
 
 /// expr allows bare call after it (ident, field, call, fn_expr)
@@ -1674,4 +1761,137 @@ test "parses @doc annotation on function declaration" {
     const value = root.expr.decl.inner.expr.binding.value;
     try std.testing.expect(value.expr == .fn_expr);
     try std.testing.expectEqualStrings("adds", value.expr.fn_expr.doc.?);
+}
+
+test "parses import statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "import \"json\"");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .import_stmt);
+    try std.testing.expectEqualStrings("json", root.expr.import_stmt.path);
+    try std.testing.expectEqualStrings("json", root.expr.import_stmt.name);
+    try std.testing.expect(!root.expr.import_stmt.pub_);
+}
+
+test "parses multi-import table" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    {
+        const tokens = try lexer.lex(alloc, "import {\"a\", \"b\"}");
+        const root = try parseTokens(alloc, tokens);
+        try std.testing.expect(root.expr == .block);
+        try std.testing.expect(root.expr.block.len == 2);
+        try std.testing.expect(root.expr.block[0].expr == .import_stmt);
+        try std.testing.expectEqualStrings("a", root.expr.block[0].expr.import_stmt.name);
+        try std.testing.expect(root.expr.block[1].expr == .import_stmt);
+        try std.testing.expectEqualStrings("b", root.expr.block[1].expr.import_stmt.name);
+    }
+    {
+        const tokens = try lexer.lex(alloc, "import {x = \"a\"}");
+        const root = try parseTokens(alloc, tokens);
+        try std.testing.expect(root.expr == .block);
+        try std.testing.expect(root.expr.block.len == 1);
+        try std.testing.expect(root.expr.block[0].expr == .import_stmt);
+        try std.testing.expectEqualStrings("x", root.expr.block[0].expr.import_stmt.name);
+        try std.testing.expectEqualStrings("a", root.expr.block[0].expr.import_stmt.path);
+    }
+    {
+        const tokens = try lexer.lex(alloc, "import {x = \"a\", \"b\"}");
+        const root = try parseTokens(alloc, tokens);
+        try std.testing.expect(root.expr == .block);
+        try std.testing.expect(root.expr.block.len == 2);
+        try std.testing.expectEqualStrings("x", root.expr.block[0].expr.import_stmt.name);
+        try std.testing.expectEqualStrings("b", root.expr.block[1].expr.import_stmt.name);
+    }
+}
+
+test "parses pub const with pub_ flag" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "pub const x = 1");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+    try std.testing.expect(root.expr.decl.kind == .con);
+}
+
+test "parses pub macro" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const src = "pub macro assert! `(expr)` `(expr)`";
+    const tokens = try lexer.lex(alloc, src);
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+    try std.testing.expect(root.expr.decl.inner.expr == .macro_expr);
+    try std.testing.expectEqualStrings("assert!", root.expr.decl.inner.expr.macro_expr.name);
+}
+
+test "parses pub import statement" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "pub import \"json\"");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .import_stmt);
+    try std.testing.expect(root.expr.import_stmt.pub_);
+    try std.testing.expectEqualStrings("json", root.expr.import_stmt.path);
+}
+
+test "parses pub fn with pub_ flag" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "pub fn f() 42");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+}
+
+test "parses pub proc" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "pub proc inc!(n) n + 1");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+    try std.testing.expect(root.expr.decl.inner.expr == .proc_macro);
+    try std.testing.expectEqualStrings("inc!", root.expr.decl.inner.expr.proc_macro.name);
+}
+
+test "parses pub struct with pub_ flag" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "pub struct User { name: string }");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+    try std.testing.expect(root.expr.decl.kind == .struct_decl);
+}
+
+test "parses pub type with pub_ flag" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const tokens = try lexer.lex(alloc, "pub type MyInt = int");
+    const root = try parseTokens(alloc, tokens);
+    try std.testing.expect(root.expr == .decl);
+    try std.testing.expect(root.expr.decl.pub_);
+    try std.testing.expect(root.expr.decl.kind == .type_alias_decl);
 }
