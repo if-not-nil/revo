@@ -605,10 +605,11 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
     const name = args[0].asString().?;
     const body = args[1].asFunction().?;
     var buf: [128]u8 = undefined;
-    var w = vm.runtime.stdout.writer(vm.runtime.io, &buf);
+    var w = std.Io.File.stdout().writerStreaming(vm.runtime.io, &buf);
     defer w.flush() catch {};
 
     w.interface.print("* test \"{s}\"...\n", .{try vm.strings.get(name)}) catch {};
+    w.flush() catch {};
     const res = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
         const failure = vm.evalFailure(err);
         failure.render(vm.runtime.alloc, &w.interface, vm.currentDebugSource() orelse "") catch {
@@ -650,7 +651,7 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
 pub fn dosuite(args: []const Data, vm: *VM) !NativeResult {
     const body = args[1].asFunction().?;
     var sbuf: [128]u8 = undefined;
-    var sw = vm.runtime.stdout.writer(vm.runtime.io, &sbuf);
+    var sw = std.Io.File.stdout().writerStreaming(vm.runtime.io, &sbuf);
     defer sw.flush() catch {};
     _ = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
         const failure = vm.evalFailure(err);
