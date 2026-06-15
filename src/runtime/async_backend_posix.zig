@@ -21,6 +21,12 @@ pub fn init(bs: *BackendState) anyerror!void {
     if (std.c.pipe(&fds) == -1) return error.Unexpected;
     bs.control_r = fds[0];
     bs.control_w = fds[1];
+    //
+    // so that drain_pipe doesn't hang when queue is empty
+    const cur = std.c.fcntl(bs.control_r, std.posix.F.GETFL, @as(c_int, 0));
+    if (cur >= 0) {
+        _ = std.c.fcntl(bs.control_r, std.posix.F.SETFL, @as(c_int, @bitCast(std.posix.O{ .NONBLOCK = true })));
+    }
 }
 
 pub fn deinit(bs: *BackendState) void {

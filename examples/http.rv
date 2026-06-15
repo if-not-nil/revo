@@ -11,11 +11,15 @@ const server = net.listen(6768)?
 print!("http server on localhost:%d...", server.port)
 
 fn serve(peer) do
+  print("serve called!")
   peer:send(response)?
+  print("send done!")
   peer:close()?
+  print("close done!")
 end
 
 while :true do
   let conn = server:accept()?
+  print!("accepted connection: %v", conn)
   spawn serve(conn)
 end
