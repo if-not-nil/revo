@@ -123,11 +123,23 @@ pub fn build(b: *Build) !void {
 
     const features = getFeatures(features_str);
 
-    const build_options = b.addOptions();
-    build_options.addOption(bool, "isocline", features.isocline);
-    build_options.addOption([]const u8, "version", VERSION);
-    build_options.addOption(bool, "lsp_enabled", features.lsp);
-    const options_mod = build_options.createModule();
+    var git_exit_code: u8 = 0; // ignored, but it's a required argument
+    const git_output = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &git_exit_code, .ignore) catch VERSION;
+    const dev_version = std.mem.trim(u8, git_output, " \n\r");
+
+    // used for dev builds
+    const debug_options = b.addOptions();
+    debug_options.addOption(bool, "isocline", features.isocline);
+    debug_options.addOption([]const u8, "version", dev_version);
+    debug_options.addOption(bool, "lsp_enabled", features.lsp);
+    const debug_options_mod = debug_options.createModule();
+
+    // used for release builds
+    const release_options = b.addOptions();
+    release_options.addOption(bool, "isocline", features.isocline);
+    release_options.addOption([]const u8, "version", VERSION);
+    release_options.addOption(bool, "lsp_enabled", features.lsp);
+    const release_options_mod = release_options.createModule();
 
     const is_freestanding = target.result.os.tag == .freestanding;
 
@@ -218,7 +230,7 @@ pub fn build(b: *Build) !void {
 
     exe_mod.addImport("isocline", isocline_mod);
     if (!is_freestanding) {
-        exe_mod.addImport("build_options", options_mod);
+        exe_mod.addImport("build_options", if (optimize == .Debug) debug_options_mod else release_options_mod);
     }
 
     const header_wf = b.addWriteFiles();
@@ -354,7 +366,7 @@ pub fn build(b: *Build) !void {
                 .link_libc = true,
                 .imports = &(imports ++ [_]Module.Import{
                     .{ .name = "isocline", .module = isocline_mod },
-                    .{ .name = "build_options", .module = options_mod },
+                    .{ .name = "build_options", .module = release_options_mod },
                     .{ .name = "lsp_main", .module = rel_revolt_mod },
                 }),
             });
