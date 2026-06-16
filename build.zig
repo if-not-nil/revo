@@ -354,9 +354,9 @@ pub fn build(b: *Build) !void {
                 .target = release_target,
                 .optimize = .ReleaseFast,
                 .link_libc = true,
-                .imports = &.{
+                .imports = &(imports ++ [_]Module.Import{
                     .{ .name = "lsp", .module = lsp_kit_dep.module("lsp") },
-                },
+                }),
             });
 
             const release_mod = b.createModule(.{
