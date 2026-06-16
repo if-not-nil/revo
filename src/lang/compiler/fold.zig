@@ -112,8 +112,7 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
     }
 
     // string concat for .concat with two string constants
-    if (lv.isString() and rv.isString() and inst.opcode == .concat)
-    {
+    if (lv.isString() and rv.isString() and inst.opcode == .concat) {
         const ls = try self.vm.strings.get(lv.asString().?);
         const rs = try self.vm.strings.get(rv.asString().?);
         const s = try std.mem.concat(self.alloc, u8, &.{ ls, rs });

@@ -432,13 +432,14 @@ const SemanticChecker = struct {
                 break :blk body_type;
             },
             .match_expr => |v| blk: {
-                _ = try self.analyzeNode(v.subject);
+                const subject_type = try self.analyzeNode(v.subject);
                 var unified: types_mod.TypeInfo = .any;
                 for (v.arms) |arm| {
                     try self.pushScope();
                     for (arm.matchers) |matcher| {
                         if (matcher == .expr) {
                             _ = try self.declarePatternNames(matcher.expr);
+                            try self.narrowPatternNames(matcher.expr, subject_type);
                         }
                     }
                     if (arm.guard) |g| _ = try self.analyzeNode(g);
@@ -677,6 +678,56 @@ const SemanticChecker = struct {
             else => {},
         }
         return .any;
+    }
+
+    /// narrow match pattern bindings when the subject type is a tagged union
+    /// `(:ok, v)` patterns against `(:ok, int) | (:err, string)` should bind
+    /// `v` as `.int`, not `.any`
+    fn narrowPatternNames(self: *SemanticChecker, pattern: *const ast.Node, subject_type: types_mod.TypeInfo) !void {
+        if (subject_type == .any) return;
+
+        switch (pattern.expr) {
+            .tuple_pattern => |items| if (items.len > 0) {
+                const first = items[0];
+                const tag = if (first.expr == .hash) first.expr.hash else return;
+                const payload = try self.narrowedPayload(subject_type, tag) orelse return;
+                for (items[1..], 0..) |item, i| {
+                    if (item.expr == .ident and !ast.isDiscardName(item.expr.ident)) {
+                        const narrowed = if (i < payload.len) payload[i] else types_mod.TypeInfo.any;
+                        try self.declare(item.expr.ident, narrowed);
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+
+    /// given a union type like `(:ok, int) | (:err, string)` and a tag atom
+    /// like `:ok`, return the payload types `[int]`, or null if no match
+    fn narrowedPayload(self: *SemanticChecker, subject_type: types_mod.TypeInfo, tag: []const u8) !?[]const types_mod.TypeInfo {
+        _ = self;
+        const variants = switch (subject_type) {
+            .@"union" => |us| us,
+            else => return null,
+        };
+        for (variants) |variant| {
+            if (variant.name.len > 0) {
+                const variant_tag = if (variant.name[0] == ':') variant.name[1..] else variant.name;
+                const pattern_tag = if (tag[0] == ':') tag[1..] else tag;
+                if (std.mem.eql(u8, variant_tag, pattern_tag)) {
+                    return variant.types;
+                }
+            }
+            // unnamed! check if first T is atom
+            if (variant.types.len > 0 and variant.types[0] == .atom) {
+                const variant_tag = types_mod.atomPayload(variant.types[0].atom);
+                const pattern_tag = if (tag[0] == ':') tag[1..] else tag;
+                if (std.mem.eql(u8, variant_tag, pattern_tag)) {
+                    return variant.types[1..];
+                }
+            }
+        }
+        return null;
     }
 
     fn analyzeAssign(self: *SemanticChecker, assign: anytype, span: ast.Span) !types_mod.TypeInfo {

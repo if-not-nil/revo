@@ -387,12 +387,15 @@ pub fn compileMatch(
         self.alloc.free(fail_jumps);
 
         if (matcher_expr) |me| {
+            // capture subject type before patternTypeInfo overwrites the hint
+            const pre_narrow_subject_type = type_check.inferExprType(self, subject);
             if (subject.expr == .ident) {
                 if (patternTypeInfo(self, me)) |ti| {
                     try state.setLocalTypeHint(self, subject.expr.ident, ti);
                 }
             }
             try bindMatchPattern(self, me, subject_storage);
+            try narrowMatchPattern(self, me, pre_narrow_subject_type);
         }
 
         if (arm.guard) |guard| {
@@ -696,6 +699,44 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
         .nil => .{ .atom = ":nil" },
         else => null,
     };
+}
+
+/// narrow pattern variables by subject's union type:
+///     `| (:ok, v) =>` narrows `v` to the payload type of the `:ok` variant
+fn narrowMatchPattern(
+    self: *Compiler,
+    pattern: *const Node,
+    subject_type: types_mod.TypeInfo,
+) !void {
+    if (subject_type != .@"union") return;
+
+    if (pattern.expr != .tuple_pattern) return;
+    const items = pattern.expr.tuple_pattern;
+    if (items.len == 0) return;
+
+    const first = items[0];
+    const tag = if (first.expr == .hash) first.expr.hash else return;
+
+    for (subject_type.@"union") |variant| {
+        const vt = variant.types;
+        if (vt.len == 0) continue;
+
+        if (variant.name.len == 0) {
+            if (vt[0] != .atom) continue;
+            const variant_tag = types_mod.atomPayload(vt[0].atom);
+            const pattern_tag = if (tag.len > 0 and tag[0] == ':') tag[1..] else tag;
+            if (!std.mem.eql(u8, variant_tag, pattern_tag)) continue;
+
+            const payload = vt[1..];
+            for (items[1..], 0..) |item, i| {
+                if (item.expr == .ident and !ast.isDiscardName(item.expr.ident)) {
+                    const narrowed = if (i < payload.len) payload[i] else .any;
+                    try state.setLocalTypeHint(self, item.expr.ident, narrowed);
+                }
+            }
+            return;
+        }
+    }
 }
 
 pub fn compileAnd(self: *Compiler, left: *const Node, right: *const Node) !void {
