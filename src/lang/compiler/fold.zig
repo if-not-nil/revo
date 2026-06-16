@@ -16,7 +16,7 @@ pub fn foldIr(self: *Compiler) !void {
 
 fn tryFoldInst(self: *Compiler, inst: *ir.IrInst) !bool {
     switch (inst.opcode) {
-        .add, .sub, .mul, .div, .mod, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
+        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .div_float, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
             return tryFoldBinary(self, inst);
         },
         .negate, .not, .negate_int, .negate_float => {
@@ -111,9 +111,9 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
         return true;
     }
 
-    // string concat for .add with two string constants
+    // string concat for .add and .concat with two string constants
     if (lv.isString() and rv.isString() and
-        (inst.opcode == .add or inst.opcode == .add_int))
+        (inst.opcode == .add or inst.opcode == .add_int or inst.opcode == .concat))
     {
         const ls = try self.vm.strings.get(lv.asString().?);
         const rs = try self.vm.strings.get(rv.asString().?);
