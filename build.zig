@@ -112,7 +112,6 @@ pub fn build(b: *Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const features_str = b.option([]const u8, "features", "available: isocline, lsp") orelse "isocline,lsp";
-    const do_release = b.option(bool, "release", "Build release binaries for all targets") orelse false;
     const test_filters = b.option(
         []const []const u8,
         "test-filter",
@@ -336,9 +335,10 @@ pub fn build(b: *Build) !void {
     }
 
     //
-    // releases
+    // release step
     //
-    if (do_release) {
+    const release_step = b.step("release", "build release binaries for all targets");
+    {
         const install_options = Build.Step.InstallArtifact.Options{
             .dest_dir = .{ .override = .{ .custom = "release" } },
         };
@@ -377,7 +377,7 @@ pub fn build(b: *Build) !void {
             });
             release_exe.rdynamic = true;
 
-            b.getInstallStep().dependOn(&b.addInstallArtifact(release_exe, install_options).step);
+            release_step.dependOn(&b.addInstallArtifact(release_exe, install_options).step);
         }
     }
 }
