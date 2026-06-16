@@ -243,6 +243,43 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
                 continue :dispatch instr.op;
             };
 
+            // number + number fast path
+            if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
+                var l_buf: [128]u8 = undefined;
+                var r_buf: [128]u8 = undefined;
+                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch unreachable;
+                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch unreachable;
+                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
+                const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
+                regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+
+            // string + number fast path
+            if (lhs.asStr()) |ls| if (rhs.asNum()) |rn| {
+                const l_str = self.stringValue(ls);
+                var r_buf: [128]u8 = undefined;
+                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch unreachable;
+                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
+                const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
+                regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+
+            // number + string fast path
+            if (lhs.asNum()) |ln| if (rhs.asStr()) |rs| {
+                var l_buf: [128]u8 = undefined;
+                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch unreachable;
+                const r_str = self.stringValue(rs);
+                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
+                const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
+                regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
+                if (!fetchNext(fiber, &instr)) break :dispatch;
+                continue :dispatch instr.op;
+            };
+
             // general: convert both to strings and concat
             //          same pattern as stdlib's tostring
             const l_src = blk: {
