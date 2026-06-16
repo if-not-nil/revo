@@ -205,6 +205,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             const lhs = regRead(regs, base, instr.b);
             const rhs = regRead(regs, base, instr.c);
 
+            // string + string fast path
             if (lhs.asStr()) |ls| if (rhs.asStr()) |rs| {
                 const l_str = self.stringValue(ls);
                 const r_str = self.stringValue(rs);
@@ -217,6 +218,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
                 continue :dispatch instr.op;
             };
 
+            // tuple + tuple fast path
             if (lhs.asTuple()) |lt| if (rhs.asTuple()) |rt| {
                 const l_tuple = try self.tuples.get(lt);
                 const r_tuple = try self.tuples.get(rt);
@@ -228,7 +230,70 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
                 continue :dispatch instr.op;
             };
 
-            return self.fail(error.IncompatibleTypes, "cannot concatenate {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
+            // general: convert both to strings and concat
+            //          same pattern as stdlib's tostring
+            const l_src = blk: {
+                if (try self.getMetamethod(lhs, "__tostring")) |mm| {
+                    const call_result = revo.std_lib.callUnaryMetamethod(mm, lhs, self);
+                    fiber = self.currentFiber();
+                    base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+                    regs = fiber.registers[0..fiber.registers_len];
+                    switch (call_result) {
+                        .ok => |data| {
+                            if (data.asStr()) |sid| break :blk try alloc.dupe(u8, self.stringValue(sid));
+                        },
+                        .err => {},
+                    }
+                    return self.fail(
+                        error.IncompatibleTypes,
+                        "cannot concatenate {s} and {s}",
+                        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+                    );
+                }
+                var wbuf = std.Io.Writer.Allocating.init(alloc);
+                defer wbuf.deinit();
+                lhs.write(&wbuf.writer, self, .display) catch return self.fail(
+                    error.IncompatibleTypes,
+                    "cannot concatenate {s} and {s}",
+                    .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+                );
+                break :blk try wbuf.toOwnedSlice();
+            };
+            defer alloc.free(l_src);
+
+            const r_src = blk: {
+                if (try self.getMetamethod(rhs, "__tostring")) |mm| {
+                    const call_result = revo.std_lib.callUnaryMetamethod(mm, rhs, self);
+                    fiber = self.currentFiber();
+                    base = fiber.frames_hot.items[fiber.frames_hot.items.len - 1].base;
+                    regs = fiber.registers[0..fiber.registers_len];
+                    switch (call_result) {
+                        .ok => |data| {
+                            if (data.asStr()) |sid| break :blk try alloc.dupe(u8, self.stringValue(sid));
+                        },
+                        .err => {},
+                    }
+                    return self.fail(
+                        error.IncompatibleTypes,
+                        "cannot concatenate {s} and {s}",
+                        .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+                    );
+                }
+                var wbuf = std.Io.Writer.Allocating.init(alloc);
+                defer wbuf.deinit();
+                rhs.write(&wbuf.writer, self, .display) catch return self.fail(
+                    error.IncompatibleTypes,
+                    "cannot concatenate {s} and {s}",
+                    .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) },
+                );
+                break :blk try wbuf.toOwnedSlice();
+            };
+            defer alloc.free(r_src);
+
+            const result = try std.mem.concat(alloc, u8, &.{ l_src, r_src });
+            regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(result));
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
         },
         .sub => {
             const lhs = regRead(regs, base, instr.b);

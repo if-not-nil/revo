@@ -756,7 +756,7 @@ pub fn typeof_(args: []const Data, vm: *VM) !NativeResult {
 /// uses __tostring or __display metamethod if available
 pub fn tostring(args: []const Data, vm: *VM) !NativeResult {
     const mm = try vm.getMetamethod(args[0], "__tostring");
-    if (mm) |m| return call_unary_metamethod(m, args[0], vm);
+    if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
     var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
     defer buf.deinit();
     try args[0].write(&buf.writer, vm, .display);
@@ -1267,7 +1267,7 @@ fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: RenderMode) !vo
         .display => {
             const mm = try vm.getMetamethod(val, "__display");
             if (mm) |m| {
-                const rendered = call_unary_metamethod(m, val, vm);
+                const rendered = callUnaryMetamethod(m, val, vm);
                 const str = switch (rendered) {
                     .ok => |r| if (r.asString()) |id| vm.stringValue(id) else "",
                     .err => "",
@@ -1277,7 +1277,7 @@ fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: RenderMode) !vo
             }
             const mm2 = try vm.getMetamethod(val, "__tostring");
             if (mm2) |m| {
-                const rendered = call_unary_metamethod(m, val, vm);
+                const rendered = callUnaryMetamethod(m, val, vm);
                 const str = switch (rendered) {
                     .ok => |r| if (r.asString()) |id| vm.stringValue(id) else "",
                     .err => "",
@@ -1291,7 +1291,7 @@ fn append_data(writer: *std.Io.Writer, val: Data, vm: *VM, mode: RenderMode) !vo
     }
 }
 
-pub fn call_unary_metamethod(mm: Data, val: Data, vm: *VM) NativeResult {
+pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) NativeResult {
     if (!mm.isFunction()) return .errType(0, "function", dataToString(mm));
     const result = vm.callFunction(mm, &.{val}) catch |err| {
         return .other(@errorName(err));

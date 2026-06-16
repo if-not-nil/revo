@@ -258,6 +258,71 @@ test "len" {
     try t.top_number("len(\"hi\")", 2);
 }
 
+test "concat operator" {
+    // string concat
+    try t.top_string("'hello' ~ ' world'", "hello world");
+    try t.top_string("'a' ~ 'b' ~ 'c'", "abc");
+    try t.top_string("'' ~ 'x'", "x");
+    try t.top_string("'x' ~ ''", "x");
+
+    // number concat (numbers convert to string)
+    try t.top_string("1 ~ 2", "12");
+    try t.top_string("1 ~ ' x'", "1 x");
+    try t.top_string("'x ' ~ 2", "x 2");
+    try t.top_string("1.5 ~ 2", "1.52");
+
+    // tuple concat
+    try t.top_number("len((1, 2) ~ (3, 4))", 4);
+    try t.top_number("len((1,) ~ (2,) ~ (3,))", 3);
+    try t.top_number("len((1, 2) ~ (3, 4) ~ (5,))", 5);
+
+    // table with __tostring metamethod
+    try t.top_string(
+        \\const mt = {__tostring = fn(self) "custom"}
+        \\const t = set_metatable({}, mt)
+        \\t ~ ""
+    , "custom");
+    try t.top_string(
+        \\const mt = {__tostring = fn(self) "hello"}
+        \\const t = set_metatable({}, mt)
+        \\"x" ~ t
+    , "xhello");
+    try t.top_string(
+        \\const mt = {__tostring = fn(self) "hello"}
+        \\const t = set_metatable({}, mt)
+        \\t ~ " world"
+    , "hello world");
+    try t.top_string(
+        \\const mt = {__tostring = fn(self) "a"}
+        \\const t = set_metatable({}, mt)
+        \\t ~ t
+    , "aa");
+
+    // concat in comp block
+    try t.top_string("comp ('hello' ~ ' world')", "hello world");
+    try t.top_string("comp (1 ~ 2)", "12");
+
+    // concat + comparison
+    try t.top_atom("'ab' ~ 'c' == 'abc'", "true");
+    try t.top_atom("'ab' ~ 'c' != 'abc'", "false");
+
+    // compound assign
+    try t.top_string(
+        \\let s = "a"
+        \\s ~= "b"
+        \\s
+    , "ab");
+    try t.top_number(
+        \\let t = (1,)
+        \\t ~= (2,)
+        \\len(t)
+    , 2);
+
+    // mixed types fall through to display
+    try t.top_string("(:a, 1) ~ 2", "(:a, 1)2");
+    try t.top_string(":hello ~ ' world'", ":hello world");
+}
+
 //
 // semantic type checking of stdlib functions
 //
