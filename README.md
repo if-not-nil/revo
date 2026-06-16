@@ -42,7 +42,6 @@ let x = "hello"
     "h" + el + "lo"
   end
   |> assert_eq("hello")
-  |> fn(c)
 
 # ===============================
 # pattern matching & result types
