@@ -1646,7 +1646,8 @@ const infix_binding_table: InfixBindingTable = blk: {
     table.set(.lte, .{ .left = 30, .right = 31, .op = .lte });
     table.set(.gte, .{ .left = 30, .right = 31, .op = .gte });
     table.set(.plus, .{ .left = 40, .right = 41, .op = .add });
-    table.set(.concat, .{ .left = 40, .right = 41, .op = .concat });
+    // right-assoc to match lua
+    table.set(.concat, .{ .left = 41, .right = 40, .op = .concat });
     table.set(.minus, .{ .left = 40, .right = 41, .op = .sub });
     table.set(.star, .{ .left = 50, .right = 51, .op = .mul });
     table.set(.slash, .{ .left = 50, .right = 51, .op = .div });
