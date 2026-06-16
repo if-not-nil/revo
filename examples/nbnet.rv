@@ -25,7 +25,7 @@ fn serve(peer, counter) do
     | (:ok, "ping") => do
         counter = counter + 1
         # send the current counter back to the client.
-        peer:send("pong " + tostring(counter) + "\n")?
+        peer:send("pong " ~ tostring(counter) ~ "\n")?
     end
     | (:ok, line) => do
         # echo any other line back to the same peer.

@@ -105,9 +105,9 @@ fn control_flow() do
 
   # match on tuples: pattern matching extracts values
   const result = match (10, "ok")
-    | (n, "ok") when n > 5 => "success: " + tostring(n)
+    | (n, "ok") when n > 5 => "success: " ~ tostring(n)
     | (n, "ok") => "small success"
-    | (_, err) => "error: " + err
+    | (_, err) => "error: " ~ err
   print(result)
 
   # reduce iterates over a collection, accumulating a result

@@ -656,7 +656,7 @@ test "table lookup order" {
     try tt.top_string(
         \\ const mt = {metafield = "second-", __index = fn(self) "last"}
         \\ const t = set_metatable({normal = "first-"}, mt)
-        \\ t.normal + t.metafield + t.something
+        \\ t.normal ~ t.metafield ~ t.something
     , "first-second-last");
 }
 

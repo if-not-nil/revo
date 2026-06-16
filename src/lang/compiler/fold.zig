@@ -111,9 +111,8 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
         return true;
     }
 
-    // string concat for .add and .concat with two string constants
-    if (lv.isString() and rv.isString() and
-        (inst.opcode == .add or inst.opcode == .add_int or inst.opcode == .concat))
+    // string concat for .concat with two string constants
+    if (lv.isString() and rv.isString() and inst.opcode == .concat)
     {
         const ls = try self.vm.strings.get(lv.asString().?);
         const rs = try self.vm.strings.get(rv.asString().?);

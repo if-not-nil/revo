@@ -128,7 +128,7 @@ p.x = 100
 struct Person {
     name: string = "",
     age: number = 0,
-    fn greet(self) "hello, " + self.name,
+    fn greet(self) "hello, " ~ self.name,
 }
 
 # create typed struct instance & modify fields

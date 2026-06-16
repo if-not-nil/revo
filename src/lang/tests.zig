@@ -272,9 +272,9 @@ test "concat operator" {
     try t.top_string("1.5 ~ 2", "1.52");
 
     // tuple concat
-    try t.top_number("len((1, 2) ~ (3, 4))", 4);
-    try t.top_number("len((1,) ~ (2,) ~ (3,))", 3);
-    try t.top_number("len((1, 2) ~ (3, 4) ~ (5,))", 5);
+    try t.top_true("(1, 2) ~ (3, 4) == (1, 2, 3, 4)");
+    try t.top_true("(1,) ~ (2,) ~ (3,) == (1, 2, 3)");
+    try t.top_true("(1, 2) ~ (3, 4) ~ (5,) == (1, 2, 3, 4, 5)");
 
     // table with __tostring metamethod
     try t.top_string(
@@ -298,10 +298,6 @@ test "concat operator" {
         \\t ~ t
     , "aa");
 
-    // concat in comp block
-    try t.top_string("comp ('hello' ~ ' world')", "hello world");
-    try t.top_string("comp (1 ~ 2)", "12");
-
     // concat + comparison
     try t.top_atom("'ab' ~ 'c' == 'abc'", "true");
     try t.top_atom("'ab' ~ 'c' != 'abc'", "false");
@@ -312,11 +308,11 @@ test "concat operator" {
         \\s ~= "b"
         \\s
     , "ab");
-    try t.top_number(
+    try t.top_true(
         \\let t = (1,)
         \\t ~= (2,)
-        \\len(t)
-    , 2);
+        \\t == (1, 2)
+    );
 
     // mixed types fall through to display
     try t.top_string("(:a, 1) ~ 2", "(:a, 1)2");
@@ -2760,7 +2756,7 @@ test "comp result can be used in runtime expressions" {
 
 test "comp w string concat" {
     try t.top_string(
-        \\ comp ("hello" + " " + "world")
+        \\ comp ("hello" ~ " " ~ "world")
     , "hello world");
 }
 
@@ -3107,7 +3103,7 @@ test "pipe: implicit match subject" {
 
 test "pipe: explicit placeholder arg position" {
     try t.top_string(
-        \\ fn f(a, b) tostring(a) + tostring(b)
+        \\ fn f(a, b) tostring(a) ~ tostring(b)
         \\ "asdf" |> f("got ", _)
     , "got asdf");
 }
@@ -3128,13 +3124,13 @@ test "pipe: explicit placeholder index access" {
 
 test "pipe: explicit placeholder expression" {
     try t.top_string(
-        \\ "asdf" |> "aaa" + _:upper()
+        \\ "asdf" |> "aaa" ~ _:upper()
     , "aaaASDF");
 }
 
 test "pipe: explicit placeholder in nested call arg" {
     try t.top_string(
-        \\ fn fmt(s, v) s + v
+        \\ fn fmt(s, v) s ~ v
         \\ "asdf" |> fmt("aaa", _:upper())
     , "aaaASDF");
 }

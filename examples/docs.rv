@@ -4,7 +4,7 @@
 fn add(a, b) a + b
 
 @doc "greets by name"
-const greet = fn(name) "hi " + name
+const greet = fn(name) "hi " ~ name
 
 @doc "method style docs also work"
 fn math:twice(x) x * 2

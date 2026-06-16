@@ -538,7 +538,7 @@ test "string metatable" {
     try testing.top_string("\"asdf\":with(1, \"y\")", "aydf");
     try testing.top_string("tostring(\"asdf\")", "asdf");
     try testing.top_string("\"asdf\"[2]", "d");
-    try testing.top_string("\"asdf\" + \"qwer\"", "asdfqwer");
+    try testing.top_string("\"asdf\" ~ \"qwer\"", "asdfqwer");
     try testing.top_string("\"ab\" * 3", "ababab");
 }
 

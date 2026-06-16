@@ -125,7 +125,7 @@ test "extractDocs returns doc items from source" {
         \\ fn add(a, b) a + b
         \\
         \\ @doc "greets"
-        \\ const greet = fn(name) "hi " + name
+        \\ const greet = fn(name) "hi " ~ name
     ;
 
     const res = try extractDocs(std.testing.allocator, src);

@@ -49,7 +49,7 @@ for nnn in 0..100 do
   # print("strings")
   let s = "hello"
   for i in 0..20
-    s = s:upper() + ":" + s:lower()
+    s = s:upper() ~ ":" ~ s:lower()
 
   # method calls
   const obj = {x = 1, y = 2, z = 3}

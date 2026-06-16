@@ -186,19 +186,6 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
                 continue :dispatch instr.op;
             };
 
-            if (lhs.asStr()) |ls| if (rhs.asStr()) |rs| {
-                const l_str = self.stringValue(ls);
-                const r_str = self.stringValue(rs);
-                self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
-                const result_str = try self.adoptDataStringNoDedup(
-                    try std.mem.concat(alloc, u8, &.{ l_str, r_str }),
-                );
-                regWrite(regs, base, instr.a, result_str);
-
-                if (!fetchNext(fiber, &instr)) break :dispatch;
-                continue :dispatch instr.op;
-            };
-
             return self.fail(error.IncompatibleTypes, "cannot add {s} and {s}", .{ revo.std_lib.dataToString(lhs), revo.std_lib.dataToString(rhs) });
         },
         .concat => {
