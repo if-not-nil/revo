@@ -329,7 +329,8 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .break_expr => |val| if (val) |v| inferExprType(ctx, v) else .any,
         .try_expr => |inner| inferExprType(ctx, inner),
         .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
-        .comp_block, .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
+        .comp_block => |cb| inferExprType(ctx, cb.expr),
+        .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
         .range_literal => .int,
         .assign_expr => .any,
@@ -1207,4 +1208,25 @@ test "tuple type annotation" {
         \\ 
         \\ x[1] + y[1] == 155.1
     );
+}
+
+test "comp block infers int from literal" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ let x = comp 42
+        \\ x + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
 }
