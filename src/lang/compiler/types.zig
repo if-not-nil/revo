@@ -1256,6 +1256,50 @@ test "match narrowing enables specialized add_int from union payload" {
     try std.testing.expect(saw_add_int);
 }
 
+test "return type propagation: const binding with annotated fn" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ const add = fn(a: int, b: int) a + b
+        \\ let x = add(3, 4)
+        \\ x + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
+test "return type propagation: fn five() 5" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn five() 5
+        \\ let x = five()
+        \\ x + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
 test "annotated function return type propagates to caller via pointer" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();

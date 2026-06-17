@@ -55,7 +55,12 @@ pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
 pub fn inferCallReturnType(self: *Compiler, callee: *const Node, args: []const *Node) TypeInfo {
     _ = args;
     const callee_type = inferExprType(self, callee);
-    if (callee_type == .function) return callee_type.function.return_type;
+    if (callee_type == .function) {
+        const ret = callee_type.function.return_type;
+        if (ret != .any) return ret;
+        // .function type hint with .any return -- try findFnSignature
+        // for the compiled sig with inferred return type
+    }
 
     if (callee.expr == .ident) {
         const sig = state_mod.findFnSignature(self, callee.expr.ident) orelse return .any;

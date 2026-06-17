@@ -1510,10 +1510,12 @@ pub const Compiler = struct {
         self.max_registers = params.len;
         self.upvalue_cache.clearRetainingCapacity();
         if (own_sig) try s.fn_signatures.put(name, sig);
+
         self.fn_return_type = if (return_type) |rt| switch (rt.kind) {
             .named => |n| n,
             else => @tagName(rt.kind),
         } else null;
+
         defer self.fn_return_type = null;
         try self.compile(body, true);
         if (return_type) |rt| {
@@ -1522,6 +1524,14 @@ pub const Compiler = struct {
             const inferred_type = type_check.inferExprType(self, body);
             const inferred_type_str = try self.alloc.dupe(u8, types.typeName(inferred_type));
             sig.return_type = inferred_type_str;
+
+            // propagate to parent state so callers find it via
+            // findFnSignature (this state will be popped)
+            if (own_sig and self.functions.items.len >= 2) {
+                const parent = &self.functions.items[self.functions.items.len - 2];
+                if (parent.fn_signatures.get(name)) |parent_sig|
+                    parent_sig.return_type = sig.return_type;
+            }
         }
         if (self.failure_reports.items.len != 0 or self.failure != null) return error.LoweringFailed;
         if (self.active_registers == 0) try self.pushNil();
