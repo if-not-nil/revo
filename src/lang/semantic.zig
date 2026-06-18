@@ -83,6 +83,7 @@ const SemanticChecker = struct {
     type_annotations: ?*std.AutoHashMap(*const ast.Node, types_mod.TypeInfo),
     typed_names: std.StringHashMap(void),
     table_field_map: std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)),
+    current_type_params: []const []const u8 = &.{},
 
     fn init(
         alloc: std.mem.Allocator,
@@ -194,8 +195,11 @@ const SemanticChecker = struct {
         return self.lookup(name) orelse .any;
     }
 
-    pub fn inferFnType(self: *SemanticChecker, params: []const ast.FnParam, return_type: ?*ast.TypeExpr) types_mod.TypeInfo {
-        const sig = self.makeFnSig(.{ .params = params, .return_type = return_type }) catch return .any;
+    pub fn inferFnType(self: *SemanticChecker, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) types_mod.TypeInfo {
+        const saved = self.current_type_params;
+        self.current_type_params = type_params;
+        defer self.current_type_params = saved;
+        const sig = self.makeFnSig(.{ .params = params, .return_type = return_type, .type_params = type_params }) catch return .any;
         return .{ .function = &sig.sig };
     }
 
@@ -204,9 +208,20 @@ const SemanticChecker = struct {
     }
 
     pub fn inferCallReturnType(self: *SemanticChecker, callee: *const ast.Node, args: []const *ast.Node) types_mod.TypeInfo {
-        _ = args;
         const callee_type = types_mod.inferExprType(self, callee);
-        if (callee_type == .function) return callee_type.function.return_type;
+        if (callee_type == .function) {
+            const sig = callee_type.function;
+            if (sig.type_params.len > 0 and sig.return_type != .any) {
+                var param_map = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
+                defer param_map.deinit();
+                for (sig.type_params, 0..) |tp, i| {
+                    const arg_type = if (i < args.len) types_mod.inferExprType(self, args[i]) else .any;
+                    param_map.put(tp, arg_type) catch {};
+                }
+                return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch .any;
+            }
+            return sig.return_type;
+        }
         return .any;
     }
 
@@ -299,6 +314,7 @@ const SemanticChecker = struct {
                 .params = params_slice,
                 .return_type = ret,
                 .required_count = required_count,
+                .type_params = fn_expr.type_params,
             },
         };
         try self.fn_sigs.append(self.alloc, sig_ptr);
@@ -563,8 +579,18 @@ const SemanticChecker = struct {
         return .{ .struct_type = def.name };
     }
 
+    pub fn isTypeParam(self: *SemanticChecker, name: []const u8) bool {
+        for (self.current_type_params) |tp| {
+            if (std.mem.eql(u8, tp, name)) return true;
+        }
+        return false;
+    }
+
     fn analyzeFnExpr(self: *SemanticChecker, fn_expr: anytype, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
+        const saved = self.current_type_params;
+        self.current_type_params = fn_expr.type_params;
+        defer self.current_type_params = saved;
         const sig = try self.makeFnSig(fn_expr);
         return self.analyzeFnBody(fn_expr, sig);
     }
@@ -579,6 +605,9 @@ const SemanticChecker = struct {
         }
         const name = binding.target.expr.ident;
         if (binding.value.expr == .fn_expr) {
+            const saved = self.current_type_params;
+            self.current_type_params = binding.value.expr.fn_expr.type_params;
+            defer self.current_type_params = saved;
             const sig = try self.makeFnSig(binding.value.expr.fn_expr);
             const fn_type: types_mod.TypeInfo = .{ .function = &sig.sig };
             if (binding.type_name) |type_expr| {
@@ -947,6 +976,7 @@ const SemanticChecker = struct {
                             if (pi < sig.param_names.len and std.mem.eql(u8, sig.param_names[pi], pn)) {
                                 _ = try self.analyzeNode(arg.expr.assign_expr.value);
                                 const actual = types_mod.inferExprType(self, arg.expr.assign_expr.value);
+                                if (expected == .type_var) continue;
                                 if (!types_mod.canCoerce(actual, expected)) {
                                     try self.appendError(
                                         try std.fmt.allocPrint(self.alloc, "arg `{s}` to `{s}` wants {s}, got {s}", .{
@@ -966,6 +996,7 @@ const SemanticChecker = struct {
                     if (!found and pi < call.args.len) {
                         _ = try self.analyzeNode(call.args[pi]);
                         const actual = types_mod.inferExprType(self, call.args[pi]);
+                        if (expected == .type_var) continue;
                         if (!types_mod.canCoerce(actual, expected)) {
                             const param_name = if (pi < sig.param_names.len and sig.param_names[pi].len > 0) sig.param_names[pi] else "";
                             try self.appendError(
@@ -980,7 +1011,7 @@ const SemanticChecker = struct {
                         }
                     }
                 }
-                return sig.return_type;
+                return self.substituteCallReturnType(sig_ptr, call.args);
             }
             const count = if (total_args < sig.params.len) total_args else sig.params.len;
             for (0..count) |i| {
@@ -989,6 +1020,7 @@ const SemanticChecker = struct {
                     types_mod.inferExprType(self, call.callee.expr.field.object)
                 else
                     try self.analyzeNode(call.args[i - self_offset]);
+                if (expected == .type_var) continue;
                 if (!types_mod.canCoerce(actual, expected)) {
                     const param_name = if (i < sig.param_names.len and sig.param_names[i].len > 0) sig.param_names[i] else "";
                     const msg = if (call.implicit_self and i == 0)
@@ -1009,11 +1041,29 @@ const SemanticChecker = struct {
                     );
                 }
             }
-            return sig.return_type;
+            return self.substituteCallReturnType(sig_ptr, call.args);
         }
 
         for (call.args) |arg| _ = try self.analyzeNode(arg);
         return .any;
+    }
+
+    fn substituteCallReturnType(self: *SemanticChecker, sig: *const types_mod.FunctionSignature, args: anytype) types_mod.TypeInfo {
+        if (sig.type_params.len == 0 or sig.return_type == .any) return sig.return_type;
+        // inside function body where these type params are in scope?
+        // if so, keep type vars abstract (no substitution)
+        for (sig.type_params) |tp| {
+            for (self.current_type_params) |ctp| {
+                if (std.mem.eql(u8, tp, ctp)) return sig.return_type;
+            }
+        }
+        var param_map = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
+        defer param_map.deinit();
+        for (sig.type_params, 0..) |tp, i| {
+            const arg_type = if (i < args.len) types_mod.inferExprType(self, args[i]) else .any;
+            param_map.put(tp, arg_type) catch {};
+        }
+        return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch .any;
     }
 
     fn isNamedParam(arg: *const ast.Node) ?[]const u8 {

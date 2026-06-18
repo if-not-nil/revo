@@ -554,7 +554,21 @@ fn parseFnWithBodyMin(self: *Parser, start: Token, body_min_bp: u8) anyerror!*No
             });
         }
 
+        // `fn name[T, U, ...](params) body`
         // `fn name(params) body`
+        // parse optional [T, U] type parameters
+        const type_params = if (self.match(.lbracket)) blk: {
+            var tps = try std.ArrayList([]const u8).initCapacity(self.alloc, 2);
+            errdefer tps.deinit(self.alloc);
+            while (!self.check(.rbracket)) {
+                const tp = try self.expectIdent();
+                try tps.append(self.alloc, tp.text);
+                if (!self.match(.comma)) break;
+            }
+            _ = try self.expect(.rbracket);
+            break :blk try tps.toOwnedSlice(self.alloc);
+        } else &.{};
+
         if (self.check(.lparen)) {
             _ = try self.expect(.lparen);
             const params = try self.parseParamList(.rparen);
@@ -563,7 +577,7 @@ fn parseFnWithBodyMin(self: *Parser, start: Token, body_min_bp: u8) anyerror!*No
             const body = try self.parseStatementExpression(body_min_bp);
 
             const fn_node = try self.allocExpr(Span.merge(start.span(), body.span), .{
-                .fn_expr = .{ .params = params, .return_type = return_type, .body = body },
+                .fn_expr = .{ .params = params, .return_type = return_type, .body = body, .type_params = type_params },
             });
             const target = try self.allocExpr(first_ident.span(), .{ .ident = first_ident.text });
             const bind_node = try self.allocExpr(Span.merge(start.span(), body.span), .{

@@ -48,6 +48,13 @@ these should be done before the language is considered complete:
 - [x] **repl**
   - [ ] live ast checking
 
+- [ ] wrappers
+    - [ ] spyware
+          wraps data/function and shows all available stats (__index, __newindex, __call, etc.)
+    - [ ] fn about(any)
+          vm stores as much information about everything possible as it can, passed from the build process
+          and then this table contains all that
+
 - [ ] **decorator system**
   - especially for metamethods
   - `@defer` binding decorator for resource cleanup (maybe not)

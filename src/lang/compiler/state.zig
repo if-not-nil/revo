@@ -39,12 +39,15 @@ pub const FunctionState = struct {
     type_scope_starts: std.ArrayList(usize),
     return_type: ?[]const u8 = null,
     fn_signatures: std.StringHashMap(*FnSig),
+    type_params: []const []const u8 = &.{},
 
     pub const FnSig = struct {
         param_names: []const []const u8,
         param_types: []const ?[]const u8,
         return_type: ?[]const u8,
         required_count: usize,
+        type_params: []const []const u8 = &.{},
+        return_type_info: types.TypeInfo = .any,
     };
 
     pub fn init(alloc: std.mem.Allocator) !FunctionState {
@@ -323,7 +326,7 @@ pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
                 const name = binding.target.expr.ident;
                 if (ast.isDiscardName(name)) continue;
                 _ = try reuseOrDeclareLocal(self, name, decl.kind == .let);
-                try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type);
+                try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type, binding.value.expr.fn_expr.type_params);
             },
             else => {},
         },
@@ -402,7 +405,7 @@ pub fn resolveUpvalue(self: *Compiler, name: []const u8) !?revo.UpvalueID {
     return resolveUpvalueRecursive(self, self.functions.items.len - 1, name);
 }
 
-pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*ast.TypeExpr) !*FunctionState.FnSig {
+pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) !*FunctionState.FnSig {
     const sig = try self.alloc.create(FunctionState.FnSig);
     errdefer self.alloc.destroy(sig);
 
@@ -422,23 +425,32 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
         if (p.optional) required_count -= 1;
     }
 
+    const return_type_str = if (return_type) |rt| switch (rt.kind) {
+        .named => |n| n,
+        else => @tagName(rt.kind),
+    } else null;
+
+    const return_type_info = if (return_type) |rt|
+        types.evalTypeExpr(self, rt) catch .any
+    else
+        types.TypeInfo.any;
+
     sig.* = .{
         .param_names = try param_names.toOwnedSlice(self.alloc),
         .param_types = try param_types.toOwnedSlice(self.alloc),
-        .return_type = if (return_type) |rt| switch (rt.kind) {
-            .named => |n| n,
-            else => @tagName(rt.kind),
-        } else null,
+        .return_type = return_type_str,
         .required_count = required_count,
+        .type_params = type_params,
+        .return_type_info = return_type_info,
     };
     return sig;
 }
 
-pub fn declareFnSignature(self: *Compiler, name: []const u8, params: []const ast.FnParam, return_type: ?*ast.TypeExpr) !void {
+pub fn declareFnSignature(self: *Compiler, name: []const u8, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) !void {
     const state = currentFunctionState(self) orelse return;
     if (ast.isDiscardName(name)) return;
     if (state.fn_signatures.get(name) != null) return;
-    const sig = try allocFnSig(self, params, return_type);
+    const sig = try allocFnSig(self, params, return_type, type_params);
     errdefer {
         self.alloc.free(sig.param_types);
         self.alloc.destroy(sig);

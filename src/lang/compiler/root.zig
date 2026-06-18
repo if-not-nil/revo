@@ -197,6 +197,13 @@ pub const Compiler = struct {
     pub const inferFieldType = type_check.inferFieldType;
     pub const inferFnType = type_check.inferFnType;
 
+    pub fn isTypeParam(self: *Compiler, name: []const u8) bool {
+        const fn_state = state_mod.currentFunctionState(self) orelse return false;
+        for (fn_state.type_params) |tp|
+            if (std.mem.eql(u8, tp, name)) return true;
+        return false;
+    }
+
     pub fn finishArtifact(self: *Compiler) !Artifact {
         try fold.foldIr(self);
         const lowered = try self.lowerToVerifyBytecode();
@@ -485,7 +492,7 @@ pub const Compiler = struct {
     }
 
     pub fn compileRoot(self: *Compiler, expr: *const Node) InternalLowerError!void {
-        try self.compileFn(&.{}, null, expr, "__main", null);
+        try self.compileFn(&.{}, null, expr, "__main", null, &.{});
         if (self.failure_reports.items.len != 0 or self.failure != null) return error.LoweringFailed;
         try self.emit(.call, 0);
         try self.emit(.halt, 0);
@@ -757,7 +764,7 @@ pub const Compiler = struct {
             .for_loop => |v| try flow.compileFor(self, v.params, v.body, v.iter),
             .while_loop => |v| try flow.compileWhile(self, v.predicate, v.body),
             .break_expr => |value| try flow.compileBreak(self, expr, value),
-            .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null),
+            .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params),
             .match_expr => |v| try flow.compileMatch(self, v.subject, v.arms),
             .tuple_pattern => return self.fail(
                 .UnsupportedSyntax,
@@ -1155,6 +1162,11 @@ pub const Compiler = struct {
                     self,
                     reordered_args[i],
                 );
+                // skip type check for type params (generics)
+                const is_type_param = for (sig.type_params) |tp| {
+                    if (std.mem.eql(u8, tp, expected_type)) break true;
+                } else false;
+                if (is_type_param) continue;
                 type_check.checkType(
                     types.resolveTypeName(self, expected_type),
                     actual_type,
@@ -1361,6 +1373,7 @@ pub const Compiler = struct {
                     binding.value.expr.fn_expr.body,
                     name,
                     null,
+                    binding.value.expr.fn_expr.type_params,
                 );
             } else try self.compile(binding.value, true);
 
@@ -1406,6 +1419,7 @@ pub const Compiler = struct {
         body: *const Node,
         name: []const u8,
         loop_sym: ?revo.AtomID,
+        type_params: []const []const u8,
     ) InternalLowerError!void {
         if (!ast.isDiscardName(name) and !std.mem.eql(u8, name, "<fn>")) {
             if (std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?")) |_|
@@ -1443,13 +1457,29 @@ pub const Compiler = struct {
         }
 
         const own_sig = !(ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>"));
-        const sig = try state_mod.allocFnSig(self, params, return_type);
 
         var s = try FunctionState.init(self.alloc);
+        s.type_params = type_params;
         s.return_type = if (return_type) |rt| switch (rt.kind) {
             .named => |n| n,
             else => @tagName(rt.kind),
         } else null;
+
+        // push function state early so evalTypeExpr can resolve type params
+        const params_len: LocalSlot = @intCast(params.len);
+        try self.functions.append(self.alloc, s);
+        try self.slot_allocators.append(self.alloc, params_len);
+        var state_pushed = true;
+        errdefer if (state_pushed) {
+            var leaked = self.functions.pop() orelse unreachable;
+            leaked.deinit(self.alloc);
+            _ = self.slot_allocators.pop() orelse unreachable;
+        };
+
+        const sig = try state_mod.allocFnSig(self, params, return_type, type_params);
+
+        // set up params on the function state in the array
+        const fn_state = &self.functions.items[self.functions.items.len - 1];
         for (params, 0..) |param, idx| {
             const local: LocalVar = .{
                 .name = param.name,
@@ -1462,40 +1492,15 @@ pub const Compiler = struct {
                 } else null,
                 .type_explicit = param.type_name != null,
             };
-            s.locals.append(self.alloc, local) catch |err| {
-                s.deinit(self.alloc);
-                return err;
-            };
-            s.all_locals.append(self.alloc, local) catch |err| {
-                s.deinit(self.alloc);
-                return err;
-            };
+            try fn_state.locals.append(self.alloc, local);
+            try fn_state.all_locals.append(self.alloc, local);
             if (param.type_name) |type_name| {
-                s.type_hints.append(self.alloc, .{
+                try fn_state.type_hints.append(self.alloc, .{
                     .name = param.name,
                     .type_info = try types.evalTypeExpr(self, type_name),
-                }) catch |err| {
-                    s.deinit(self.alloc);
-                    return err;
-                };
+                });
             }
         }
-        const params_len: LocalSlot = @intCast(params.len);
-        self.functions.append(self.alloc, s) catch |err| {
-            s.deinit(self.alloc);
-            return err;
-        };
-        self.slot_allocators.append(self.alloc, params_len) catch |err| {
-            var leaked = self.functions.pop() orelse unreachable;
-            leaked.deinit(self.alloc);
-            return err;
-        };
-        var state_pushed = true;
-        errdefer if (state_pushed) {
-            var leaked = self.functions.pop() orelse unreachable;
-            leaked.deinit(self.alloc);
-            _ = self.slot_allocators.pop() orelse unreachable;
-        };
 
         const prev_in_loop = self.in_loop_depth;
         self.in_loop_depth = 0;
@@ -1524,13 +1529,16 @@ pub const Compiler = struct {
             const inferred_type = type_check.inferExprType(self, body);
             const inferred_type_str = try self.alloc.dupe(u8, types.typeName(inferred_type));
             sig.return_type = inferred_type_str;
+            sig.return_type_info = inferred_type;
 
             // propagate to parent state so callers find it via
             // findFnSignature (this state will be popped)
             if (own_sig and self.functions.items.len >= 2) {
                 const parent = &self.functions.items[self.functions.items.len - 2];
-                if (parent.fn_signatures.get(name)) |parent_sig|
+                if (parent.fn_signatures.get(name)) |parent_sig| {
                     parent_sig.return_type = sig.return_type;
+                    parent_sig.return_type_info = sig.return_type_info;
+                }
             }
         }
         if (self.failure_reports.items.len != 0 or self.failure != null) return error.LoweringFailed;

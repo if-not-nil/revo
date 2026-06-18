@@ -266,7 +266,7 @@ pub const AstSubstituter = struct {
                 },
             }),
             .fn_expr => |f| try self.alloc(node.span, .{
-                .fn_expr = .{ .params = f.params, .return_type = f.return_type, .body = try self.substitute(f.body) },
+                .fn_expr = .{ .params = f.params, .return_type = f.return_type, .body = try self.substitute(f.body), .type_params = f.type_params },
             }),
             .block => |items| blk: {
                 var out = try std.ArrayList(*Node).initCapacity(self.allocator, items.len);

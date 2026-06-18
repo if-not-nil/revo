@@ -106,6 +106,37 @@ end
 let nested = outer(5)
 
 
+# generics!!! explicit [T] params with call-site substitution
+#
+# the function body compiles once, type params stay abstract in the body
+# at each call site, the compiler substitutes concrete types for the return
+#
+
+
+# generic identity: T inferred from argument
+fn identity[T](x: T) x
+let id_int = identity(42)
+let id_str = identity("hello")
+
+# repeated type param: both args must match
+fn repeat[T](x: T, y: T) x
+let rep = repeat(1, 2)
+# repeat(1, "asdf")   # argument 2 to `repeat` expects same type as argument 1
+
+
+# multiple type params with tuple return
+fn swap[T, U](a: T, b: U) -> (U, T) (b, a)
+let swapped = swap(1, "two")
+
+# compound return type with type param
+fn wrap[T](x: T) -> (:ok, T) (:ok, x)
+let wrapped = wrap(42)
+
+# non-inferrable: return-only type param needs manual annotation
+fn make[T](x) -> T x
+# let y = make(1)                # cannot infer T: only used in return
+
+
 # structs & field validation
 # > struct fields use `number` at runtime (int/float distinction is compile-time only)
 

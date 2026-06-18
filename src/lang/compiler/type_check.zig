@@ -53,17 +53,47 @@ pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
 }
 
 pub fn inferCallReturnType(self: *Compiler, callee: *const Node, args: []const *Node) TypeInfo {
-    _ = args;
     const callee_type = inferExprType(self, callee);
     if (callee_type == .function) {
-        const ret = callee_type.function.return_type;
+        const fn_sig = callee_type.function;
+        const ret = fn_sig.return_type;
+        // generic fn with type params -- substitute from arg types
+        if (fn_sig.type_params.len > 0 and ret != .any) {
+            var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
+            defer param_map.deinit();
+            for (fn_sig.type_params, 0..) |tp, i| {
+                const arg_type = if (i < args.len) inferExprType(self, args[i]) else .any;
+                param_map.put(tp, arg_type) catch {};
+            }
+            return types_mod.substituteTypeParams(self.alloc, ret, &param_map) catch .any;
+        }
         if (ret != .any) return ret;
         // .function type hint with .any return -- try findFnSignature
         // for the compiled sig with inferred return type
     }
 
     if (callee.expr == .ident) {
-        const sig = state_mod.findFnSignature(self, callee.expr.ident) orelse return .any;
+        const fn_name = callee.expr.ident;
+        const sig = state_mod.findFnSignature(self, fn_name) orelse return .any;
+        // generic fn with type params -- substitute from arg types
+        if (sig.type_params.len > 0) {
+            // build a synthetic return type from the available info
+            const ret_info: TypeInfo = if (sig.return_type_info != .any)
+                sig.return_type_info
+            else if (sig.return_type) |ret_str|
+                types_mod.resolveTypeName(self, ret_str)
+            else
+                .any;
+            if (ret_info != .any) {
+                var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
+                defer param_map.deinit();
+                for (sig.type_params, 0..) |tp, i| {
+                    const arg_type = if (i < args.len) inferExprType(self, args[i]) else .any;
+                    param_map.put(tp, arg_type) catch {};
+                }
+                return types_mod.substituteTypeParams(self.alloc, ret_info, &param_map) catch .any;
+            }
+        }
         return if (sig.return_type) |ret| types_mod.resolveTypeName(self, ret) else .any;
     }
 
@@ -83,7 +113,7 @@ pub fn inferFieldType(self: *Compiler, object: *const Node, name: []const u8) Ty
     };
 }
 
-pub fn inferFnType(self: *Compiler, params: []const ast.FnParam, return_type: ?*ast.TypeExpr) TypeInfo {
+pub fn inferFnType(self: *Compiler, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8) TypeInfo {
     var param_types = std.ArrayList(TypeInfo).initCapacity(self.alloc, params.len) catch return .any;
     defer param_types.deinit(self.alloc);
     var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, params.len) catch return .any;
@@ -99,6 +129,7 @@ pub fn inferFnType(self: *Compiler, params: []const ast.FnParam, return_type: ?*
         .param_names = param_names.toOwnedSlice(self.alloc) catch return .any,
         .params = param_types.toOwnedSlice(self.alloc) catch return .any,
         .return_type = ret,
+        .type_params = type_params,
     };
     return TypeInfo{ .function = sig };
 }

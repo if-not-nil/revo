@@ -261,6 +261,7 @@ pub const Expr = union(enum) {
         return_type: ?*TypeExpr = null,
         body: *Node,
         doc: ?[]const u8 = null,
+        type_params: []const []const u8 = &.{},
     },
     binding: Binding,
     decl: DeclNode,
@@ -1108,6 +1109,7 @@ pub fn walkExpr(
             .params = v.params,
             .return_type = v.return_type,
             .body = try ctx.walk(allocator, v.body, ctx),
+            .type_params = v.type_params,
         } }),
         .loop_expr => |v| allocNode(allocator, expr.span, .{ .loop_expr = .{
             .body = try ctx.walk(allocator, v.body, ctx),

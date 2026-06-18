@@ -69,6 +69,7 @@ pub fn compileLocalBinding(
             value.expr.fn_expr.body,
             name,
             null,
+            value.expr.fn_expr.type_params,
         );
     } else {
         try self.compile(value, true);
@@ -513,6 +514,7 @@ pub fn compileStruct(
                     b.value.expr.fn_expr.body,
                     b.target.expr.ident,
                     null,
+                    b.value.expr.fn_expr.type_params,
                 )
             else
                 try self.compile(b.value, true);

@@ -19,6 +19,7 @@ pub const TypeInfo = union(enum) {
     struct_type: []const u8,
     function: *const FunctionSignature,
     any,
+    type_var: []const u8,
 
     pub fn eql(self: TypeInfo, other: TypeInfo) bool {
         return switch (self) {
@@ -51,6 +52,7 @@ pub const TypeInfo = union(enum) {
                 for (f.params, o.params) |a, b| if (!a.eql(b)) break :blk false;
                 break :blk true;
             } else false,
+            .type_var => |name| if (other == .type_var) std.mem.eql(u8, name, other.type_var) else false,
             .any => true,
         };
     }
@@ -66,6 +68,7 @@ pub const FunctionSignature = struct {
     param_names: []const []const u8 = &.{},
     is_any_fn_sig: bool = false,
     required_count: usize = 0,
+    type_params: []const []const u8 = &.{},
 };
 
 /// sentinel "any function" type,,, matches any callable value
@@ -74,8 +77,7 @@ pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any
 
 pub fn typeName(T: TypeInfo) []const u8 {
     return switch (T) {
-        .struct_type => |s| s,
-        .atom => |a| a,
+        .struct_type, .atom, .type_var => |s| s,
         else => @tagName(T),
     };
 }
@@ -83,6 +85,7 @@ pub fn typeName(T: TypeInfo) []const u8 {
 /// alloc version of typeName, formats unions as well
 pub fn formatType(alloc: std.mem.Allocator, ti: TypeInfo) ![]const u8 {
     return switch (ti) {
+        .type_var => |n| try alloc.dupe(u8, n),
         .@"union" => |variants| blk: {
             var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
             errdefer buf.deinit(alloc);
@@ -108,7 +111,7 @@ pub fn isNumeric(T: TypeInfo) bool {
 }
 
 pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
-    if (from.eql(to) or to == .any or from == .any) return true;
+    if (from.eql(to) or to == .any or from == .any or from == .type_var or to == .type_var) return true;
     // function subtyping: contravariant params, covariant return
     if (to == .function and from == .function) {
         const to_sig = to.function;
@@ -209,13 +212,12 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
-        .@"union" => .any,
+        .@"union", .concat => .any,
         .add, .sub, .mul, .div, .mod => blk: {
             if (l == .int and r == .int) break :blk .int;
             if (isNumeric(l) and isNumeric(r)) break :blk .float;
             break :blk .any;
         },
-        .concat => .any,
         .eq, .neq, .lt, .gt, .lte, .gte => .bool,
     };
 }
@@ -224,7 +226,7 @@ pub fn inferUnaryOp(op: ast.UnOp, T: TypeInfo) TypeInfo {
     return switch (op) {
         .negate => if (isNumeric(T)) T else .any,
         .not => .bool,
-        .spawn, .join, .yield => .any,
+        else => .any,
     };
 }
 
@@ -320,7 +322,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args)),
         .field => |field| ctx.inferFieldType(field.object, field.name),
         .index => |index| inferIndexType(ctx, index.object, index.key),
-        .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type),
+        .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params),
         .block => |exprs| inferBlockResultType(ctx, exprs),
         .return_expr => .any,
         .loop_expr => |v| inferExprType(ctx, v.body),
@@ -333,11 +335,8 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
         .range_literal => .int,
-        .assign_expr => .any,
-        .decl, .binding => .any,
-        .tuple_pattern => .any,
+        .assign_expr, .decl, .binding, .tuple_pattern, .type_alias => .any,
         .struct_def => |def| .{ .struct_type = def.name },
-        .type_alias => .any,
     };
 }
 
@@ -373,9 +372,24 @@ pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
+/// check if name is a type parameter via comptime duck typing
+/// ctx needs `fn isTypeParam(self, name: []const u8) bool`
+fn isTypeParamName(ctx: anytype, name: []const u8) bool {
+    const T = @TypeOf(ctx);
+    const has_it = switch (@typeInfo(T)) {
+        .pointer => |info| @hasDecl(info.child, "isTypeParam"),
+        else => @hasDecl(T, "isTypeParam"),
+    };
+    if (has_it) return ctx.isTypeParam(name);
+    return false;
+}
+
 pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
     return switch (te.kind) {
-        .named => |name| resolveTypeName(ctx, name),
+        .named => |name| {
+            if (isTypeParamName(ctx, name)) return TypeInfo{ .type_var = name };
+            return resolveTypeName(ctx, name);
+        },
         .atom => |name| TypeInfo{ .atom = name },
         .tuple => |items| blk: {
             var types = try std.ArrayList(TypeInfo).initCapacity(ctx.alloc, items.len);
@@ -411,6 +425,42 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
             };
             break :blk TypeInfo{ .function = sig_ptr };
         },
+    };
+}
+
+/// substitute type params in a TypeInfo tree
+/// subst is any type with `get(key: []const u8) ?TypeInfo`
+pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anytype) !TypeInfo {
+    return switch (ti) {
+        .type_var => |name| subst.get(name) orelse .any,
+        .tuple => |items| blk: {
+            const new_items = try alloc.alloc(TypeInfo, items.len);
+            for (items, new_items) |item, *dst| dst.* = try substituteTypeParams(alloc, item, subst);
+            break :blk TypeInfo{ .tuple = new_items };
+        },
+        .@"union" => |variants| blk: {
+            const new_variants = try alloc.alloc(UnionVariant, variants.len);
+            for (variants, new_variants) |v, *nv| {
+                const new_types = try alloc.alloc(TypeInfo, v.types.len);
+                for (v.types, new_types) |vt, *nt| nt.* = try substituteTypeParams(alloc, vt, subst);
+                nv.* = UnionVariant{ .name = v.name, .types = new_types };
+            }
+            break :blk TypeInfo{ .@"union" = new_variants };
+        },
+        .function => |fsig| blk: {
+            const new_params = try alloc.alloc(TypeInfo, fsig.params.len);
+            for (fsig.params, new_params) |p, *np| np.* = try substituteTypeParams(alloc, p, subst);
+            const new_ret = try substituteTypeParams(alloc, fsig.return_type, subst);
+            const new_sig = try alloc.create(FunctionSignature);
+            new_sig.* = FunctionSignature{
+                .params = new_params,
+                .return_type = new_ret,
+                .param_names = fsig.param_names,
+                .type_params = fsig.type_params,
+            };
+            break :blk TypeInfo{ .function = new_sig };
+        },
+        else => ti,
     };
 }
 
@@ -1308,6 +1358,234 @@ test "annotated function return type propagates to caller via pointer" {
         .text =
         \\ fn add(a: int, b: int) a + b
         \\ let x = add(3, 4)
+        \\ x + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
+//
+// generics / type_var tests
+//
+
+test "types: type_var equality" {
+    const TI = revo.lang.compiler.types.TypeInfo;
+    const a = TI{ .type_var = "T" };
+    const b = TI{ .type_var = "T" };
+    const c = TI{ .type_var = "U" };
+    try std.testing.expect(a.eql(b));
+    try std.testing.expect(!a.eql(c));
+    try std.testing.expect(!a.eql(.int));
+}
+
+test "types: type_var coercion" {
+    const types = revo.lang.compiler.types;
+    const tv = types.TypeInfo{ .type_var = "T" };
+    try std.testing.expect(types.canCoerce(tv, .int));
+    try std.testing.expect(types.canCoerce(.int, tv));
+    try std.testing.expect(types.canCoerce(tv, .any));
+    try std.testing.expect(types.canCoerce(.any, tv));
+    try std.testing.expect(types.canCoerce(tv, tv));
+}
+
+test "substituteTypeParams direct type var" {
+    const types = revo.lang.compiler.types;
+    const alloc = std.testing.allocator;
+    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
+    defer subst.deinit();
+    try subst.put("T", .int);
+
+    const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .type_var = "T" }, subst);
+    try std.testing.expect(result.eql(.int));
+}
+
+test "substituteTypeParams unknown type var becomes any" {
+    const types = revo.lang.compiler.types;
+    const alloc = std.testing.allocator;
+    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
+    defer subst.deinit();
+
+    const result = try types.substituteTypeParams(alloc, types.TypeInfo{ .type_var = "T" }, subst);
+    try std.testing.expect(result.eql(.any));
+}
+
+test "substituteTypeParams tuple with type var" {
+    const types = revo.lang.compiler.types;
+    const alloc = std.testing.allocator;
+    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
+    defer subst.deinit();
+    try subst.put("T", .int);
+
+    const input = types.TypeInfo{ .tuple = &.{ types.TypeInfo{ .type_var = "T" }, .string } };
+    const result = try types.substituteTypeParams(alloc, input, subst);
+    try std.testing.expect(result == .tuple);
+    try std.testing.expect(result.tuple.len == 2);
+    try std.testing.expect(result.tuple[0].eql(.int));
+    try std.testing.expect(result.tuple[1].eql(.string));
+    alloc.free(result.tuple);
+}
+
+test "substituteTypeParams multiple type vars" {
+    const types = revo.lang.compiler.types;
+    const alloc = std.testing.allocator;
+    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
+    defer subst.deinit();
+    try subst.put("T", .int);
+    try subst.put("U", .string);
+
+    const input = types.TypeInfo{ .tuple = &.{ types.TypeInfo{ .type_var = "T" }, types.TypeInfo{ .type_var = "U" } } };
+    const result = try types.substituteTypeParams(alloc, input, subst);
+    try std.testing.expect(result == .tuple);
+    try std.testing.expect(result.tuple.len == 2);
+    try std.testing.expect(result.tuple[0].eql(.int));
+    try std.testing.expect(result.tuple[1].eql(.string));
+    alloc.free(result.tuple);
+}
+
+test "substituteTypeParams function sig with type var" {
+    const types = revo.lang.compiler.types;
+    const alloc = std.testing.allocator;
+    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
+    defer subst.deinit();
+    try subst.put("T", .int);
+
+    const sig = try alloc.create(types.FunctionSignature);
+    sig.* = .{
+        .params = &.{types.TypeInfo{ .type_var = "T" }},
+        .return_type = types.TypeInfo{ .type_var = "T" },
+        .param_names = &.{"x"},
+    };
+    const input = types.TypeInfo{ .function = sig };
+    const result = try types.substituteTypeParams(alloc, input, subst);
+    try std.testing.expect(result == .function);
+    try std.testing.expect(result.function.params.len == 1);
+    try std.testing.expect(result.function.params[0].eql(.int));
+    try std.testing.expect(result.function.return_type.eql(.int));
+    alloc.destroy(sig);
+    alloc.free(result.function.params);
+    alloc.destroy(result.function);
+}
+
+test "substituteTypeParams union with type var" {
+    const types = revo.lang.compiler.types;
+    const alloc = std.testing.allocator;
+    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
+    defer subst.deinit();
+    try subst.put("T", .int);
+
+    const variant = types.UnionVariant{
+        .name = "ok",
+        .types = &.{types.TypeInfo{ .type_var = "T" }},
+    };
+    const input = types.TypeInfo{ .@"union" = &.{variant} };
+    const result = try types.substituteTypeParams(alloc, input, subst);
+    try std.testing.expect(result == .@"union");
+    try std.testing.expect(result.@"union".len == 1);
+    try std.testing.expect(result.@"union"[0].types.len == 1);
+    try std.testing.expect(result.@"union"[0].types[0].eql(.int));
+    alloc.free(result.@"union"[0].types);
+    alloc.free(result.@"union");
+}
+
+test "generics identity fn enables add_int" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn id[T](x: T) x
+        \\ let y = id(42)
+        \\ y + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+
+    var saw_add_int = false;
+    for (built.ok.instructions) |inst| {
+        if (inst.op == .add_int) saw_add_int = true;
+    }
+    try std.testing.expect(saw_add_int);
+}
+
+test "generics identity fn with string compiles and runs" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn id[T](x: T) x
+        \\ id("hello")
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+}
+
+test "generics compound return type (:ok, T) propagates inner type" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn wrap[T](x: T) -> (:ok, T) (:ok, x)
+        \\ let r = wrap(42)
+        \\ r[1] + 1
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+}
+
+test "generics multiple type params with tuple return compile" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn pair[T, U](a: T, b: U) -> (T, U)
+        \\ pair(1, "hi")
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+}
+
+test "generics non-inferrable type param (return-only) compiles" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn make[T]() 5
+        \\ make()
+        ,
+    }, .{});
+    try std.testing.expect(built == .ok);
+    defer vm.runtime.alloc.free(built.ok.instructions);
+    defer vm.runtime.alloc.free(built.ok.spans);
+}
+
+test "generics repeated type param works" {
+    var vm = try VM.init(t.runtime());
+    defer vm.deinit();
+
+    const built = try lang.build(&vm, .{
+        .text =
+        \\ fn same[T](a: T, b: T) a
+        \\ let x = same(42, 99)
         \\ x + 1
         ,
     }, .{});
