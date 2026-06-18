@@ -164,14 +164,14 @@ pub const testing = struct {
     };
 
     pub fn expectTokens(source: []const u8, expected: []const ExpectedToken) !void {
-        const tokens = try lex(std.heap.page_allocator, source);
+        const tokens = try lex(std.testing.allocator, source);
         defer {
             for (tokens) |tok| {
                 if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
-                    std.heap.page_allocator.free(tok.text);
+                    std.testing.allocator.free(tok.text);
                 }
             }
-            std.heap.page_allocator.free(tokens);
+            std.testing.allocator.free(tokens);
         }
 
         try std.testing.expectEqual(expected.len, tokens.len);
@@ -184,14 +184,14 @@ pub const testing = struct {
         }
     }
     pub fn expectTypes(source: []const u8, expected: []const TokenType) !void {
-        const tokens = try lex(std.heap.page_allocator, source);
+        const tokens = try lex(std.testing.allocator, source);
         defer {
             for (tokens) |tok| {
                 if (tok.type == .string or tok.type == .backtick_string or tok.type == .multiline_string) {
-                    std.heap.page_allocator.free(tok.text);
+                    std.testing.allocator.free(tok.text);
                 }
             }
-            std.heap.page_allocator.free(tokens);
+            std.testing.allocator.free(tokens);
         }
 
         try std.testing.expectEqual(expected.len, tokens.len);
@@ -783,7 +783,7 @@ test "lexes macros and pipe-forward" {
 }
 
 test "lexes multiline strings" {
-    const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
     const tokens = try lex(allocator,
         \\"""hello
         \\world"""
@@ -1068,12 +1068,12 @@ test "token span includes line column start end" {
 }
 
 test "lexes string with newline escape" {
-    const tokens = try lex(std.heap.page_allocator, "\"hello\\nworld\"");
+    const tokens = try lex(std.testing.allocator, "\"hello\\nworld\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
@@ -1103,12 +1103,12 @@ test "unterminated multiline comment span points at opening hashes" {
 }
 
 test "lexes string with tab escape" {
-    const tokens = try lex(std.heap.page_allocator, "\"hi\\tworld\"");
+    const tokens = try lex(std.testing.allocator, "\"hi\\tworld\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
@@ -1116,12 +1116,12 @@ test "lexes string with tab escape" {
 }
 
 test "lexes string with backslash escape" {
-    const tokens = try lex(std.heap.page_allocator, "\"path\\\\to\\\\file\"");
+    const tokens = try lex(std.testing.allocator, "\"path\\\\to\\\\file\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
@@ -1129,12 +1129,12 @@ test "lexes string with backslash escape" {
 }
 
 test "lexes string with quote escape" {
-    const tokens = try lex(std.heap.page_allocator, "\"say \\\"hello\\\"\"");
+    const tokens = try lex(std.testing.allocator, "\"say \\\"hello\\\"\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
@@ -1142,12 +1142,12 @@ test "lexes string with quote escape" {
 }
 
 test "lexes string with carriage return escape" {
-    const tokens = try lex(std.heap.page_allocator, "\"line1\\rline2\"");
+    const tokens = try lex(std.testing.allocator, "\"line1\\rline2\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
@@ -1155,12 +1155,12 @@ test "lexes string with carriage return escape" {
 }
 
 test "lexes single quoted string is raw" {
-    const tokens = try lex(std.heap.page_allocator, "'hello\\nworld'");
+    const tokens = try lex(std.testing.allocator, "'hello\\nworld'");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);
@@ -1168,12 +1168,12 @@ test "lexes single quoted string is raw" {
 }
 
 test "lexes backtick string with escapes" {
-    const tokens = try lex(std.heap.page_allocator, "`hello\\nworld`");
+    const tokens = try lex(std.testing.allocator, "`hello\\nworld`");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .backtick_string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .backtick_string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.backtick_string, tokens[0].type);
@@ -1181,12 +1181,12 @@ test "lexes backtick string with escapes" {
 }
 
 test "lexes backtick string with backtick escape" {
-    const tokens = try lex(std.heap.page_allocator, "`say \\`hi\\``");
+    const tokens = try lex(std.testing.allocator, "`say \\`hi\\``");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .backtick_string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .backtick_string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.backtick_string, tokens[0].type);
@@ -1194,12 +1194,12 @@ test "lexes backtick string with backtick escape" {
 }
 
 test "lexes string with unknown escape passed through" {
-    const tokens = try lex(std.heap.page_allocator, "\"hello\\qworld\"");
+    const tokens = try lex(std.testing.allocator, "\"hello\\qworld\"");
     defer {
         for (tokens) |tok| {
-            if (tok.type == .string) std.heap.page_allocator.free(tok.text);
+            if (tok.type == .string) std.testing.allocator.free(tok.text);
         }
-        std.heap.page_allocator.free(tokens);
+        std.testing.allocator.free(tokens);
     }
 
     try std.testing.expectEqual(TokenType.string, tokens[0].type);

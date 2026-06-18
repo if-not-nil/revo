@@ -807,14 +807,14 @@ fn isNameChar(c: u8) bool {
 
 pub const testing = struct {
     fn doesMatch(got: *Node, wanted: []const u8) !void {
-        var buf = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+        var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer buf.deinit();
         try got.print(&buf.writer);
         try std.testing.expectEqualStrings(wanted, buf.written());
     }
 
     test "expands zero-arg and unary macros" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -824,7 +824,7 @@ pub const testing = struct {
             \\ dup!
             \\ try!(1)
         ));
-        var buf = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+        var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer buf.deinit();
         try expanded.print(&buf.writer);
         try std.testing.expectEqualStrings(
@@ -834,7 +834,7 @@ pub const testing = struct {
     }
 
     test "expands println and pipe macros" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -846,7 +846,7 @@ pub const testing = struct {
     }
 
     test "expands binary macro with multiple captures and literals" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -857,7 +857,7 @@ pub const testing = struct {
     }
 
     test "expands variadic group capture macro" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -868,7 +868,7 @@ pub const testing = struct {
     }
 
     test "expands unless macro" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -879,7 +879,7 @@ pub const testing = struct {
     }
 
     test "expands ok and err result macros" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -892,7 +892,7 @@ pub const testing = struct {
     }
 
     test "expands all_true macro" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -903,7 +903,7 @@ pub const testing = struct {
     }
 
     test "macro in nested block scope" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
@@ -918,7 +918,7 @@ pub const testing = struct {
     }
 
     test "macro capture type restrictions" {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),

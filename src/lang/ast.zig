@@ -712,7 +712,7 @@ fn binOpName(op: BinOp) []const u8 {
 }
 
 test "prints nested expression trees" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const span: Span = .{ .start = 0, .end = 0, .line = 1, .column = 1 };
@@ -742,14 +742,14 @@ test "prints nested expression trees" {
         .right = call_expr,
     } } };
 
-    var buf = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+    var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
     try sum.print(&buf.writer);
     try std.testing.expectEqualStrings("(+ 1 (call @foo 0))", buf.written());
 }
 
 test "pretty prints nested expression trees" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const span: Span = .{ .start = 0, .end = 0, .line = 1, .column = 1 };
@@ -779,7 +779,7 @@ test "pretty prints nested expression trees" {
         .right = call_expr,
     } } };
 
-    var buf = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+    var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
     try sum.printPretty(&buf.writer);
     try std.testing.expectEqualStrings(
@@ -812,7 +812,7 @@ test "span merge keeps earliest start regardless argument order" {
 }
 
 test "prints break and return empty and valued forms" {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
     const span: Span = .{ .start = 0, .end = 0, .line = 1, .column = 1 };
@@ -824,7 +824,7 @@ test "prints break and return empty and valued forms" {
     const return_empty = Node{ .span = span, .expr = .{ .return_expr = null } };
     const return_value = Node{ .span = span, .expr = .{ .return_expr = one } };
 
-    var buf = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+    var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
 
     try break_empty.print(&buf.writer);

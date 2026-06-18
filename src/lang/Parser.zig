@@ -1741,13 +1741,13 @@ fn exprAllowsParenCall(expr: *const Node) bool {
 
 pub const testing = struct {
     pub fn renderExpr(source: []const u8) ![]u8 {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
         const tokens = try lexer.lex(arena.allocator(), source);
         defer arena.allocator().free(tokens);
         const expr = try parseTokens(arena.allocator(), tokens);
-        var buf = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+        var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
         defer buf.deinit();
 
         try expr.print(&buf.writer);
@@ -1756,7 +1756,7 @@ pub const testing = struct {
 
     pub fn expectPrinted(source: []const u8, expected: []const u8) !void {
         const rendered = try renderExpr(source);
-        defer std.heap.page_allocator.free(rendered);
+        defer std.testing.allocator.free(rendered);
 
         try std.testing.expectEqualStrings(expected, rendered);
     }
