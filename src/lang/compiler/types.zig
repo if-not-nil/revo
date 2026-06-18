@@ -608,7 +608,7 @@ test "atom union alias accepts literal and alias value in calls" {
 }
 
 test "typed struct field access" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -656,7 +656,7 @@ test "typed struct field assignment accepts correct type" {
 }
 
 test "binary int + int emits add" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -678,7 +678,7 @@ test "binary int + int emits add" {
 }
 
 test "binary float + float emits add" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -700,7 +700,7 @@ test "binary float + float emits add" {
 }
 
 test "negate int emits negate_int" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -722,7 +722,7 @@ test "negate int emits negate_int" {
 }
 
 test "comparison int == int emits eq_int" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -756,7 +756,7 @@ test "untyped code still works" {
 }
 
 test "mixed int and float falls back to generic add" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1076,7 +1076,7 @@ test "block type error on type mismatch" {
 // chained typed ops preserve specialization
 //
 test "chained typed math emits add and mul" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1261,7 +1261,7 @@ test "tuple type annotation" {
 }
 
 test "comp block infers int from literal" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1283,7 +1283,7 @@ test "comp block infers int from literal" {
 
 test "match narrowing enables specialized add_int from union payload" {
     // narrowing should make `v` int instead of any, so `v + 1` should emit add_int
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1307,7 +1307,7 @@ test "match narrowing enables specialized add_int from union payload" {
 }
 
 test "return type propagation: const binding with annotated fn" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1329,7 +1329,7 @@ test "return type propagation: const binding with annotated fn" {
 }
 
 test "return type propagation: fn five() 5" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1351,7 +1351,7 @@ test "return type propagation: fn five() 5" {
 }
 
 test "annotated function return type propagates to caller via pointer" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1375,6 +1375,15 @@ test "annotated function return type propagates to caller via pointer" {
 //
 // generics / type_var tests
 //
+
+fn testRuntime() revo.Runtime {
+    return .{
+        .alloc = std.testing.allocator,
+        .io = std.testing.io,
+        .diag_alloc = undefined,
+        .diag_arena = null,
+    };
+}
 
 test "types: type_var equality" {
     const TI = revo.lang.compiler.types.TypeInfo;
@@ -1496,7 +1505,7 @@ test "substituteTypeParams union with type var" {
 }
 
 test "generics identity fn enables add_int" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1518,7 +1527,7 @@ test "generics identity fn enables add_int" {
 }
 
 test "generics identity fn with string compiles and runs" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1533,7 +1542,7 @@ test "generics identity fn with string compiles and runs" {
 }
 
 test "generics compound return type (:ok, T) propagates inner type" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1549,7 +1558,7 @@ test "generics compound return type (:ok, T) propagates inner type" {
 }
 
 test "generics multiple type params with tuple return compile" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1564,7 +1573,7 @@ test "generics multiple type params with tuple return compile" {
 }
 
 test "generics non-inferrable type param (return-only) compiles" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
@@ -1579,7 +1588,7 @@ test "generics non-inferrable type param (return-only) compiles" {
 }
 
 test "generics repeated type param works" {
-    var vm = try VM.init(t.runtime());
+    var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
