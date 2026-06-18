@@ -1,5 +1,5 @@
 const std = @import("std");
-const alloc = std.heap.page_allocator;
+const alloc = std.testing.allocator;
 const io = std.testing.io;
 
 const lang = @import("./root.zig");
@@ -92,6 +92,7 @@ fn printRuntimeFailure(source: []const u8, failure: revo.EvalFailure) void {
 
 pub fn topResult(source: []const u8, module_dir: ?[]const u8) !TopResult {
     var vm = try revo.VM.init(runtime());
+    errdefer vm.deinit();
     const src_name: []const u8 = if (module_dir) |dir| blk: {
         vm.module_dir = dir;
         const joined = try std.fs.path.join(alloc, &.{ dir, "<source>" });
@@ -108,6 +109,7 @@ pub fn topResult(source: []const u8, module_dir: ?[]const u8) !TopResult {
 // TODO: clean this up
 pub fn topResultMode(source: []const u8, module_dir: ?[]const u8, test_mode: bool) !TopResult {
     var vm = try revo.VM.init(runtime());
+    errdefer vm.deinit();
     const src_name: []const u8 = if (module_dir) |dir| blk: {
         vm.module_dir = dir;
         const joined = try std.fs.path.join(alloc, &.{ dir, "<source>" });

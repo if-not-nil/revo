@@ -1173,7 +1173,7 @@ pub fn import(args: []const Data, vm: *VM) !NativeResult {
 
     try vm.loading_stack.append(vm.runtime.alloc, cache_key);
     const result = vm.runImportedModule(resolved_path, source) catch |err| {
-        _ = vm.loading_stack.pop();
+        if (vm.loading_stack.pop()) |key| vm.runtime.alloc.free(key);
         return switch (err) {
             error.OutOfMemory => error.OutOfMemory,
             else => NativeResult.other("module error"),

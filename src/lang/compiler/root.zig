@@ -732,13 +732,13 @@ pub const Compiler = struct {
                     "import statement outside function context",
                 );
                 if (state_mod.findLocalInCurrentScope(self, is.name)) |_| {
-                    const msg = try std.fmt.allocPrint(self.runtime_alloc, "name `{s}` is already defined", .{is.name});
+                    const msg = try std.fmt.allocPrint(self.alloc, "name `{s}` is already defined", .{is.name});
                     return self.fail(.ParseError, expr, msg);
                 }
                 // also check import_locals to prevent double import of same name
                 for (fn_state.import_locals.items) |il| {
                     if (std.mem.eql(u8, il.name, is.name)) {
-                        const msg = try std.fmt.allocPrint(self.runtime_alloc, "name `{s}` is already defined by another import", .{is.name});
+                        const msg = try std.fmt.allocPrint(self.alloc, "name `{s}` is already defined by another import", .{is.name});
                         return self.fail(.ParseError, expr, msg);
                     }
                 }
@@ -1273,8 +1273,8 @@ pub const Compiler = struct {
         );
         if (result == .err) {
             const eval_failure = result.err;
-            const msg = try self.runtime_alloc.dupe(u8, eval_failure.report.message);
-            const parts = try self.runtime_alloc.dupe(
+            const msg = try self.alloc.dupe(u8, eval_failure.report.message);
+            const parts = try self.alloc.dupe(
                 diagnostic.Part,
                 eval_failure.report.parts,
             );
