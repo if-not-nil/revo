@@ -1,258 +1,226 @@
-# little pieces of paper with "0.1" written on them
-
-these should be done before the language is considered complete:
-
-- [ ] annotate more code
-    this is being done after writing the code which is sorta weird
-- [ ] clean up the standard library
-    - [ ] make a clear abstraction for defining functions together with their docs and type definitions
-- [ ] variable arguments in user code
-- [ ] default function arguments
-- [x] **predictable type inference and typechecker**
-  - [X] needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
-  - [X] needed for zerocost comptime type-checking, like picking the right loop iterator
-  - [X] then, make struct layouts comptime
-
-- [x] predictablw const behaviour
-    even i don't know how it works.
-  - [x] either get rid of it entirely or really make it work well
-  - [ ] document what happens and when
-
-- [x] **comptime test system**
-  - [x] normal tests
-  ```ruby
-  test "test name" do
-      assert!(:true)
-  end
-  ```
-  - [ ] doctests (like elixir)
-  ```ruby
-  ## @doc 
-  > double(n: positive number) -> n * 2
-  >> double(2)
-  (:ok, 4)
-  >> double("hi")
-  (:err, "arg 0 is not a positive number")
-
-  returns @n multiplied by 2 for all positive numbers
-  ##
-  fn double(n: number) match n
-  | x when x > 0 and number?(x) ok(x*2)
-  | _ err("arg 0 is not a positive number")
-  ```
-
-- [ ] better ext interfaces
-    - [ ] more functions exposed to c
-    - [x] zig extension api
-
-- [x] **repl**
-  - [ ] live ast checking
-
-- [ ] wrappers
-    - [ ] spyware
-          wraps data/function and shows all available stats (__index, __newindex, __call, etc.)
-    - [ ] fn about(any)
-          vm stores as much information about everything possible as it can, passed from the build process
-          and then this table contains all that
-
-- [ ] **decorator system**
-  - especially for metamethods
-  - `@defer` binding decorator for resource cleanup (maybe not)
-    ```asm
-    let a @defer(fn(x) x:close()) = io:open("f.txt") 
-    ```
-
-- [x] **macro enhancements**
-    - [x] proc macros
-  - [ ] pattern matching for macros
-  - [ ] macros importable on compiler's side
-    - [ ] clearly scope them instead of having them be global
-          maybe just namespace and restrict based on current module name
-
-- [x] established doc system
-    - [x] doc comment system
-
-## perf
-
-### advanced io
-- [x] async runtime
-- [x] **poll** (any posix)
-- [ ] **kqueue** (bsd and osx)
-- [ ] **uring** (linux)
-- [ ] struct Runtime as a configurer
-    add default presets. that means, the entirety of the lookup could be marked as inline and, eventually, just folded into an enum lookup and handled by the type system. this could also mean builds with full abscense of Runtime at runtime (and maybe as a field in vm), if comptimed the right way
-    - [ ] struct Runtime figure out the who-owns-what with the vm and runtime relation. maybe entrypoint owns one runtime that is then always shared,
-but the runtime owns the string interner and other state theoretically shareable between vm instances?
-    - [ ] lua does something equivalent to moving module_cache, debug_infos, bootstrap_globals from vm to runtime here. super cool and fast 
-    - [ ] node has a scheduler there too but i dont really get it
-
-## std expansion
-
-### easy
-
-- [ ] **expose zig code as stdlib**
-  - [x] language's ast, assembly, lexer, and parser
-  - [x] http client/server
-  - [x] json parsing and generation
-  - [x] build itself
-  - [ ] simple key-value db with disk i/o
-  - [ ] regex (wrap system's engine from c or maybe take lua's match)
-
-### lang
-
-- [ ] **bigints** - arbitrary precision arithmetic
-
-- [ ] **zerocost**
-  - [ ] `mean` keyword (or `btw`, `meanwhile`, `also`) - pure non-functional, executes side-effects and returns nothing
-  `1 + mean(12) "hi"  # prints "hi", then returns 1 + 12`
-  - [ ] `inspect` - print value with line number, return unchanged
-  `1 + inspect(2) == 3`
-
-## nice-to-have
-
-### cli
-
-- [ ] **cli polish**
-  - [ ] hand-fuzz unwinding
-    - [ ] when reflection exists, pull in anything that could be of use from a recovered VM state
-  - [ ] hand-fuzz error spans
-  - progress indicators
-  - help text improvements
-
-### build system
-
-- [ ] **built-in build/task system**
-    - [ ] something similar to zig possibly
-
-    <details>
-
-    package manager will use a global cache
-    no lockfile for single script, only build.rv
-    it pulls via https git (unless ssh or http explicitly specified)
-    and versions based on git tags
-    the manifest is stored in that repo, either as [undecided]
-        manifest.ini or manifest.toml or a serialized revo table
-
-    ```ini
-    version = 0.0.1
-    license = GPLv2
-    author = me
-    ```
-
-    - in single file:
-    ```elixir
-    pkgs!(
-        "github.com/if-not-nil/md-tcp",
-        markdown_over_tcp "github.com/if-not-nil/md-tcp"
-    )
-
-    markdown_over_tcp:serve(6767)
-    ```
-    - in `build.rv`:
-    ```ruby
-    import!("build")
-
-    build(fn(b) do
-      b:license(:GPLv3)
-      # could also specify as
-      b:custom_license({
-        # pulling in a copyleft lib will prevent you from building it on bundle and warn
-        :copyleft,
-        "MPL-2"
-      })
-      b:version("0.1.2")
-      
-      b:packages({
-          {"@web", version: "0.1.2^"}
-          
-      })
-      b:command("run", "run the server", (:Exec, "src/main.rv"))
-      b:command("build", "build the server", (:Cmd, do
-        b:ensure_dir("out")
-        b:sync("static", "out/static")
-        b:compile({
-          whence = "src/main.rv",
-          into = "out/main.rvo",
-          # dump all compiled imports into ./out with respecting structure
-          # packages will load from global cache
-          imports = "out/" 
-        })
-      end))
-    end)
-    ```
-
-    - in `build.rv` for a library
-    ```ruby
-    import!("build")
-
-    build(fn(b) do
-      b:license(:GPLv3)
-      # could also specify as
-      b:custom_license({
-        # pulling in a copyleft lib will prevent you from building it on bundle and warn
-        :copyleft,
-        name = "MPL-2",
-        text = """
-        prod. lung notification
-
-        provided as-is, no liability, do whatever you want, must specify
-        everyone involved as "prod. alice, bob, ..." instead of "authors: ..."
-        or "contributors: ..." or whatever
-        """
-      })
-      b:version("0.1.2")
-      b:packages({
-          {"@web", version: "0.1.2^"}
-      })
-      # run this in a git hook
-      b:command("manifest", "build the manifest", (:Cmd, do
-        b:build_manifest("./manifest.ini")
-      end))
-    end)
-    ```
-
-    </details>
-- [ ] **package resolution and paths**
-    - [ ] mimic lua's system closely and document through tests (with edge cases)
-- [ ] **`use` statement** - for importing and binding to scope
-  ```asm
-  use "json"
-  io.parse("{1: 'hi'}")
-  ```
-
-## cool but optional
-
-- [ ] **lisp** - parses tree nodes directly how the compiler sees them, looks just like the parser's
-print functionality. not really a lisp in a tradition sense but looks fun to implement
-- [ ] **reconstruct syntax from ast**
-
-## done
-
-- [x] distinct single and double quotes
-- [x] string escaping with backslash
-- [x] for loops
-  - [x] numeric for loops
-- [x] while loops
-- [x] structs (abstractions over tuples)
-- [x] compile-time evaluation
-  - [x] comptime closures (isolated vms)
-  - [x] automatic constant folding
-- [x] no nil just atoms
-- [x] default metamethods for built-in data types
-- [x] go-style channels
-- [x] save bytecode to disk
-- [x] bytecode compilation flag (`-b`)
-- [x] custom bytecode output path (`-o`)
-
-# little pieces of paper with "maybe" written on them
-
 ```
 p for planned,
 ? for maybe,
 x for done
 ```
 
-- optional style rules for the LSP
-    - [p] keep below 80 lines
-    - [?] any function with >80 lines must have doc comment
-    - [p] no unwrap or top-level `?`
+## 0.1 completeness
+
+### core
+
+- [ ] variable arguments in user code
+- [ ] default function arguments
+- [ ] ambient type declarations
+  - [ ] maybe via ambient `.d.rv` declaration files that are not parse-only without side-effects?
+- [x] predictable type inference and typechecker
+  - [x] needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
+  - [x] needed for zerocost comptime type-checking (e.g., picking the right loop iterator)
+  - [x] struct layouts now comptime
+
+### macros & metaprogramming
+
+- [x] macro enhancements
+  - [x] proc macros
+  - [ ] crystal-ish macros
+    - [x] quasiquoting
+  - [x] macros importable on the compiler's side
+    - [ ] clearly scoped instead of global: namespace and restrict based on current module name
+
+### tests & docs
+
+- [x] comptime test system
+  - [x] normal tests
+    ```ruby
+    test "test name" do
+        assert!(:true)
+    end
+    ```
+  - [ ] doctests (like ex)
+    ```ruby
+    ## @doc
+    > double(n: positive number) -> n * 2
+    >> double(2)
+    (:ok, 4)
+    >> double("hi")
+    (:err, "arg 0 is not a positive number")
+    ##
+    fn double(n: number) match n
+    | x when x > 0 and number?(x) ok(x*2)
+    | _ err("arg 0 is not a positive number")
+    ```
+- [x] doc comment system
+- [ ] annotate more code (backwardly done after writing rn)
+
+### standard library
+
+- [x] clean up the standard library
+  - [x] clear abstraction for defining functions together with their docs and type signatures
+- [ ] split core/std
+  - [ ] bundled libraries: `core` for zig code, `std` for revo code
+  - [ ] move cold code into revo (slightly slower before jit, acceptable)
+  - [ ] core libs: *(TBD)*
+  - [ ] std libs: *(TBD)*
+
+### extensions & interop
+
+- [ ] better ext interfaces
+  - [x] more functions exposed to c
+  - [x] zig extension api
+  - [ ] userdata type: raw memory area with no predefined operations
+        wrap in a struct to define operations
+- [ ] wrappers
+  - [ ] spyware: wraps data/function and shows all available stats (`__index`, `__newindex`, `__call`, etc.)
+  - [ ] `fn about(any)`: vm stores as much build-time information about everything as possible; exposed as a table
+
+### repl
+
+- [x] repl
+  - [ ] live ast checking (not possible with isocline afaik)
+
+---
+
+## performance
+
+### scheduler, async & i/o
+
+- [ ] m:n thread mapping
+- [ ] rewrite i/o
+      if `Io.Evented` is complete and enough, none of this matters
+
+- [x] async runtime
+- [x] `poll` (any posix)
+- [ ] `kqueue` (bsd and macos)
+- [ ] `uring` (linux)
+- [ ] `Runtime` struct as a configurer
+  - [ ] add default presets; make the lookup `inline`-able and eventually fold into an enum + type system
+  - [ ] move `module_cache`, `debug_infos`, `bootstrap_globals` from vm to runtime (a la lua)
+  - [ ] scheduler (a la node): design tbd
+- todo: universal individual build step access from within revo code
+
+## std/core
+
+### expose zig code as stdlib
+
+- [x] language's ast, assembler, lexer, and parser
+- [x] http client/server
+- [x] json parsing and generation
+- [x] build system itself
+- [ ] simple key-value db with disk i/o
+- [ ] regex (wrap system engine from c, or adapt lua's match)
+
+### language features
+
+- [ ] bigints
+- [ ] zerocosts
+  - [ ] `mean` keyword (or `btw`, `also`): pure side-effect, returns nothing, can be in any position
+    ```
+    1 + mean(12) "hi"  # prints "hi", returns 1 + 12
+    ```
+  - [ ] `inspect`: print value with debug info, return unchanged
+    ```
+    1 + inspect(2) == 3
+    ```
+
+## tooling
+
+### cli
+
+- [ ] break&fix unwinding
+  - [ ] when reflection exists, pull useful data from a recovered vm state
+- [ ] break&fix error spans
+- [ ] progress indicators
+- help command
+    - [ ] docs for zig functions
+          may be irrelevant if all signatures move to ambient declaration files
+
+### build system
+
+- [ ] built-in build/task system (similar to zig)
+  - package manager uses a global cache
+  - no lockfile for single scripts, only `build.rv`
+  - pulls via https git (unless ssh or http explicitly specified)
+  - versions based on git tags
+  - manifest stored in repo as `manifest.ini` / `manifest.toml` / serialized revo table *(undecided)*
+  - see design notes below for single-file and `build.rv` examples
+
+### lsp
+
+- [ ] procedural per-project revo-defined code actions
+  - [ ] `hooks:action()`: ast-transforming code actions
+  - [ ] `hooks:format()`: custom format rules (node-level and document-level)
+  - [ ] `hooks:completion()`: custom completion sources with trigger characters
+  - [ ] `hooks:diagnostic()`: custom inline diagnostics
+- [ ] optional style rules
+  - [p] keep files below 80 lines
+  - [?] any function with >80 lines must have a doc comment
+  - [p] no `unwrap` or top-level `?`
+- [ ] live ast checking in repl
+
+## cool but optional
+
+- [ ] lisp mode
+- [ ] reconstruct syntax from ast
+
+## apdx: build system design notes
+
+<details>
+<summary>single-file package usage</summary>
+
+```ex
+pkgs!(
+    "github.com/if-not-nil/md-tcp",
+    markdown_over_tcp "github.com/if-not-nil/md-tcp"
+)
+
+markdown_over_tcp:serve(6767)
+```
+
+</details>
+
+<details>
+<summary>build.rv for an application</summary>
+
+```ruby
+import!("build")
+
+build(fn(b) do
+  b:license(:GPLv3)
+  b:version("0.1.2")
+
+  b:packages({
+      {"@web", version: "0.1.2^"}
+  })
+  b:command("run", "run the server", (:Exec, "src/main.rv"))
+  b:command("build", "build the server", (:Cmd, do
+    b:ensure_dir("out")
+    b:sync("static", "out/static")
+    b:compile({
+      whence = "src/main.rv",
+      into = "out/main.rvo",
+      imports = "out/"
+    })
+  end))
+end)
+```
+
+</details>
+
+<details>
+<summary>build.rv for a library</summary>
+
+```ruby
+import!("build")
+
+build(fn(b) do
+  b:license(:GPLv3)
+  b:version("0.1.2")
+  b:packages({
+      {"@web", version: "0.1.2^"}
+  })
+  b:command("manifest", "build the manifest", (:Cmd, do
+    b:build_manifest("./manifest.ini")
+  end))
+end)
+```
+
+</details>
