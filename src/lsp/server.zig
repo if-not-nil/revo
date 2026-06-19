@@ -81,6 +81,7 @@ const Handler = struct {
         const u = try h.alloc.dupe(u8, uri);
         errdefer h.alloc.free(u);
         try h.uri_to_file.put(h.alloc, u, file_id);
+        errdefer _ = h.uri_to_file.remove(u);
         try h.file_to_uri.put(h.alloc, file_id, u);
     }
 
@@ -166,6 +167,7 @@ const Handler = struct {
     pub fn @"textDocument/didChange"(h: *Handler, arena: std.mem.Allocator, params: T.TextDocument.DidChangeParams) !void {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return;
         // full sync; only the last change matters
+        if (params.contentChanges.len == 0) return;
         const last = params.contentChanges.len - 1;
         const text = switch (params.contentChanges[last]) {
             .text_document_content_change_whole_document => |c| c.text,
@@ -176,11 +178,15 @@ const Handler = struct {
     }
 
     /// close the file in ws and drop uri mappings
-    pub fn @"textDocument/didClose"(h: *Handler, _: std.mem.Allocator, params: T.TextDocument.DidCloseParams) !void {
+    pub fn @"textDocument/didClose"(h: *Handler, arena: std.mem.Allocator, params: T.TextDocument.DidCloseParams) !void {
         if (h.uri_to_file.get(params.textDocument.uri)) |file_id| {
             h.ws.close(file_id);
         }
         h.unregisterDoc(params.textDocument.uri);
+        try h.transport.writeNotification(h.io, arena, "textDocument/publishDiagnostics", T.publish_diagnostics.Params, .{
+            .uri = params.textDocument.uri,
+            .diagnostics = &.{},
+        }, .{});
     }
 
     /// go-to-definition; position is 1-based inside workspace, 0-based otw
@@ -339,7 +345,7 @@ const Handler = struct {
         for (syms) |sym| {
             const uri = h.file_to_uri.get(sym.file_id) orelse continue;
             list.appendAssumeCapacity(.{
-                .name = params.query,
+                .name = sym.name,
                 .kind = .Variable,
                 .location = .{
                     .uri = uri,
@@ -419,9 +425,7 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.
                 .context => T.Diagnostic.Severity.Information,
                 .trace => T.Diagnostic.Severity.Hint,
             },
-            .message = if (report.message.len > 0) report.message
-            else if (sp.message.len > 0) sp.message
-            else "error",
+            .message = if (report.message.len > 0) report.message else if (sp.message.len > 0) sp.message else "error",
             .source = "revo",
             .tags = &.{},
             .relatedInformation = &.{},
@@ -433,7 +437,7 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report) ![]T.
         out.appendAssumeCapacity(.{
             .range = .{ .start = .{ .line = 0, .character = 0 }, .end = .{ .line = 0, .character = 0 } },
             .severity = T.Diagnostic.Severity.Error,
-            .message = report.message,
+            .message = if (report.message.len > 0) report.message else "error",
             .source = "revo",
             .tags = &.{},
             .relatedInformation = &.{},

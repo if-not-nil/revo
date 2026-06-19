@@ -77,8 +77,6 @@ x for done
 - [x] repl
   - [ ] live ast checking (not possible with isocline afaik)
 
----
-
 ## performance
 
 ### scheduler, async & i/o
@@ -160,6 +158,9 @@ x for done
 
 - [ ] lisp mode
 - [ ] reconstruct syntax from ast
+- [ ] untyped data
+  java is fully typed, therefore it doesn't need to store data as typed
+  when the type system is complete and 100% of revo code can be adequately typed, this should be possible
 
 ## apdx: build system design notes
 

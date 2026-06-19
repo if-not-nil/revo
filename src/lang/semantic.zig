@@ -220,9 +220,7 @@ const SemanticChecker = struct {
                 var param_map = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
                 defer param_map.deinit();
                 for (sig.type_params, 0..) |tp, i| {
-                    param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i])
-                    else if (i < args.len and type_args.len == 0) types_mod.inferExprType(self, args[i])
-                    else .any) catch {};
+                    param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) types_mod.inferExprType(self, args[i]) else .any) catch {};
                 }
                 return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch .any;
             }
@@ -1071,9 +1069,7 @@ const SemanticChecker = struct {
         var param_map = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
         defer param_map.deinit();
         for (sig.type_params, 0..) |tp, i| {
-            param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i])
-            else if (i < args.len and type_args.len == 0) types_mod.inferExprType(self, args[i])
-            else .any) catch {};
+            param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) types_mod.inferExprType(self, args[i]) else .any) catch {};
         }
         return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch .any;
     }

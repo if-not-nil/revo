@@ -372,13 +372,13 @@ pub fn findSymbols(self: *Workspace, alloc: std.mem.Allocator, name: []const u8)
     const syms = self.symbol_index.get(name) orelse return alloc.alloc(Location, 0);
     const locations = try alloc.alloc(Location, syms.len);
     for (syms, locations) |sym, *loc| {
-        const snap = self.snapshot(sym.file_id) orelse {
+        _ = self.snapshot(sym.file_id) orelse {
             alloc.free(locations);
             return error.FileNotOpen;
         };
         loc.* = .{
             .file_id = sym.file_id,
-            .name = try alloc.dupe(u8, snap.name),
+            .name = try alloc.dupe(u8, name),
             .range = sym.range,
         };
     }
@@ -526,7 +526,7 @@ pub fn diagnostics(
             // errorKind doesn't matter much for diagnostics display
             full.diagnostics = null;
             sem.diagnostics = null;
-            return lang.Error{ .lower = .{ .kind = .ParseError, .report = merged_report } };
+            return lang.Error{ .lower = .{ .kind = .CompileError, .report = merged_report } };
         }
         full.diagnostics = null;
         return full_diag;

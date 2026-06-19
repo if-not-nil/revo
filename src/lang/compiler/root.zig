@@ -28,6 +28,7 @@ const toRegister = state_mod.toRegister;
 
 pub const LowerErrorKind = enum {
     ParseError,
+    CompileError,
     UnsupportedSyntax,
     InvalidAssignmentTarget,
     IntegerOutOfRange,

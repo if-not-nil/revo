@@ -67,9 +67,7 @@ pub fn inferCallReturnType(
             var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
             defer param_map.deinit();
             for (fn_sig.type_params, 0..) |tp, i| {
-                param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i])
-                else if (i < args.len and type_args.len == 0) inferExprType(self, args[i])
-                else .any) catch {};
+                param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
             }
             return types_mod.substituteTypeParams(self.alloc, ret, &param_map) catch .any;
         }
@@ -95,9 +93,7 @@ pub fn inferCallReturnType(
                 var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
                 defer param_map.deinit();
                 for (sig.type_params, 0..) |tp, i| {
-                    param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i])
-                    else if (i < args.len and type_args.len == 0) inferExprType(self, args[i])
-                    else .any) catch {};
+                    param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
                 }
                 return types_mod.substituteTypeParams(self.alloc, ret_info, &param_map) catch .any;
             }
