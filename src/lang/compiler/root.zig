@@ -1615,11 +1615,14 @@ pub const Compiler = struct {
         parts: []const diagnostic.Part,
     ) !void {
         const copied_parts = try self.alloc.dupe(diagnostic.Part, parts);
+        const msg = for (parts) |p| {
+            if (p == .@"error") break p.@"error";
+        } else "";
         try self.failure_reports.append(self.alloc, .{
             .kind = kind,
             .report = .{
                 .parts = copied_parts,
-                .message = "",
+                .message = msg,
             },
         });
     }

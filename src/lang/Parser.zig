@@ -83,7 +83,7 @@ pub fn parseTokensReport(alloc: std.mem.Allocator, tokens: []const Token) anyerr
             parts[1] = .{ .span = .{ .span = token.span(), .role = .primary } };
             return .{ .err = .{
                 .kind = .UnexpectedToken,
-                .report = .{ .parts = parts, .message = "" },
+                .report = .{ .parts = parts, .message = parts[0].@"error" },
             } };
         },
         error.ExpectedIdentifier => {
@@ -93,7 +93,7 @@ pub fn parseTokensReport(alloc: std.mem.Allocator, tokens: []const Token) anyerr
             parts[1] = .{ .span = .{ .span = token.span(), .role = .primary } };
             return .{ .err = .{
                 .kind = .ExpectedIdentifier,
-                .report = .{ .parts = parts, .message = "" },
+                .report = .{ .parts = parts, .message = parts[0].@"error" },
             } };
         },
         error.ExpectedMatchArm => {
@@ -103,7 +103,7 @@ pub fn parseTokensReport(alloc: std.mem.Allocator, tokens: []const Token) anyerr
             parts[1] = .{ .span = .{ .span = token.span(), .role = .primary } };
             return .{ .err = .{
                 .kind = .ExpectedMatchArm,
-                .report = .{ .parts = parts, .message = "" },
+                .report = .{ .parts = parts, .message = parts[0].@"error" },
             } };
         },
         else => return err,
