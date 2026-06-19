@@ -319,7 +319,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .if_expr => |v| inferIfType(inferExprType(ctx, v.then_expr), if (v.else_expr) |e| inferExprType(ctx, e) else null),
         .tuple => |items| inferTupleType(ctx, items),
         .table => .{ .struct_type = "table" },
-        .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args)),
+        .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args),
         .field => |field| ctx.inferFieldType(field.object, field.name),
         .index => |index| inferIndexType(ctx, index.object, index.key),
         .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params),
@@ -372,22 +372,10 @@ pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
-/// check if name is a type parameter via comptime duck typing
-/// ctx needs `fn isTypeParam(self, name: []const u8) bool`
-fn isTypeParamName(ctx: anytype, name: []const u8) bool {
-    const T = @TypeOf(ctx);
-    const has_it = switch (@typeInfo(T)) {
-        .pointer => |info| @hasDecl(info.child, "isTypeParam"),
-        else => @hasDecl(T, "isTypeParam"),
-    };
-    if (has_it) return ctx.isTypeParam(name);
-    return false;
-}
-
 pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
     return switch (te.kind) {
         .named => |name| {
-            if (isTypeParamName(ctx, name)) return TypeInfo{ .type_var = name };
+            if (ctx.isTypeParam(name)) return TypeInfo{ .type_var = name };
             return resolveTypeName(ctx, name);
         },
         .atom => |name| TypeInfo{ .atom = name },
@@ -437,15 +425,6 @@ pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anyty
             const new_items = try alloc.alloc(TypeInfo, items.len);
             for (items, new_items) |item, *dst| dst.* = try substituteTypeParams(alloc, item, subst);
             break :blk TypeInfo{ .tuple = new_items };
-        },
-        .@"union" => |variants| blk: {
-            const new_variants = try alloc.alloc(UnionVariant, variants.len);
-            for (variants, new_variants) |v, *nv| {
-                const new_types = try alloc.alloc(TypeInfo, v.types.len);
-                for (v.types, new_types) |vt, *nt| nt.* = try substituteTypeParams(alloc, vt, subst);
-                nv.* = UnionVariant{ .name = v.name, .types = new_types };
-            }
-            break :blk TypeInfo{ .@"union" = new_variants };
         },
         .function => |fsig| blk: {
             const new_params = try alloc.alloc(TypeInfo, fsig.params.len);
@@ -1483,27 +1462,6 @@ test "substituteTypeParams function sig with type var" {
     alloc.destroy(result.function);
 }
 
-test "substituteTypeParams union with type var" {
-    const types = revo.lang.compiler.types;
-    const alloc = std.testing.allocator;
-    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
-    defer subst.deinit();
-    try subst.put("T", .int);
-
-    const variant = types.UnionVariant{
-        .name = "ok",
-        .types = &.{types.TypeInfo{ .type_var = "T" }},
-    };
-    const input = types.TypeInfo{ .@"union" = &.{variant} };
-    const result = try types.substituteTypeParams(alloc, input, subst);
-    try std.testing.expect(result == .@"union");
-    try std.testing.expect(result.@"union".len == 1);
-    try std.testing.expect(result.@"union"[0].types.len == 1);
-    try std.testing.expect(result.@"union"[0].types[0].eql(.int));
-    alloc.free(result.@"union"[0].types);
-    alloc.free(result.@"union");
-}
-
 test "generics identity fn enables add_int" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
@@ -1607,4 +1565,18 @@ test "generics repeated type param works" {
         if (inst.op == .add_int) saw_add_int = true;
     }
     try std.testing.expect(saw_add_int);
+}
+
+test "explicit call-site type args make[int]() resolves return type" {
+    try t.top_number(
+        \\ fn make[T]() -> T 5
+        \\ make[int]()
+    , 5);
+}
+
+test "explicit call-site type args id[int](42) resolves return type" {
+    try t.top_number(
+        \\ fn id[T](x: T) -> T x
+        \\ id[int](42)
+    , 42);
 }

@@ -249,6 +249,7 @@ pub const AstSubstituter = struct {
                         .callee = try self.substitute(c.callee),
                         .args = try args.toOwnedSlice(self.allocator),
                         .implicit_self = c.implicit_self,
+                        .type_args = c.type_args,
                     },
                 });
             },

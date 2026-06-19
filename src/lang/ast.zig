@@ -251,7 +251,7 @@ pub const Expr = union(enum) {
     binary: struct { op: BinOp, left: *Node, right: *Node },
     and_expr: struct { left: *Node, right: *Node },
     or_expr: struct { left: *Node, right: *Node },
-    call: struct { callee: *Node, args: []*Node, implicit_self: bool = false },
+    call: struct { callee: *Node, args: []*Node, implicit_self: bool = false, type_args: []const []const u8 = &.{} },
     field: struct { object: *Node, name: []const u8 },
     index: struct { object: *Node, key: *Node },
     if_expr: struct { condition: *Node, then_expr: *Node, else_expr: ?*Node },
@@ -1161,6 +1161,7 @@ pub fn walkExpr(
             .callee = try ctx.walk(allocator, v.callee, ctx),
             .args = try walkSliceWith(allocator, v.args, Transform, ctx),
             .implicit_self = v.implicit_self,
+            .type_args = v.type_args,
         } }),
         .proc_macro => |pm| allocNode(allocator, expr.span, .{ .proc_macro = .{
             .name = pm.name,

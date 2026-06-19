@@ -217,8 +217,43 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
             continue;
         }
 
-        // postfix: index `obj[key]`
-        if (self.match(.lbracket)) {
+        // postfix: generic call `f[T](args)` or index `obj[key]`
+        if (self.peek().type == .lbracket) {
+            if (left.expr == .ident) {
+                var i: usize = 1;
+                var is_type_args = false;
+                while (self.pos + i < self.tokens.len) {
+                    switch (self.tokens[self.pos + i].type) {
+                        .ident => i += 1,
+                        .comma => i += 1,
+                        .rbracket => {
+                            if (self.pos + i + 1 < self.tokens.len and self.tokens[self.pos + i + 1].type == .lparen)
+                                is_type_args = true;
+                            break;
+                        },
+                        else => break,
+                    }
+                }
+                if (is_type_args) {
+                    _ = try self.expect(.lbracket);
+                    var type_args = try std.ArrayList([]const u8).initCapacity(self.alloc, 2);
+                    defer type_args.deinit(self.alloc);
+                    while (!self.check(.rbracket)) {
+                        const tp = try self.expectIdent();
+                        try type_args.append(self.alloc, tp.text);
+                        if (!self.match(.comma)) break;
+                    }
+                    _ = try self.expect(.rbracket);
+                    _ = try self.expect(.lparen);
+                    const args = try self.parseDelimitedExprList(.rparen);
+                    const close = try self.expect(.rparen);
+                    left = try self.allocExpr(Span.merge(left.span, close.span()), .{
+                        .call = .{ .callee = left, .args = args, .type_args = try type_args.toOwnedSlice(self.alloc) },
+                    });
+                    continue;
+                }
+            }
+            _ = try self.expect(.lbracket);
             const key = try self.parseExpression(0);
             const close = try self.expect(.rbracket);
             left = try self.allocExpr(Span.merge(left.span, close.span()), .{

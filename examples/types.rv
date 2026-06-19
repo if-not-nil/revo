@@ -112,7 +112,6 @@ let nested = outer(5)
 # at each call site, the compiler substitutes concrete types for the return
 #
 
-
 # generic identity: T inferred from argument
 fn identity[T](x: T) x
 let id_int = identity(42)
@@ -125,16 +124,27 @@ let rep = repeat(1, 2)
 
 
 # multiple type params with tuple return
-fn swap[T, U](a: T, b: U) -> (U, T) (b, a)
+fn swap[T, U](a: T, b: U) -> (U, T)
+  return (b, a)
+
 let swapped = swap(1, "two")
 
 # compound return type with type param
-fn wrap[T](x: T) -> (:ok, T) (:ok, x)
+fn wrap[T](x: T) -> (:ok, T)
+  return (:ok, x)
 let wrapped = wrap(42)
 
-# non-inferrable: return-only type param needs manual annotation
-fn make[T](x) -> T x
+# non-inferrable: return-only type param needs explicit annotation
+# provide type args at the call site: ident[T, U](args)
+fn make[T](x) -> T
+  return x
 # let y = make(1)                # cannot infer T: only used in return
+let y = make[int](1)             # explicit T=int makes it work
+
+# return-only type param (zero runtime args)
+fn zero[T]() -> T
+  return 0
+let z = zero[int]()              # T=int, returns int 0
 
 
 # structs & field validation

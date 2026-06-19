@@ -52,44 +52,52 @@ pub fn inferIdentType(self: *Compiler, name: []const u8) TypeInfo {
     return inferVarType(self, name);
 }
 
-pub fn inferCallReturnType(self: *Compiler, callee: *const Node, args: []const *Node) TypeInfo {
+pub fn inferCallReturnType(
+    self: *Compiler,
+    callee: *const Node,
+    args: []const *Node,
+    type_args: []const []const u8,
+) TypeInfo {
     const callee_type = inferExprType(self, callee);
     if (callee_type == .function) {
         const fn_sig = callee_type.function;
         const ret = fn_sig.return_type;
-        // generic fn with type params -- substitute from arg types
+        // generic fn with type params? substitute from arg types
         if (fn_sig.type_params.len > 0 and ret != .any) {
             var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
             defer param_map.deinit();
             for (fn_sig.type_params, 0..) |tp, i| {
-                const arg_type = if (i < args.len) inferExprType(self, args[i]) else .any;
-                param_map.put(tp, arg_type) catch {};
+                param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i])
+                else if (i < args.len and type_args.len == 0) inferExprType(self, args[i])
+                else .any) catch {};
             }
             return types_mod.substituteTypeParams(self.alloc, ret, &param_map) catch .any;
         }
         if (ret != .any) return ret;
-        // .function type hint with .any return -- try findFnSignature
+        // .function type hint with .any return? maybe findFnSignature
         // for the compiled sig with inferred return type
     }
 
     if (callee.expr == .ident) {
         const fn_name = callee.expr.ident;
         const sig = state_mod.findFnSignature(self, fn_name) orelse return .any;
-        // generic fn with type params -- substitute from arg types
+        // generic fn with type params? subst from arg types
         if (sig.type_params.len > 0) {
-            // build a synthetic return type from the available info
+            // synthetic return type from the what weve got
             const ret_info: TypeInfo = if (sig.return_type_info != .any)
                 sig.return_type_info
             else if (sig.return_type) |ret_str|
                 types_mod.resolveTypeName(self, ret_str)
             else
                 .any;
+
             if (ret_info != .any) {
                 var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
                 defer param_map.deinit();
                 for (sig.type_params, 0..) |tp, i| {
-                    const arg_type = if (i < args.len) inferExprType(self, args[i]) else .any;
-                    param_map.put(tp, arg_type) catch {};
+                    param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i])
+                    else if (i < args.len and type_args.len == 0) inferExprType(self, args[i])
+                    else .any) catch {};
                 }
                 return types_mod.substituteTypeParams(self.alloc, ret_info, &param_map) catch .any;
             }
