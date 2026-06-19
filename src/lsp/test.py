@@ -31,12 +31,13 @@ from lsprotocol.types import (
 from pytest_lsp import ClientServerConfig, LanguageClient
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REVOPLS = str(REPO_ROOT / "zig-out" / "bin" / "revolt")
+REVOPLS = str(REPO_ROOT / "zig-out" / "bin" / "revo")
+REVO_ARGS = ["--lsp"]
 
 
 @pytest_lsp.fixture(
     scope="module",
-    config=ClientServerConfig(server_command=[REVOPLS]),
+    config=ClientServerConfig(server_command=[REVOPLS] + REVO_ARGS),
 )
 async def client(lsp_client: LanguageClient):
     params = InitializeParams(capabilities=ClientCapabilities())
@@ -311,6 +312,51 @@ async def test_did_change(client: LanguageClient):
     await client.wait_for_notification("textDocument/publishDiagnostics")
     diags = client.diagnostics.get(TEST_URI, [])
     assert len(diags) > 0, "expected diagnostics for incomplete code"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_undefined_name_single_diag(client: LanguageClient):
+    """undefined name produces exactly 1 diagnostic with non-empty message"""
+    uri = "file:///test/undefined.rv"
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=uri, language_id="revo", version=1, text="aaa\n",
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+    diags = client.diagnostics.get(uri, [])
+    for d in diags:
+        print(f"  diag: msg={d.message!r} code={d.code} range={d.range}")
+    assert len(diags) == 1, f"expected 1 diagnostic for undefined name, got {
+        len(diags)}: {[d.message for d in diags]}"
+    assert len(diags[0].message) > 0, "diagnostic message should not be empty"
+    assert "aaa" in diags[0].message, "message should reference the name"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_undefined_name_no_duplicates(client: LanguageClient):
+    """same error from semantic+compile passes should not produce duplicates"""
+    uri = "file:///test/undef_dup.rv"
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=uri, language_id="revo", version=1, text="bbb\n",
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+    diags = client.diagnostics.get(uri, [])
+    for d in diags:
+        print(f"  diag: msg={d.message!r} code={d.code} range={d.range}")
+    # dedup by message+range: no two diagnostics should have the same pair
+    seen = set()
+    for d in diags:
+        key = (d.message, d.range.start.line, d.range.start.character,
+               d.range.end.line, d.range.end.character)
+        assert key not in seen, f"duplicate diagnostic: {d.message} at {d.range}"
+        seen.add(key)
 
 
 @pytest.mark.asyncio(loop_scope="module")

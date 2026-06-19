@@ -1417,7 +1417,7 @@ fn deinitArtifact(alloc: std.mem.Allocator, artifact: lang.Artifact) void {
     alloc.free(artifact.spans);
 }
 
-/// merge two error reports into one (all parts from both)
+/// merge two error reports into one (dedup span parts by range+message)
 fn mergeReports(alloc: std.mem.Allocator, a: lang.Error, b: lang.Error) !lang.diagnostic.Report {
     const a_report = switch (a) {
         .parse => |f| f.report,
@@ -1434,7 +1434,22 @@ fn mergeReports(alloc: std.mem.Allocator, a: lang.Error, b: lang.Error) !lang.di
     const total = a_report.parts.len + b_report.parts.len;
     var all_parts = try std.ArrayList(lang.diagnostic.Part).initCapacity(alloc, total);
     for (a_report.parts) |p| all_parts.appendAssumeCapacity(p);
-    for (b_report.parts) |p| all_parts.appendAssumeCapacity(p);
+    for (b_report.parts) |p| {
+        var dup = false;
+        if (p == .span) {
+            for (a_report.parts) |ap| {
+                if (ap == .span and
+                    ap.span.span.start == p.span.span.start and
+                    ap.span.span.end == p.span.span.end and
+                    std.mem.eql(u8, ap.span.message, p.span.message))
+                {
+                    dup = true;
+                    break;
+                }
+            }
+        }
+        if (!dup) all_parts.appendAssumeCapacity(p);
+    }
     const message = if (a_report.message.len > 0)
         try alloc.dupe(u8, a_report.message)
     else if (b_report.message.len > 0)
