@@ -155,11 +155,14 @@ fn hasErrors(self: *Parser) bool {
 
 fn finishFailure(self: *Parser) anyerror!ParseFailure {
     const parts = try self.errors.toOwnedSlice(self.alloc);
+    const msg = for (parts) |p| {
+        if (p == .@"error") break p.@"error";
+    } else "";
     return .{
         .kind = self.first_error_kind orelse .LexUnknown,
         .report = .{
             .parts = parts,
-            .message = "",
+            .message = msg,
         },
     };
 }

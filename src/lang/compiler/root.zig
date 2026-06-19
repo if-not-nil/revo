@@ -1680,7 +1680,7 @@ pub const Compiler = struct {
             .kind = first.kind,
             .report = .{
                 .parts = try parts.toOwnedSlice(self.alloc),
-                .message = "",
+                .message = first.report.message,
                 .source_name = first.report.source_name,
                 .source = first.report.source,
             },
