@@ -101,9 +101,9 @@ pub fn build(b: *Build) !void {
     if (builtin.os.tag == .linux) {
         with_glibc = b.option(bool, "glibc", "Build with llvm and link with glibc") orelse false;
         if (with_glibc) {
-            target = b.standardTargetOptions(.{.default_target = .{ .abi = .musl }});
+            target = b.standardTargetOptions(.{ .default_target = .{ .abi = .gnu } });
         } else {
-            target = b.standardTargetOptions(.{.default_target = .{ .abi = .gnu }});
+            target = b.standardTargetOptions(.{ .default_target = .{ .abi = .musl } });
         }
     } else {
         target = b.standardTargetOptions(.{});

@@ -63,7 +63,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
                     @as(u64, std.math.maxInt(i32)),
                 )))
             else if (!has_io_waiters)
-                1  // no sleepers and no io then don't block forever on the control pipe
+                1 // no sleepers and no io then don't block forever on the control pipe
             else
                 -1;
 

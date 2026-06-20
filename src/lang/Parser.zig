@@ -481,6 +481,10 @@ fn parsePrefix(self: *Parser) anyerror!*Node {
         .kw_pub => self.parsePubPrefix(token),
         .backtick_string => try self.parseQuasiquote(token),
         .eof => return error.UnexpectedToken,
+        .colon => blk: {
+            try self.recordError(.UnexpectedToken, "':' without a following name is not a value; use ':name' for an atom", token.span());
+            break :blk self.allocExpr(token.span(), .nil);
+        },
         else => return error.UnexpectedToken,
     };
 }

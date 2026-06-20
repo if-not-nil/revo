@@ -394,10 +394,6 @@ fn renderSpanBlock(
     }
 
     try writer.print(" --> {s}:{d}:{d}\n", .{ source_name, start_line, start_column });
-    try writeDimStart(writer);
-    try writePipePrefix(writer, 0);
-    try writer.writeByte('\n');
-    try writeDimEnd(writer);
 
     const clamped_start = @min(location.start, source.len);
     const line1_before = std.mem.findScalarLast(u8, source[0..clamped_start], '\n') orelse 0;
