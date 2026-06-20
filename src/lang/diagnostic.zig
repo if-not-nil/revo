@@ -634,6 +634,7 @@ fn renderBoxSpanBlock(
             const prev_nl = std.mem.findScalarLast(u8, source[0..prev_end], '\n') orelse 0;
             const ctx_start = if (prev_nl == 0) 0 else prev_nl + 1;
             const ctx_text = source[ctx_start..prev_end];
+            if (ctx_num == 0) break;
             ctx_num -= 1;
             if (std.mem.trim(u8, ctx_text, " \t\r").len != 0) {
                 ctx_before[ctx_before_len] = .{

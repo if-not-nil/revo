@@ -541,11 +541,7 @@ pub inline fn atomName(self: *VM, id: mem.AtomID) []const u8 {
 }
 
 pub fn dataAtom(self: *VM, name: []const u8) !Data {
-    if (self.atoms.get(name)) |id| return Data.new.atom(id);
-    const id = try self.strings.own(name);
-    const owned = self.strings.getAssumeAlive(id);
-    try self.atoms.put(owned, id);
-    return Data.new.atom(id);
+    return Data.new.atom(try self.internAtom(name));
 }
 
 pub fn setGlobal(self: *VM, name: []const u8, val: Data) !void {
