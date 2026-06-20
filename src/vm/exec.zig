@@ -62,6 +62,8 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
                     delay_ns / std.time.ns_per_ms,
                     @as(u64, std.math.maxInt(i32)),
                 )))
+            else if (!has_io_waiters)
+                1  // no sleepers and no io then don't block forever on the control pipe
             else
                 -1;
 
@@ -234,8 +236,12 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
                 var l_buf: [128]u8 = undefined;
                 var r_buf: [128]u8 = undefined;
-                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch unreachable;
-                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch unreachable;
+                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch blk: {
+                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{ln});
+                };
+                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch blk: {
+                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{rn});
+                };
                 self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
                 const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
                 regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
@@ -247,7 +253,9 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             if (lhs.asStr()) |ls| if (rhs.asNum()) |rn| {
                 const l_str = self.stringValue(ls);
                 var r_buf: [128]u8 = undefined;
-                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch unreachable;
+                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch blk: {
+                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{rn});
+                };
                 self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
                 const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
                 regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
@@ -258,7 +266,9 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             // number + string fast path
             if (lhs.asNum()) |ln| if (rhs.asStr()) |rs| {
                 var l_buf: [128]u8 = undefined;
-                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch unreachable;
+                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch blk: {
+                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{ln});
+                };
                 const r_str = self.stringValue(rs);
                 self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
                 const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
