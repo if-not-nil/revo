@@ -81,7 +81,7 @@ fn serializeTuple(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, tid
             .function => try writeIntLE(buffer, allocator, u64, item.asFunction().?),
             .table => try writeIntLE(buffer, allocator, u64, item.asTable().?),
             .tuple => try serializeTuple(buffer, allocator, vm, item.asTuple().?),
-            .struct_val, .struct_type => unreachable,
+            .struct_val, .struct_type, .foreign => unreachable,
         }
     }
 }
@@ -148,7 +148,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
                 try buffer.appendSlice(allocator, str);
             },
             .function => try writeIntLE(&buffer, allocator, u64, constant.asFunction().?),
-            .struct_val, .struct_type => unreachable,
+            .struct_val, .struct_type, .foreign => unreachable,
             .table => try writeIntLE(&buffer, allocator, u64, constant.asTable().?),
             .tuple => try serializeTuple(&buffer, allocator, vm, constant.asTuple().?),
         }

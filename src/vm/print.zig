@@ -74,6 +74,7 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             try writer.writeAll("#");
             try writer.writeAll(desc.name);
         },
+        .foreign => try writer.print("<foreign {*}>", .{self.asForeign().?}),
     }
 }
 

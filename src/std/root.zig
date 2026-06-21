@@ -741,6 +741,7 @@ pub fn typeof(d: Data) []const u8 {
         .tuple => "tuple",
         .struct_val => "struct",
         .struct_type => "type",
+        .foreign => "foreign",
     };
 }
 

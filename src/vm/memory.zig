@@ -21,6 +21,7 @@ pub const Type = enum(u4) {
     tuple = 5,
     struct_val = 6,
     struct_type = 7,
+    foreign = 8,
 };
 
 pub const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
@@ -68,6 +69,9 @@ pub const Data = struct {
         pub inline fn structType(id: StructTypeID) Data {
             return Data.boxed(.struct_type, id);
         }
+        pub inline fn foreign(ptr: ?*anyopaque) Data {
+            return Data.boxed(.foreign, @intFromPtr(ptr));
+        }
     };
 
     pub const RenderMode = enum(u1) { display, debug };
@@ -89,7 +93,7 @@ pub const Data = struct {
     pub inline fn tag(self: Data) Type {
         if ((self.bits & BOX_MASK) != BOX_MASK) return .number;
         const raw = (self.bits >> TAG_SHIFT) & TAG_MASK;
-        if (raw > @intFromEnum(Type.struct_type)) return .number;
+        if (raw > @intFromEnum(Type.foreign)) return .number;
         return @enumFromInt(raw);
     }
 
@@ -119,6 +123,9 @@ pub const Data = struct {
     }
     pub inline fn isStructType(self: Data) bool {
         return self.tag() == .struct_type;
+    }
+    pub inline fn isForeign(self: Data) bool {
+        return self.tag() == .foreign;
     }
 
     pub inline fn asStr(self: Data) ?StringID {
@@ -161,6 +168,9 @@ pub const Data = struct {
     }
     pub fn asStructType(self: Data) ?StructTypeID {
         return if (self.isStructType()) @intCast(self.bits & PAYLOAD_MASK) else null;
+    }
+    pub fn asForeign(self: Data) ?*anyopaque {
+        return if (self.isForeign()) @ptrFromInt(@as(usize, @intCast(self.bits & PAYLOAD_MASK))) else null;
     }
 
     pub inline fn rawBits(self: Data) u64 {

@@ -189,6 +189,17 @@ pub export fn revo_string_length(vm_ptr: *anyopaque, id: u64) callconv(.c) usize
     return slice.len;
 }
 
+/// wrap a raw pointer as a foreign value, caller manages lifetime
+pub export fn revo_foreign_new(ptr: ?*anyopaque) callconv(.c) CRevoData {
+    return CRevoData.fromData(Data.new.foreign(ptr));
+}
+
+/// extract the raw pointer from a foreign value (null if not foreign)
+pub export fn revo_foreign_ptr(val: CRevoData) callconv(.c) ?*anyopaque {
+    if (val.tag != @intFromEnum(memory.Type.foreign)) return null;
+    return @ptrFromInt(@as(usize, @intCast(val.value)));
+}
+
 /// load a shared library and register its revo_bindings as c functions
 pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
     if (builtin.target.os.tag == .windows) {

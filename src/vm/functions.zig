@@ -55,6 +55,7 @@ pub const CRevoData = extern struct {
             .table => Data.new.table(@intCast(self.value)),
             .tuple => Data.new.tuple(@intCast(self.value)),
             .struct_val, .struct_type => unreachable,
+            .foreign => Data.new.foreign(@ptrFromInt(self.value)),
         };
     }
 
@@ -71,6 +72,7 @@ pub const CRevoData = extern struct {
                 .tuple => data.asTuple().?,
                 .struct_val => data.asStructVal().?,
                 .struct_type => data.asStructType().?,
+                .foreign => @intFromPtr(data.asForeign().?),
             },
         };
     }
