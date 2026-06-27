@@ -77,7 +77,7 @@ pub fn main(init: std.process.Init) void {
         else => |err| {
             var stderr_buf: [256]u8 = undefined;
             var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
-            pretty.printErrorName(init.gpa, &stderr.interface, err) catch return;
+            pretty.printError(&stderr.interface, "{s}", .{@errorName(err)}) catch return;
         },
     };
 }
@@ -215,14 +215,14 @@ fn runMain(init: std.process.Init) !void {
 fn printError(init: std.process.Init, comptime fmt: []const u8, args: anytype) void {
     var buf = std.Io.Writer.Allocating.init(init.gpa);
     defer buf.deinit();
-    pretty.printError(init.gpa, &buf.writer, fmt, args) catch return;
+    pretty.printError(&buf.writer, fmt, args) catch return;
     std.debug.print("{s}", .{buf.written()});
 }
 
 fn printSuccess(init: std.process.Init, comptime fmt: []const u8, args: anytype) void {
     var buf = std.Io.Writer.Allocating.init(init.gpa);
     defer buf.deinit();
-    pretty.printSuccess(init.gpa, &buf.writer, fmt, args) catch return;
+    pretty.printSuccess(&buf.writer, fmt, args) catch return;
     std.debug.print("{s}", .{buf.written()});
 }
 

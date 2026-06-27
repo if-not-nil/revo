@@ -3,7 +3,7 @@ const std = @import("std");
 const lang = @import("./root.zig");
 const ast = @import("./ast.zig");
 const diagnostic = @import("diagnostic.zig");
-const struct_layout = @import("compiler/struct_layout.zig");
+const struct_layout = @import("compiler/types.zig");
 const types_mod = @import("compiler/types.zig");
 const revo = @import("revo");
 

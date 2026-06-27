@@ -31,7 +31,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
         });
         const fiber = self.mainFiber();
         fiber.registers_len = 16;
-        @memset(fiber.registers[0..16], revo.core_atoms.data(.missing));
+        @memset(fiber.registers[0..16], revo.Data.new.core(.missing));
     }
 
     self.sched.setFiberState(0, .ready);
@@ -135,6 +135,7 @@ pub inline fn execFiberUntilDepth(self: *VM, target_depth: usize) !?VM.EvalFailu
 }
 
 fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?VM.EvalFailure {
+    @setEvalBranchQuota(2000);
     var fiber = self.currentFiber();
     const alloc = self.runtime.alloc;
 
@@ -161,7 +162,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             continue :dispatch instr.op;
         },
         .load_nil => {
-            regWrite(regs, base, instr.a, revo.core_atoms.data(.nil));
+            regWrite(regs, base, instr.a, revo.Data.new.core(.nil));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -598,7 +599,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             }
             if (try self.resolveField(object, key)) |resolved| {
                 regWrite(regs, base, instr.a, resolved.value);
-            } else regWrite(regs, base, instr.a, revo.core_atoms.data(.undef));
+            } else regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -637,12 +638,12 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
                     ic.* = .{ .pc = pc, .table_id = t_id, .version = t.ic_version, .value = resolved.value };
                     regWrite(regs, base, instr.a, resolved.value);
                 } else {
-                    regWrite(regs, base, instr.a, revo.core_atoms.data(.undef));
+                    regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
                 }
             } else if (try self.resolveField(object, key)) |resolved| {
                 regWrite(regs, base, instr.a, resolved.value);
             } else {
-                regWrite(regs, base, instr.a, revo.core_atoms.data(.undef));
+                regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
             }
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
@@ -801,7 +802,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             const dst = base + instr.a;
             const src = base + instr.b;
             if (builtin.mode != .ReleaseFast and src >= regs.len) {
-                regWrite(regs, base, instr.a, revo.core_atoms.data(.missing));
+                regWrite(regs, base, instr.a, revo.Data.new.core(.missing));
             } else {
                 regs[dst] = regs[src];
             }
@@ -820,7 +821,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             const dst = base + instr.a;
             const src = base + instr.b;
             if (builtin.mode != .ReleaseFast and src >= regs.len) {
-                regWrite(regs, base, instr.a, revo.core_atoms.data(.missing));
+                regWrite(regs, base, instr.a, revo.Data.new.core(.missing));
             } else {
                 regs[dst] = regs[src];
             }

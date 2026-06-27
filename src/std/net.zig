@@ -202,7 +202,7 @@ fn onRecvReady(vm: *VM, waiter: *Scheduler.WaitEntry, _: i16) !Scheduler.IoDispa
         .server => {
             deinitToken(RecvWaitToken, vm.runtime.alloc, waiter.token);
             waiter.token = 0;
-            return try completeWaiter(vm, waiter, .err, revo.core_atoms.data(.CannotRecvOnServer));
+            return try completeWaiter(vm, waiter, .err, revo.Data.new.core(.CannotRecvOnServer));
         },
     };
 
@@ -255,7 +255,7 @@ fn onRecvReady(vm: *VM, waiter: *Scheduler.WaitEntry, _: i16) !Scheduler.IoDispa
             freePending(vm.runtime.alloc, &stream.pending);
             return try completeWaiter(vm, waiter, .ok, payload);
         } else {
-            return try completeWaiter(vm, waiter, .err, revo.core_atoms.data(.SocketClosed));
+            return try completeWaiter(vm, waiter, .err, revo.Data.new.core(.SocketClosed));
         }
     }
 
@@ -507,12 +507,12 @@ fn accept_fn(args: []const Data, vm: *VM) !NativeResult {
     if (builtin.target.os.tag == .windows) return error.OsNotSupported;
     const socket_data = Data.new.table(args[0].asTable().?);
 
-    if (!try isServer(socket_data, vm)) return try root.resultTuple(vm, .err, revo.core_atoms.data(.NotServerSocket));
+    if (!try isServer(socket_data, vm)) return try root.resultTuple(vm, .err, revo.Data.new.core(.NotServerSocket));
 
     const entry_ptr = try getEntryPtr(socket_data, vm);
     const server = switch (entry_ptr.*) {
         .server => |*s| s,
-        .stream => return try root.resultTuple(vm, .err, revo.core_atoms.data(.NotServerSocket)),
+        .stream => return try root.resultTuple(vm, .err, revo.Data.new.core(.NotServerSocket)),
     };
 
     if (revo.has_async_backend) {
@@ -576,12 +576,12 @@ fn send_fn(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data.new.table(args[0].asTable().?);
     const message = vm.stringValue(args[1].asString().?);
 
-    if (try isServer(socket_data, vm)) return try root.resultTuple(vm, .err, revo.core_atoms.data(.CannotSendOnServer));
+    if (try isServer(socket_data, vm)) return try root.resultTuple(vm, .err, revo.Data.new.core(.CannotSendOnServer));
 
     const entry_ptr = try getEntryPtr(socket_data, vm);
     const stream = switch (entry_ptr.*) {
         .stream => |*s| s,
-        .server => return try root.resultTuple(vm, .err, revo.core_atoms.data(.CannotSendOnServer)),
+        .server => return try root.resultTuple(vm, .err, revo.Data.new.core(.CannotSendOnServer)),
     };
 
     const handle = stream.socket.socket.handle;
@@ -679,12 +679,12 @@ fn recv(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data.new.table(args[0].asTable().?);
     const opts_data = args[1];
 
-    if (try isServer(socket_data, vm)) return try root.resultTuple(vm, .err, revo.core_atoms.data(.CannotRecvOnServer));
+    if (try isServer(socket_data, vm)) return try root.resultTuple(vm, .err, revo.Data.new.core(.CannotRecvOnServer));
 
     const entry_ptr = try getEntryPtr(socket_data, vm);
     const stream = switch (entry_ptr.*) {
         .stream => |*s| s,
-        .server => return try root.resultTuple(vm, .err, revo.core_atoms.data(.CannotRecvOnServer)),
+        .server => return try root.resultTuple(vm, .err, revo.Data.new.core(.CannotRecvOnServer)),
     };
 
     var parsed = parseRecvOptions(opts_data, vm) catch return .errType(1, "recv opts table", root.dataToString(opts_data));
@@ -715,7 +715,7 @@ fn recv(args: []const Data, vm: *VM) !NativeResult {
                 .AGAIN => {},
                 .SUCCESS => {
                     const n: usize = @intCast(rc);
-                    if (n == 0) return try root.resultTuple(vm, .err, revo.core_atoms.data(.SocketClosed));
+                    if (n == 0) return try root.resultTuple(vm, .err, revo.Data.new.core(.SocketClosed));
                     return try .Ok(vm, try vm.ownDataString(recv_buf[0..n]));
                 },
                 else => |err| return try root.resultTuple(vm, .err, try vm.dataAtom(@tagName(err))),
@@ -740,7 +740,7 @@ fn recv(args: []const Data, vm: *VM) !NativeResult {
                         stream.pending = &.{};
                         return try .Ok(vm, payload);
                     }
-                    return try root.resultTuple(vm, .err, revo.core_atoms.data(.SocketClosed));
+                    return try root.resultTuple(vm, .err, revo.Data.new.core(.SocketClosed));
                 }
                 try appendPending(vm.runtime.alloc, stream, recv_buf[0..n]);
                 if (try tryExtractPendingDelimited(vm, stream, parsed.delimiter)) |line| return try .Ok(vm, line);
@@ -764,7 +764,7 @@ fn recv(args: []const Data, vm: *VM) !NativeResult {
                         stream.pending = &.{};
                         return try .Ok(vm, payload);
                     }
-                    return try root.resultTuple(vm, .err, revo.core_atoms.data(.SocketClosed));
+                    return try root.resultTuple(vm, .err, revo.Data.new.core(.SocketClosed));
                 }
                 try appendPending(vm.runtime.alloc, stream, recv_buf[0..n]);
             }
@@ -788,7 +788,7 @@ fn recv(args: []const Data, vm: *VM) !NativeResult {
 fn socket_close_fn(args: []const Data, vm: *VM) !NativeResult {
     const socket_data = Data.new.table(args[0].asTable().?);
     try closeEntry(socket_data, vm);
-    return try .Ok(vm, revo.core_atoms.data(.nil));
+    return try .Ok(vm, revo.Data.new.core(.nil));
 }
 
 const std = @import("std");

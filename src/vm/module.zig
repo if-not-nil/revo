@@ -74,16 +74,6 @@ pub fn runCompiledModuleReport(
     return r.result;
 }
 
-///
-/// run compiled code without clearing globals; intended for repl
-pub fn runCompiledSessionReport(
-    vm: *revo.VM,
-    source_path: []const u8,
-    program: []const revo.Instruction,
-) !revo.EvalResult {
-    return runCompiledModuleReport(vm, source_path, program);
-}
-
 test "module message setters clear previous values" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
@@ -143,7 +133,7 @@ test "module hot reload cache" {
     defer vm.runtime.alloc.free(artifact.instructions);
     defer vm.runtime.alloc.free(artifact.spans);
 
-    _ = try runCompiledSessionReport(&vm, source_name, artifact.instructions);
+    _ = try runCompiledModuleReport(&vm, source_name, artifact.instructions);
     try std.testing.expectEqual(Data.new.num(1), vm.mainResult());
 
     try tmp.dir.writeFile(std.testing.io, .{
@@ -153,6 +143,6 @@ test "module hot reload cache" {
         ,
     });
 
-    _ = try runCompiledSessionReport(&vm, source_name, artifact.instructions);
+    _ = try runCompiledModuleReport(&vm, source_name, artifact.instructions);
     try std.testing.expectEqual(Data.new.num(2), vm.mainResult());
 }

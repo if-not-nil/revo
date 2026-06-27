@@ -279,7 +279,7 @@ fn set(args: []const Data, vm: *VM) !NativeResult {
     const idx: usize = if (args[1].asNum()) |n| try revo.asIndex(n) else return .errType(1, "number", root.dataToString(args[1]));
 
     const existing_str = vm.stringValue(str_handle);
-    if (idx >= existing_str.len) return .{ .ok = revo.core_atoms.data(.missing) };
+    if (idx >= existing_str.len) return .{ .ok = revo.Data.new.core(.missing) };
 
     const char: u8 = blk: {
         if (args[2].asString()) |s| {
@@ -314,8 +314,8 @@ fn len_f(args: []const Data, vm: *VM) !NativeResult {
 /// returns character at index as single-char string
 fn index_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
-    const idx = if (args[1].asNum()) |n| revo.asIndex(n) catch return .{ .ok = revo.core_atoms.data(.missing) } else return .errType(1, "number", root.dataToString(args[1]));
-    if (idx >= str.len) return .{ .ok = revo.core_atoms.data(.missing) };
+    const idx = if (args[1].asNum()) |n| revo.asIndex(n) catch return .{ .ok = revo.Data.new.core(.missing) } else return .errType(1, "number", root.dataToString(args[1]));
+    if (idx >= str.len) return .{ .ok = revo.Data.new.core(.missing) };
     const result = try vm.ownDataStringNoDedup(str[idx .. idx + 1]);
     return .{ .ok = result };
 }
@@ -394,7 +394,7 @@ fn find_f(args: []const Data, vm: *VM) !NativeResult {
     if (std.mem.indexOf(u8, str, needle)) |pos| {
         return .{ .ok = Data.new.num(pos) };
     }
-    return .{ .ok = revo.core_atoms.data(.missing) };
+    return .{ .ok = revo.Data.new.core(.missing) };
 }
 
 /// > string:replace(old: string, new: string) -> string
@@ -566,7 +566,7 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
     if (std.mem.indexOf(u8, str, search)) |idx| {
         return .{ .ok = Data.new.num(idx) };
     }
-    return .{ .ok = revo.core_atoms.data(.nil) };
+    return .{ .ok = revo.Data.new.core(.nil) };
 }
 
 /// > string.join(table: table, sep: string) -> string

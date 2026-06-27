@@ -329,7 +329,7 @@ fn stat_fn(args: []const Data, vm: *VM) !NativeResult {
 /// this is currently a logical close for wrapper handles
 fn close_fn(args: []const Data, vm: *VM) !NativeResult {
     _ = parseFileHandle(args[0], vm) catch return try NativeResult.Err(vm, "InvalidFile");
-    return try NativeResult.Ok(vm, revo.core_atoms.data(.ok));
+    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 /// > file:readdir() -> !table
@@ -375,7 +375,7 @@ fn exists_fn(args: []const Data, vm: *VM) !NativeResult {
             .allow_directory = true,
             .path_only = true,
         }) catch |err| switch (err) {
-            error.FileNotFound => return try NativeResult.Ok(vm, revo.core_atoms.data(.false)),
+            error.FileNotFound => return try NativeResult.Ok(vm, revo.Data.new.core(.false)),
             else => return try NativeResult.Err(vm, mapIOError(err)),
         }
     else
@@ -383,11 +383,11 @@ fn exists_fn(args: []const Data, vm: *VM) !NativeResult {
             .allow_directory = true,
             .path_only = true,
         }) catch |err| switch (err) {
-            error.FileNotFound => return try NativeResult.Ok(vm, revo.core_atoms.data(.false)),
+            error.FileNotFound => return try NativeResult.Ok(vm, revo.Data.new.core(.false)),
             else => return try NativeResult.Err(vm, mapIOError(err)),
         };
     defer file.close(vm.runtime.io);
-    return try NativeResult.Ok(vm, revo.core_atoms.data(.true));
+    return try NativeResult.Ok(vm, revo.Data.new.core(.true));
 }
 
 /// > fs.mkdir(path: string, ?permissions: atom|number) -> !atom
@@ -405,7 +405,7 @@ fn mkdir_fn(args: []const Data, vm: *VM) !NativeResult {
     Dir.cwd().createDir(vm.runtime.io, path, permissions) catch |err| {
         return try NativeResult.Err(vm, mapIOError(err));
     };
-    return try NativeResult.Ok(vm, revo.core_atoms.data(.ok));
+    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 /// > fs.remove(path: string) -> !atom
@@ -417,12 +417,12 @@ fn remove_fn(args: []const Data, vm: *VM) !NativeResult {
             Dir.cwd().deleteDir(vm.runtime.io, path) catch |err| {
                 return try NativeResult.Err(vm, mapIOError(err));
             };
-            return try NativeResult.Ok(vm, revo.core_atoms.data(.ok));
+            return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
         },
         error.FileNotFound => return try NativeResult.Err(vm, "NotFound"),
         else => return try NativeResult.Err(vm, mapIOError(file_err)),
     };
-    return try NativeResult.Ok(vm, revo.core_atoms.data(.ok));
+    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 /// > fs.readdir(path: string) -> !table
@@ -466,7 +466,7 @@ fn rename_fn(args: []const Data, vm: *VM) !NativeResult {
     Dir.cwd().rename(old_path, Dir.cwd(), new_path, vm.runtime.io) catch |err| {
         return try NativeResult.Err(vm, mapIOError(err));
     };
-    return try NativeResult.Ok(vm, revo.core_atoms.data(.ok));
+    return try NativeResult.Ok(vm, revo.Data.new.core(.ok));
 }
 
 fn sourceForPath(comptime template: []const u8, path: []const u8) ![]u8 {

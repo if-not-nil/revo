@@ -283,7 +283,7 @@ fn filterNext(args: []const Data, vm: *VM) !NativeResult {
 
     while (true) {
         const val = try vm.callFunction(iter, &.{});
-        if (val.asAtom()) |atom| if (atom == done_id) return .okData(revo.core_atoms.data(.done));
+        if (val.asAtom()) |atom| if (atom == done_id) return .okData(revo.Data.new.core(.done));
         const ok = try vm.callFunction(pred, &[_]Data{val});
         if (isTruthy(ok)) return .okData(val);
     }
@@ -435,7 +435,7 @@ pub fn find_fn(args: []const Data, vm: *VM) !NativeResult {
         else => return .errType(0, "string, tuple, or table", dataToString(args[0])),
     }
 
-    return .{ .ok = revo.core_atoms.data(.missing) };
+    return .{ .ok = revo.Data.new.core(.missing) };
 }
 
 /// > all?(collection: string|tuple|table, fn: function) -> boolean
@@ -603,8 +603,8 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
     const atom_obj = revo.core_atoms.obj.atom_id();
     const atom_pos = revo.core_atoms.pos.atom_id();
 
-    const obj = tbl.getRaw(Data.new.atom(atom_obj)) orelse return .okData(revo.core_atoms.data(.done));
-    const pos_val = tbl.getRaw(Data.new.atom(atom_pos)) orelse return .okData(revo.core_atoms.data(.done));
+    const obj = tbl.getRaw(Data.new.atom(atom_obj)) orelse return .okData(revo.Data.new.core(.done));
+    const pos_val = tbl.getRaw(Data.new.atom(atom_pos)) orelse return .okData(revo.Data.new.core(.done));
     const pos = @as(usize, @intFromFloat(pos_val.asNum().?));
 
     const val: ?Data = switch (obj.tag()) {
@@ -632,7 +632,7 @@ fn iteratorNext(args: []const Data, vm: *VM) !NativeResult {
         try tbl.putRaw(Data.new.atom(atom_pos), Data.new.num(@as(f64, @floatFromInt(pos + 1))));
         return .okData(v);
     }
-    return .okData(revo.core_atoms.data(.done));
+    return .okData(revo.Data.new.core(.done));
 }
 
 inline fn isTruthy(data: Data) bool {

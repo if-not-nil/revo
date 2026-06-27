@@ -18,7 +18,7 @@ const flow = @import("flow.zig");
 const fold = @import("fold.zig");
 pub const ir = @import("ir.zig");
 const state_mod = @import("state.zig");
-pub const struct_layout = @import("struct_layout.zig");
+
 pub const types = @import("types.zig");
 pub const type_check = @import("type_check.zig");
 const values = @import("values.zig");
@@ -126,8 +126,7 @@ pub const Compiler = struct {
     },
     active_registers: usize = 0,
     max_registers: usize = 0,
-    struct_layouter: struct_layout.StructLayouter,
-    struct_layouts: std.StringHashMap([]const struct_layout.FieldDef),
+    struct_layouts: std.StringHashMap([]const types.FieldDef),
     ir_builder: ir.IrBuilder,
     value_stack: std.ArrayList(*ir.IrInst),
     // register cache for upvalue loads, cleared per-block in compileBlock
@@ -158,8 +157,7 @@ pub const Compiler = struct {
             .break_jumps = try std.ArrayList(usize).initCapacity(arena, 16),
             .loop_result_regs = try std.ArrayList(usize).initCapacity(arena, 8),
             .test_suite_names = try std.ArrayList([]const u8).initCapacity(arena, 4),
-            .struct_layouter = struct_layout.StructLayouter.init(arena),
-            .struct_layouts = std.StringHashMap([]const struct_layout.FieldDef).init(arena),
+            .struct_layouts = std.StringHashMap([]const types.FieldDef).init(arena),
             .ir_builder = try ir.IrBuilder.init(arena),
             .value_stack = try std.ArrayList(*ir.IrInst).initCapacity(arena, 32),
             .upvalue_cache = std.AutoHashMap(usize, usize).init(arena),
@@ -181,7 +179,6 @@ pub const Compiler = struct {
         self.break_jumps.deinit(self.alloc);
         self.loop_result_regs.deinit(self.alloc);
         self.test_suite_names.deinit(self.alloc);
-        self.struct_layouter.deinit();
         var layout_it = self.struct_layouts.iterator();
         while (layout_it.next()) |entry| self.alloc.free(entry.value_ptr.*);
         self.struct_layouts.deinit();

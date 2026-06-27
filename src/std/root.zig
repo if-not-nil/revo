@@ -489,7 +489,7 @@ pub fn resultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !NativeResult 
 
 pub fn okAtom(vm: *VM) NativeResult {
     _ = vm;
-    return .{ .ok = revo.core_atoms.data(.ok) };
+    return .{ .ok = revo.Data.new.core(.ok) };
 }
 
 pub fn resultTag(vm: *VM, comptime tag: ResultTag) !mem.AtomID {
@@ -501,7 +501,7 @@ pub fn resultTag(vm: *VM, comptime tag: ResultTag) !mem.AtomID {
 }
 
 pub inline fn boolData(value: bool) Data {
-    return if (value) revo.core_atoms.true.data() else revo.core_atoms.false.data();
+    return if (value) revo.Data.new.core(.true) else revo.Data.new.core(.false);
 }
 
 pub fn tupleTag(value: Data, vm: *VM) ?mem.AtomID {
@@ -613,12 +613,7 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
     const res = vm.callFunction(Data.new.function(body), &[0]Data{}) catch |err| {
         const failure = vm.evalFailure(err);
         failure.render(vm.runtime.alloc, &w.interface, vm.currentDebugSource() orelse "") catch {
-            try revo.pretty.printError(
-                vm.runtime.alloc,
-                &w.interface,
-                "hard-fail - {s}",
-                .{@errorName(err)},
-            );
+            try revo.pretty.printError(&w.interface, "hard-fail - {s}", .{@errorName(err)});
             return .{ .ok = Data.new.nil() };
         };
         return .{ .ok = Data.new.nil() };
@@ -637,12 +632,7 @@ pub fn dotest(args: []const Data, vm: *VM) !NativeResult {
         defer obuf.deinit();
         try append_data(&obuf.writer, tpl.items[1], vm, .debug);
 
-        try revo.pretty.printError(
-            vm.runtime.alloc,
-            &w.interface,
-            "fail - {s}",
-            .{obuf.written()},
-        );
+        try revo.pretty.printError(&w.interface, "fail - {s}", .{obuf.written()});
     }
     return .{ .ok = Data.new.nil() };
 }
@@ -804,7 +794,7 @@ pub fn unwrap_err_(args: []const Data, vm: *VM) !NativeResult {
         return .{ .ok = tuple.items[1] };
     }
 
-    return panic_(&[1]Data{revo.core_atoms.data(.err)}, vm);
+    return panic_(&[1]Data{revo.Data.new.core(.err)}, vm);
 }
 
 /// > @range(start: number, step: number, stop: number) -> tuple
@@ -943,7 +933,7 @@ pub fn print(args: []const Data, vm: *VM) !NativeResult {
     }
     try pw.interface.print("\n", .{});
     try pw.flush();
-    return .{ .ok = revo.core_atoms.data(.ok) };
+    return .{ .ok = revo.Data.new.core(.ok) };
 }
 
 /// > panic(args: any...) -> error

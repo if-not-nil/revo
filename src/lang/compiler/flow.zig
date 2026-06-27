@@ -336,6 +336,26 @@ pub fn emitLoopRecurse(
     try self.emit(.ret, 1);
 }
 
+const RegisterState = struct {
+    next_slot: LocalSlot,
+    active: usize,
+    max: usize,
+};
+
+fn saveRegState(self: *Compiler) RegisterState {
+    return .{
+        .next_slot = self.slot_allocators.items[self.slot_allocators.items.len - 1],
+        .active = self.active_registers,
+        .max = self.max_registers,
+    };
+}
+
+fn restoreRegState(self: *Compiler, s: RegisterState) void {
+    self.active_registers = s.active;
+    self.max_registers = s.max;
+    self.slot_allocators.items[self.slot_allocators.items.len - 1] = s.next_slot;
+}
+
 pub fn compileMatch(
     self: *Compiler,
     subject: *const Node,
@@ -344,17 +364,11 @@ pub fn compileMatch(
     if (state.currentFunctionState(self) == null)
         return self.fail(.UnsupportedSyntax, subject, "match requires function scope");
 
-    const saved_next_slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
-    const saved_active = self.active_registers;
-    const saved_max = self.max_registers;
+    const saved = saveRegState(self);
 
     try state.pushScope(self);
     errdefer state.popScope(self);
-    errdefer {
-        self.active_registers = saved_active;
-        self.max_registers = saved_max;
-        self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
-    }
+    errdefer restoreRegState(self, saved);
 
     // evaluated once, loaded per arm
     const subject_slot = try state.declareLocal(self, "__match_subject", false);
@@ -426,7 +440,7 @@ pub fn compileMatch(
     state.popScope(self);
 
     // reclaim subject slot
-    self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
+    self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved.next_slot;
 
     self.active_registers = arm_base_registers;
     try self.pushNil(); // fallthrough when no arm matched
@@ -577,14 +591,8 @@ pub fn compileIf(
     if (state.currentFunctionState(self) == null)
         return self.fail(.UnsupportedSyntax, condition, "if requires function scope");
 
-    const saved_next_slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
-    const saved_active = self.active_registers;
-    const saved_max = self.max_registers;
-    errdefer {
-        self.active_registers = saved_active;
-        self.max_registers = saved_max;
-        self.slot_allocators.items[self.slot_allocators.items.len - 1] = saved_next_slot;
-    }
+    const saved = saveRegState(self);
+    errdefer restoreRegState(self, saved);
 
     try self.compile(condition, true);
     const else_jump = try self.jump(.jump_if_false);

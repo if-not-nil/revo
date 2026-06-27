@@ -177,7 +177,7 @@ pub fn renderReport(
     const source_name = report.source_name orelse "<source>";
     const source = report.source orelse "";
     if (report.parts.len == 0 and report.message.len != 0) {
-        try pretty.printError(alloc, writer, "{s}", .{report.message});
+        try pretty.printError(writer, "{s}", .{report.message});
         return;
     }
 
@@ -188,7 +188,7 @@ pub fn renderReport(
         switch (part) {
             .@"error" => |message| {
                 if (error_seen) try writer.writeByte('\n');
-                try pretty.printError(alloc, writer, "{s}", .{message});
+                try pretty.printError(writer, "{s}", .{message});
                 error_seen = true;
             },
             .span => |span| switch (span.role) {

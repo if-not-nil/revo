@@ -1,6 +1,8 @@
 const std = @import("std");
+const VM = @import("VM.zig").VM;
+const print_mod = @import("print.zig");
 
-const revo = @import("revo");
+pub const core_atoms = @import("core.zig").core_atoms;
 
 pub const StringID = usize;
 pub const AtomID = usize;
@@ -42,8 +44,12 @@ pub const Data = struct {
             };
             return Data.numberRaw(n);
         }
+        pub inline fn core(comptime a: core_atoms) Data {
+            return Data.new.atom(a.atom_id());
+        }
+
         pub inline fn nil() Data {
-            return revo.core_atoms.data(.nil);
+            return Data.new.core(.nil);
         }
         pub inline fn str(id: StringID) Data {
             return Data.boxed(.string, id);
@@ -55,7 +61,7 @@ pub const Data = struct {
             return Data.boxed(.function, id);
         }
         pub inline fn boolean(val: bool) Data {
-            return if (val) revo.core_atoms.data(.true) else revo.core_atoms.data(.false);
+            return if (val) Data.new.core(.true) else Data.new.core(.false);
         }
         pub inline fn table(id: TableID) Data {
             return Data.boxed(.table, id);
@@ -177,11 +183,11 @@ pub const Data = struct {
         return self.bits;
     }
 
-    pub fn write(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: RenderMode) anyerror!void {
-        return revo.vm.print.writeData(self, writer, vm, mode);
+    pub fn write(self: Data, writer: *std.Io.Writer, v: *VM, mode: RenderMode) anyerror!void {
+        return print_mod.writeData(self, writer, v, mode);
     }
 
-    pub fn print(self: Data, vm: *revo.VM) void {
+    pub fn print(self: Data, vm: *VM) void {
         var buf: [16]u8 = undefined;
         var stdout = vm.runtime.stdout.writer(vm.runtime.io, &buf);
         self.write(&stdout.interface, vm, .debug) catch {
@@ -190,3 +196,9 @@ pub const Data = struct {
         };
     }
 };
+
+pub inline fn isFalse(val: Data) bool {
+    if (val.asNum()) |n| return n == 0;
+    if (val.asAtom()) |id| return id <= core_atoms.lastFalse;
+    return false;
+}

@@ -108,7 +108,7 @@ pub const Fiber = struct {
             .wait = .none,
             .parked_result_slot = null,
             .waiters = undefined,
-            .result = revo.core_atoms.data(.nil),
+            .result = revo.Data.new.core(.nil),
         };
 
         self.registers = try alloc.alloc(Data, reg_count);
@@ -288,7 +288,7 @@ pub fn init(runtime: revo.Runtime) !VM {
 
     // set initial fiber result to no_result
     // after core atoms are initialized
-    vm.sched.fibers.items[0].result = revo.core_atoms.data(.no_result);
+    vm.sched.fibers.items[0].result = revo.Data.new.core(.no_result);
 
     try revo.std_lib.register_stdlib(&vm);
     try revo.lang.proc.register(&vm);
@@ -492,7 +492,7 @@ fn ensureAbsoluteSlot(self: *VM, slot: usize) !void {
     try ensureRegCapacity(fiber, self.runtime.alloc, slot + 1);
     if (slot < fiber.registers_len) return;
     const old_len = fiber.registers_len;
-    @memset(fiber.registers[old_len .. slot + 1], revo.core_atoms.data(.missing));
+    @memset(fiber.registers[old_len .. slot + 1], revo.Data.new.core(.missing));
     fiber.registers_len = slot + 1;
 }
 
@@ -506,7 +506,7 @@ pub inline fn regRead(slots: []const Data, base: usize, reg: opcode.Register) Da
     if (builtin.mode != .ReleaseFast) {
         const slot = base + reg;
         if (slot >= slots.len)
-            return revo.core_atoms.data(.missing);
+            return revo.Data.new.core(.missing);
     }
     return slots[base + reg];
 }
@@ -608,7 +608,7 @@ pub fn putInTableAtom(
 
 pub inline fn getGlobal(self: *VM, name: []const u8) ?Data {
     if (self.atoms.get(name)) |id| return self.globals.get(id);
-    return revo.core_atoms.data(.undef);
+    return revo.Data.new.core(.undef);
 }
 
 pub fn setProgramDebugInfo(
@@ -760,7 +760,7 @@ pub inline fn captureUpvalue(self: *VM, slot_index: usize) !root.functions.Upval
         if (entry.slot_index > slot_index) {
             const upvalue_id = try self.functions.createUpvalue(.{
                 .open_index = slot_index,
-                .closed = revo.core_atoms.data(.missing),
+                .closed = revo.Data.new.core(.missing),
             });
             try open.insert(self.runtime.alloc, idx, .{ .slot_index = slot_index, .id = upvalue_id });
             return upvalue_id;
@@ -768,7 +768,7 @@ pub inline fn captureUpvalue(self: *VM, slot_index: usize) !root.functions.Upval
     }
     const upvalue_id = try self.functions.createUpvalue(.{
         .open_index = slot_index,
-        .closed = revo.core_atoms.data(.missing),
+        .closed = revo.Data.new.core(.missing),
     });
     try open.append(self.runtime.alloc, .{ .slot_index = slot_index, .id = upvalue_id });
     return upvalue_id;
@@ -1294,7 +1294,7 @@ fn callNonClosureFunction(
                             try self.writeRegisterFast(
                                 base,
                                 instr.c,
-                                revo.core_atoms.data(.missing),
+                                revo.Data.new.core(.missing),
                             );
                             return error.Parked;
                         },
@@ -1314,13 +1314,13 @@ fn fillOptionalSlots(regs: []Data, base: usize, argc: usize, total_arity: u8, re
     if (argc < total_arity) {
         @memset(
             regs[base + argc .. base + total_arity],
-            revo.core_atoms.data(.no),
+            revo.Data.new.core(.no),
         );
     }
     if (total_arity < register_count) {
         @memset(
             regs[base + total_arity .. base + register_count],
-            revo.core_atoms.data(.missing),
+            revo.Data.new.core(.missing),
         );
     }
 }
@@ -1338,7 +1338,7 @@ pub fn callRegister(
     const callee = if (callee_slot < fiber.registers_len)
         fiber.registers[callee_slot]
     else
-        revo.core_atoms.data(.missing);
+        revo.Data.new.core(.missing);
 
     // seemingly the likeliest for both rec and non-rec
     if (callee.tag() == .function) {
@@ -1606,7 +1606,7 @@ fn callStructConstructor(
 
     for (desc.fields, 0..) |f, i| {
         if (instance.fields[i].rawBits() ==
-            revo.core_atoms.data(.undef).rawBits() and
+            revo.Data.new.core(.undef).rawBits() and
             f.default_val == null)
         {
             try self.setRuntimeMessageFmt(
@@ -1845,7 +1845,7 @@ pub inline fn spawnRegister(
     if (closure.register_count > child.registers.len)
         child.registers = try self.runtime.alloc.realloc(child.registers, closure.register_count);
     child.registers_len = closure.register_count;
-    @memset(child.registers[0..closure.register_count], revo.core_atoms.data(.missing));
+    @memset(child.registers[0..closure.register_count], revo.Data.new.core(.missing));
 
     for (0..argc) |idx| {
         // this is safe
@@ -1854,7 +1854,7 @@ pub inline fn spawnRegister(
         child.registers[idx] = if (src_slot < fiber.registers_len)
             fiber.registers[src_slot]
         else
-            revo.core_atoms.data(.missing);
+            revo.Data.new.core(.missing);
     }
 
     fillOptionalSlots(
@@ -1907,7 +1907,6 @@ test {
     _ = @import("module.zig");
     _ = @import("opcode.zig");
     _ = @import("table.zig");
-    _ = @import("testing.zig");
     _ = @import("tests.zig");
     _ = @import("tuple.zig");
     _ = @import("exec.zig");
@@ -1939,7 +1938,6 @@ pub const opcode = root.opcode;
 const Instruction = opcode.Instruction;
 pub const Interner = root.interner.Interner;
 const TablePool = root.table.TablePool;
-pub const testing = root.testing;
 const TuplePool = root.tuple.TuplePool;
 pub const GlobalID = mem.StringID;
 pub const ChannelID = mem.TableID;

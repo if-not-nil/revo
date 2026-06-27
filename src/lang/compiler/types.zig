@@ -62,6 +62,13 @@ pub fn atomPayload(name: []const u8) []const u8 {
     return if (name.len > 0 and name[0] == ':') name[1..] else name;
 }
 
+pub const FieldDef = struct {
+    name: []const u8,
+    field_type: TypeInfo,
+    type_name: ?[]const u8 = null,
+    default_val: ?revo.memory.Data = null,
+};
+
 pub const FunctionSignature = struct {
     params: []const TypeInfo,
     return_type: TypeInfo,

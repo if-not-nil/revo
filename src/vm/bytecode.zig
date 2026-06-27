@@ -361,11 +361,10 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
 // tests
 //
 
-const test_support = @import("testing.zig");
 const expectEqual = std.testing.expectEqual;
 
 test "serialize and deserialize round trip" {
-    const runtime = test_support.runtime();
+    const runtime = revo.lang.testing.runtime();
     var vm = try VM.init(runtime);
     defer vm.deinit();
 
@@ -400,7 +399,7 @@ test "serialize and deserialize round trip" {
 }
 
 test "deserialize detects invalid magic" {
-    const runtime = test_support.runtime();
+    const runtime = revo.lang.testing.runtime();
     var vm = try VM.init(runtime);
     defer vm.deinit();
 
@@ -409,7 +408,7 @@ test "deserialize detects invalid magic" {
 }
 
 test "serialize writes valid file header" {
-    const runtime = test_support.runtime();
+    const runtime = revo.lang.testing.runtime();
     var vm = try VM.init(runtime);
     defer vm.deinit();
 

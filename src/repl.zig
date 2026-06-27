@@ -421,7 +421,7 @@ pub const Session = struct {
         // const cwd_path = try std.Io.Dir.cwd().realPathFileAlloc(self.vm.runtime.io, ".", self.gpa);
         // defer self.gpa.free(cwd_path);
 
-        const run_result = revo.module.runCompiledSessionReport(
+        const run_result = revo.module.runCompiledModuleReport(
             self.vm,
             ".",
             artifact.instructions,

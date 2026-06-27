@@ -193,106 +193,50 @@ pub fn reuseOrDeclareLocal(self: *Compiler, name: []const u8, mutable: bool) !Lo
     return declareLocal(self, name, mutable);
 }
 
+fn scanLocals(items: []LocalVar, slot: LocalSlot) ?*LocalVar {
+    var i = items.len;
+    while (i > 0) {
+        i -= 1;
+        if (items[i].slot == slot) return &items[i];
+    }
+    return null;
+}
+
 pub fn markLocalInitialized(self: *Compiler, slot: LocalSlot) void {
     const state = currentFunctionState(self) orelse return;
-    // current scope first
     var i = state.locals.items.len;
     while (i > 0) {
         i -= 1;
         if (state.locals.items[i].slot == slot) {
             state.locals.items[i].initialized = true;
-            return;
+            break;
         }
     }
-    // then fallback to all_locals (covers cases where popScope trimmed the list)
-    i = state.all_locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.all_locals.items[i].slot == slot) {
-            state.all_locals.items[i].initialized = true;
-            return;
-        }
-    }
+    if (scanLocals(state.all_locals.items, slot)) |l| l.initialized = true;
 }
 
 pub fn markLocalValueKind(self: *Compiler, slot: LocalSlot, kind: LocalValueKind) void {
     const state = currentFunctionState(self) orelse return;
-    var i = state.locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.locals.items[i].slot == slot) {
-            state.locals.items[i].kind = kind;
-            break;
-        }
-    }
-    i = state.all_locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.all_locals.items[i].slot == slot) {
-            state.all_locals.items[i].kind = kind;
-            break;
-        }
-    }
+    if (scanLocals(state.locals.items, slot)) |l| l.kind = kind;
+    if (scanLocals(state.all_locals.items, slot)) |l| l.kind = kind;
 }
 
 pub fn setLocalType(self: *Compiler, slot: LocalSlot, type_name: ?[]const u8) void {
     const state = currentFunctionState(self) orelse return;
-    var i = state.locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.locals.items[i].slot == slot) {
-            state.locals.items[i].type_name = type_name;
-            break;
-        }
-    }
-    i = state.all_locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.all_locals.items[i].slot == slot) {
-            state.all_locals.items[i].type_name = type_name;
-            break;
-        }
-    }
+    if (scanLocals(state.locals.items, slot)) |l| l.type_name = type_name;
+    if (scanLocals(state.all_locals.items, slot)) |l| l.type_name = type_name;
 }
 
 pub fn setLocalTypeExplicit(self: *Compiler, slot: LocalSlot) void {
     const state = currentFunctionState(self) orelse return;
-    var i = state.locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.locals.items[i].slot == slot) {
-            state.locals.items[i].type_explicit = true;
-            break;
-        }
-    }
-    i = state.all_locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.all_locals.items[i].slot == slot) {
-            state.all_locals.items[i].type_explicit = true;
-            break;
-        }
-    }
+    if (scanLocals(state.locals.items, slot)) |l| l.type_explicit = true;
+    if (scanLocals(state.all_locals.items, slot)) |l| l.type_explicit = true;
 }
 
 pub fn setLocalTableFields(self: *Compiler, slot: LocalSlot, fields: ?[]const []const u8) void {
     const state = currentFunctionState(self) orelse return;
-    var i = state.locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.locals.items[i].slot == slot) {
-            state.locals.items[i].table_fields = fields;
-            break;
-        }
-    }
-    i = state.all_locals.items.len;
-    while (i > 0) {
-        i -= 1;
-        if (state.all_locals.items[i].slot == slot) {
-            state.all_locals.items[i].table_fields = fields;
-            break;
-        }
-    }
+    if (scanLocals(state.locals.items, slot)) |l| l.table_fields = fields;
+    if (scanLocals(state.all_locals.items, slot)) |l| l.table_fields = fields;
 }
 
 pub fn setLocalTypeHint(self: *Compiler, name: []const u8, type_info: types.TypeInfo) !void {

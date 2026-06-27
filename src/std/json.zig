@@ -114,7 +114,7 @@ fn writeJsonString(writer: *std.Io.Writer, str: []const u8) anyerror!void {
 
 fn fromJsonValue(value: json.Value, vm: *VM) anyerror!Data {
     return switch (value) {
-        .null => revo.core_atoms.data(.nil),
+        .null => revo.Data.new.core(.nil),
         .bool => |b| Data.new.boolean(b),
         .integer => |n| Data.new.num(n),
         .float => |n| Data.new.num(n),

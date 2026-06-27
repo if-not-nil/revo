@@ -908,7 +908,7 @@ fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.NativeResult {
         return .panic();
     }
 
-    if (tuple.items.len == 1) return .{ .ok = revo.core_atoms.data(.nil) };
+    if (tuple.items.len == 1) return .{ .ok = revo.Data.new.core(.nil) };
     if (tuple.items.len == 2) return .{ .ok = tuple.items[1] };
 
     const payload_id = try vm.tuples.create(tuple.items[1..]);
@@ -946,7 +946,7 @@ fn normalizeProcValue(vm: *revo.VM, value: Data) !Data {
         .table => blk: {
             const tid = value.asTable().?;
             const table = try vm.tables.get(tid);
-            if (table.array.items.len == 0) break :blk revo.core_atoms.data(.nil);
+            if (table.array.items.len == 0) break :blk revo.Data.new.core(.nil);
             if (table.array.items.len == 1) break :blk table.array.items[0];
             break :blk value;
         },
@@ -958,19 +958,19 @@ fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.Nativ
     if (args.len != 1) return .errArity(args.len, 1);
     const iter_id = args[0].asTable() orelse return .errType(0, "table", revo.std_lib.dataToString(args[0]));
     const iter_tbl = try vm.tables.get(iter_id);
-    const items_data = iter_tbl.getRawAtom(revo.core_atoms.items.atom_id()) orelse return .{ .ok = revo.core_atoms.data(.nil) };
+    const items_data = iter_tbl.getRawAtom(revo.core_atoms.items.atom_id()) orelse return .{ .ok = revo.Data.new.core(.nil) };
     const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atom_id()) orelse Data.new.num(0);
     const idx = if (index_data.asNum()) |n| try revo.asIndex(n) else return error.TypeError;
 
     const item = if (items_data.asTable()) |tid| blk: {
         const table = try vm.tables.get(tid);
-        if (idx >= table.array.items.len) break :blk revo.core_atoms.data(.nil);
+        if (idx >= table.array.items.len) break :blk revo.Data.new.core(.nil);
         break :blk table.array.items[idx];
     } else if (items_data.asTuple()) |tid| blk: {
         const tuple = try vm.tuples.get(tid);
-        if (idx >= tuple.items.len) break :blk revo.core_atoms.data(.nil);
+        if (idx >= tuple.items.len) break :blk revo.Data.new.core(.nil);
         break :blk tuple.items[idx];
-    } else revo.core_atoms.data(.nil);
+    } else revo.Data.new.core(.nil);
 
     if (advance) {
         try iter_tbl.putRawAtom(revo.core_atoms.index.atom_id(), Data.new.num(idx + 1));

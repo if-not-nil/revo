@@ -420,8 +420,7 @@ pub fn compileStruct(
     name: []const u8,
     items: []const StructItem,
 ) !void {
-    const struct_layout_mod = @import("struct_layout.zig");
-    var field_defs = try std.ArrayList(struct_layout_mod.FieldDef).initCapacity(
+    var field_defs = try std.ArrayList(types_mod.FieldDef).initCapacity(
         self.alloc,
         items.len,
     );
@@ -472,18 +471,24 @@ pub fn compileStruct(
     if (self.struct_layouts.fetchRemove(name)) |kv| self.alloc.free(kv.value);
     try self.struct_layouts.put(name, field_slice);
 
-    const type_id = if (field_slice.len > 0)
-        try self.struct_layouter.registerType(
-            self.vm,
-            name,
-            field_slice,
-        )
-    else
-        try self.vm.struct_types.registerType(
-            name,
-            &.{},
-            std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc),
-        );
+    const type_id = if (field_slice.len > 0) blk: {
+        var fields = try std.ArrayList(revo.vm.struct_mod.StructField).initCapacity(self.alloc, field_slice.len);
+        defer fields.deinit(self.alloc);
+        for (field_slice) |d| {
+            const type_atom: ?revo.AtomID = if (d.type_name) |tn|
+                try self.vm.internAtom(tn)
+            else if (d.field_type != .any)
+                try self.vm.internAtom(types_mod.typeName(d.field_type))
+            else
+                null;
+            try fields.append(self.alloc, .{
+                .name_atom = try self.vm.internAtom(d.name),
+                .type_atom = type_atom,
+                .default_val = d.default_val,
+            });
+        }
+        break :blk try self.vm.struct_types.registerType(name, fields.items, std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc));
+    } else try self.vm.struct_types.registerType(name, &.{}, std.StringHashMap(revo.memory.Data).init(self.vm.runtime.alloc));
 
     // bind the .struct_type constant to the struct name
     const slot = try state.reuseOrDeclareLocal(self, name, false);
@@ -573,7 +578,7 @@ fn evalConstNode(self: *Compiler, node: *const Node) ?Data {
         .string => |s| return self.vm.ownDataString(s) catch return null,
         .multiline_string => |s| return self.vm.ownDataString(s) catch return null,
         .hash => |h| return self.vm.dataAtom(h) catch return null,
-        .nil => return revo.core_atoms.data(.nil),
+        .nil => return revo.Data.new.core(.nil),
         .table => |entries| {
             const t_id = self.vm.tables.create() catch return null;
             const table = self.vm.tables.get(t_id) catch return null;

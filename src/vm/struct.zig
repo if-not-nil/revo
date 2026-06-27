@@ -90,7 +90,7 @@ pub const StructInstance = struct {
 
     pub fn get(self: *StructInstance, field_idx: usize) Data {
         if (field_idx < self.fields.len) return self.fields[field_idx];
-        return revo.core_atoms.data(.undef);
+        return revo.Data.new.core(.undef);
     }
 
     pub fn set(self: *StructInstance, field_idx: usize, val: Data) void {
@@ -134,7 +134,7 @@ pub const StructInstancePool = struct {
 
     pub fn create(self: *StructInstancePool, type_id: StructTypeID, field_count: usize) !StructInstanceID {
         const fields = try self.alloc.alloc(Data, field_count);
-        @memset(fields, revo.core_atoms.data(.undef));
+        @memset(fields, revo.Data.new.core(.undef));
         errdefer self.alloc.free(fields);
         if (self.dead.pop()) |id| {
             self.instances.items[id] = StructInstance{ .type_id = type_id, .fields = fields };

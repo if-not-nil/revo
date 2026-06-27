@@ -1,106 +1,36 @@
-// for colored printing
-
 const std = @import("std");
 
-/// should be fine as a global
 pub var supports_color: bool = true;
 
-pub const Color = enum {
-    reset,
-    red,
-    green,
-    yellow,
-    blue,
-    magenta,
-    cyan,
-    bold,
-    dim,
-
-    pub fn code(self: Color) []const u8 {
-        return switch (self) {
-            .reset => "\x1b[0m",
-            .red => "\x1b[31m",
-            .green => "\x1b[32m",
-            .yellow => "\x1b[33m",
-            .blue => "\x1b[34m",
-            .magenta => "\x1b[35m",
-            .cyan => "\x1b[36m",
-            .bold => "\x1b[1m",
-            .dim => "\x1b[2m",
-        };
-    }
-};
-
-/// https://no-color.org/, https://bixense.com/clicolors/
 pub fn isColorSupported(env: *std.process.Environ.Map, io: std.Io) bool {
     if (env.contains("NO_COLOR")) return false;
-    if (env.contains("CLICOLOR_FORCE")) return true;
-    if (env.contains("FORCE_COLOR")) return true;
-
-    const stdout = std.Io.File.stdout();
-    const is_tty = stdout.isTty(io) catch return false;
+    if (env.contains("CLICOLOR_FORCE") or env.contains("FORCE_COLOR")) return true;
+    const is_tty = std.Io.File.stdout().isTty(io) catch return false;
     if (!is_tty) return false;
-
-    if (env.get("TERM")) |term| {
-        if (std.mem.eql(u8, term, "dumb")) return false;
-    }
-
+    if (env.get("TERM")) |term| if (std.mem.eql(u8, term, "dumb")) return false;
     return true;
 }
 
-/// single style
-pub fn printColored(alloc: std.mem.Allocator, writer: *std.Io.Writer, color: Color, comptime fmt: []const u8, args: anytype) !void {
-    _ = alloc;
-    if (supports_color) try writer.writeAll(color.code());
-    try writer.print(fmt, args);
-    if (supports_color) try writer.writeAll(Color.reset.code());
-    try writer.flush();
-}
-
-/// multiple styles, like .bold, .red
-pub fn printStyled(alloc: std.mem.Allocator, writer: *std.Io.Writer, styles: []const Color, comptime fmt: []const u8, args: anytype) !void {
-    _ = alloc;
+fn style(writer: *std.Io.Writer, code: []const u8) !void {
     if (supports_color) {
-        for (styles) |style| try writer.writeAll(style.code());
+        try writer.writeAll(code);
     }
-    try writer.print(fmt, args);
-    if (supports_color) try writer.writeAll(Color.reset.code());
+}
+
+pub fn printError(writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
+    try style(writer, "\x1b[1m\x1b[31m");
+    try writer.writeAll("error: ");
+    try style(writer, "\x1b[0m");
+    try style(writer, "\x1b[1m");
+    try writer.print(fmt ++ "\n", args);
+    try style(writer, "\x1b[0m");
     try writer.flush();
 }
 
-pub fn printError(alloc: std.mem.Allocator, writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
-    try printStyled(alloc, writer, &.{ Color.bold, Color.red }, "error", .{});
-    try writer.writeAll(": ");
-    try writer.print(fmt, args);
-    try writer.writeAll("\n");
-    try writer.flush();
-}
-
-pub fn printErrorName(alloc: std.mem.Allocator, writer: *std.Io.Writer, err: anyerror) !void {
-    try printStyled(alloc, writer, &.{ Color.bold, Color.red }, "error", .{});
-    try writer.writeAll(": ");
-    try writer.writeAll(@errorName(err));
-    try writer.writeAll("\n");
-    try writer.flush();
-}
-
-pub fn printWarning(alloc: std.mem.Allocator, writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
-    try printStyled(alloc, writer, &.{Color.yellow}, "warning", .{});
-    try writer.writeAll(": ");
-    try writer.print(fmt, args);
-    try writer.writeAll("\n");
-    try writer.flush();
-}
-
-pub fn printSuccess(alloc: std.mem.Allocator, writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
-    try printColored(alloc, writer, Color.green, fmt, args);
-    try writer.writeAll("\n");
-    try writer.flush();
-}
-
-pub fn printInfo(alloc: std.mem.Allocator, writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
-    try printColored(alloc, writer, Color.cyan, fmt, args);
-    try writer.writeAll("\n");
+pub fn printSuccess(writer: *std.Io.Writer, comptime fmt: []const u8, args: anytype) !void {
+    try style(writer, "\x1b[32m");
+    try writer.print(fmt ++ "\n", args);
+    try style(writer, "\x1b[0m");
     try writer.flush();
 }
 

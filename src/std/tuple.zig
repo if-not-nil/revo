@@ -76,7 +76,7 @@ fn index(args: []const Data, vm: *VM) !NativeResult {
     const n = args[1].asNum() orelse return .errType(1, "number", root.dataToString(args[1]));
     const idx = try revo.asIndex(n);
     const t = try vm.tuples.get(id);
-    if (idx >= t.items.len) return .{ .ok = revo.core_atoms.data(.missing) };
+    if (idx >= t.items.len) return .{ .ok = revo.Data.new.core(.missing) };
     return .{ .ok = t.items[idx] };
 }
 

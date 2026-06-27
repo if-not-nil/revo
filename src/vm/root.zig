@@ -18,13 +18,11 @@ pub const Instruction = opcode.Instruction;
 pub const Opcode = opcode.Opcode;
 pub const print = @import("print.zig");
 pub const ProgramCounter = @import("VM.zig").ProgramCounter;
-const root = @import("root.zig");
-pub const core_atoms = root.core_atoms;
-pub const isFalse = root.isFalse;
+pub const core_atoms = @import("core.zig").core_atoms;
+pub const isFalse = @import("memory.zig").isFalse;
 pub const Scheduler = @import("scheduler.zig").Scheduler;
 pub const struct_mod = @import("struct.zig");
 pub const table = @import("table.zig");
-pub const testing = @import("testing.zig");
 pub const tests = @import("tests.zig");
 pub const tuple = @import("tuple.zig");
 pub const VM = @import("VM.zig").VM;
@@ -43,7 +41,6 @@ test {
     _ = @import("module.zig");
     _ = @import("opcode.zig");
     _ = @import("table.zig");
-    _ = @import("testing.zig");
     _ = @import("tests.zig");
     _ = @import("tuple.zig");
 }

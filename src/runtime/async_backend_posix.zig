@@ -148,24 +148,24 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
             if (rec.status == 0) {
                 try wakeTuple(vm, rec.fiber_id, .ok, revo.Data.new.num(rec.bytes));
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.core_atoms.data(.SendFailed));
+                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.SendFailed));
             }
         },
         .socket_recv => {
             if (rec.status == 0) {
                 if (rec.bytes == 0) {
-                    try wakeTuple(vm, rec.fiber_id, .err, revo.core_atoms.data(.SocketClosed));
+                    try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.SocketClosed));
                 } else {
                     if (rec.job_ptr.*.buffer) |b| {
                         const buf_slice = b[0..rec.bytes];
                         const payload = try vm.ownDataString(buf_slice);
                         try wakeTuple(vm, rec.fiber_id, .ok, payload);
                     } else {
-                        try wakeTuple(vm, rec.fiber_id, .err, revo.core_atoms.data(.RecvFailed));
+                        try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
                     }
                 }
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.core_atoms.data(.RecvFailed));
+                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
             }
             // free buffer owned by backend
             if (rec.job_ptr.*.buffer) |b_free| {
@@ -190,7 +190,7 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
                 print("process_completion: accept wrapped fd={d}\n", .{new_fd});
                 try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.core_atoms.data(.AcceptFailed));
+                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
             }
         },
     }

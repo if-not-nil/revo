@@ -312,7 +312,7 @@ fn insert(args: []const Data, vm: *VM) !NativeResult {
         try table.array.append(vm.runtime.alloc, val);
     }
 
-    return .{ .ok = revo.core_atoms.data(.ok) };
+    return .{ .ok = revo.Data.new.core(.ok) };
 }
 
 /// > table:remove(pos: number) -> any
@@ -494,7 +494,7 @@ fn rawget(args: []const Data, vm: *VM) !NativeResult {
     if (args.len != 2) return .errArity(args.len, 2);
     const table_id = args[0].asTable() orelse return .errType(0, "table", dataToString(args[0]));
     const t = try vm.tables.get(table_id);
-    return .okData(t.getRaw(args[1]) orelse revo.core_atoms.data(.undef));
+    return .okData(t.getRaw(args[1]) orelse revo.Data.new.core(.undef));
 }
 
 /// > rawset(table: table, key: any, value: any) -> table
@@ -591,7 +591,7 @@ fn first(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].asTable().?;
     const tbl = try vm.tables.get(table_id);
     if (tbl.array.items.len == 0) {
-        return .{ .ok = revo.core_atoms.data(.nil) };
+        return .{ .ok = revo.Data.new.core(.nil) };
     }
     return .{ .ok = tbl.array.items[0] };
 }
@@ -602,7 +602,7 @@ fn last(args: []const Data, vm: *VM) !NativeResult {
     const table_id = args[0].asTable().?;
     const tbl = try vm.tables.get(table_id);
     if (tbl.array.items.len == 0) {
-        return .{ .ok = revo.core_atoms.data(.nil) };
+        return .{ .ok = revo.Data.new.core(.nil) };
     }
     return .{ .ok = tbl.array.items[tbl.array.items.len - 1] };
 }
@@ -651,7 +651,7 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
             return .{ .ok = Data.new.num(i) };
         }
     }
-    return .{ .ok = revo.core_atoms.data(.nil) };
+    return .{ .ok = revo.Data.new.core(.nil) };
 }
 
 /// > table:contains?(value) -> bool
