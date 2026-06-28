@@ -3299,7 +3299,7 @@ test "import with absolute path" {
     const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(module_dir);
 
-    const source = try std.fmt.allocPrint(alloc, "import \"{s}\"\nabsm.x", .{abs_path});
+    const source = try std.fmt.allocPrint(alloc, "import '{s}'\nabsm.x", .{abs_path});
     defer alloc.free(source);
 
     var result = try t.topResult(source, module_dir);

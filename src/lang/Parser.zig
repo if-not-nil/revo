@@ -971,11 +971,6 @@ fn parsePubPrefix(self: *Parser, _: Token) anyerror!*Node {
     return node;
 }
 
-fn importPathName(alloc: std.mem.Allocator, path: []const u8) ![]const u8 {
-    const basename = if (std.mem.findScalarLast(u8, path, '/')) |i| path[i + 1 ..] else path;
-    return if (std.mem.findLast(u8, basename, ".")) |i| try alloc.dupe(u8, basename[0..i]) else try alloc.dupe(u8, basename);
-}
-
 /// import "path" or import { ... }
 fn parseImport(self: *Parser, start: Token) anyerror!*Node {
     // import { m1 = "mod1", "mod2" }
@@ -987,7 +982,7 @@ fn parseImport(self: *Parser, start: Token) anyerror!*Node {
             if (self.peek().type == .string) {
                 // "path", auto-bind
                 const path_token = try self.expect(.string);
-                const name = try importPathName(self.alloc, path_token.text);
+                const name = try self.alloc.dupe(u8, std.fs.path.stem(path_token.text));
                 try import_nodes.append(self.alloc, try self.allocExpr(
                     Span.merge(start.span(), path_token.span()),
                     .{ .import_stmt = .{ .name = name, .path = path_token.text } },
@@ -1014,7 +1009,7 @@ fn parseImport(self: *Parser, start: Token) anyerror!*Node {
     // import "path" autobind
     {
         const path_token = try self.expect(.string);
-        const name = try importPathName(self.alloc, path_token.text);
+        const name = try self.alloc.dupe(u8, std.fs.path.stem(path_token.text));
         return self.allocExpr(
             Span.merge(start.span(), path_token.span()),
             .{ .import_stmt = .{ .name = name, .path = path_token.text } },

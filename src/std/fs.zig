@@ -299,11 +299,12 @@ fn append_fn(args: []const Data, vm: *VM) !NativeResult {
     const permissions = if (args.len > 2) parsePermissions(vm, args[2]) catch return try NativeResult.Err(vm, "InvalidPermissions") else .default_file;
 
     const data = vm.stringValue(args[1].asString().?);
-    const file = Dir.cwd().createFile(vm.runtime.io, handle.path, .{
-        .truncate = false,
-        .permissions = permissions,
-    }) catch |err| {
-        return try NativeResult.Err(vm, mapIOError(err));
+    const file = Dir.cwd().openFile(vm.runtime.io, handle.path, .{ .mode = .write_only }) catch |err| switch (err) {
+        error.FileNotFound => Dir.cwd().createFile(vm.runtime.io, handle.path, .{
+            .truncate = false,
+            .permissions = permissions,
+        }) catch |e| return try NativeResult.Err(vm, mapIOError(e)),
+        else => return try NativeResult.Err(vm, mapIOError(err)),
     };
 
     const stat = file.stat(vm.runtime.io) catch |err| {
@@ -484,7 +485,7 @@ test "fs.open/read reads file contents" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ fs.open("{s}"):unwrap():read():unwrap()
+        \\ fs.open('{s}'):unwrap():read():unwrap()
     , file_path);
     defer alloc.free(source);
 
@@ -502,7 +503,7 @@ test "fs.write overwrites file" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ const f = fs.open("{s}"):unwrap()
+        \\ const f = fs.open('{s}'):unwrap()
         \\ f:write("new value"):unwrap()
         \\ f:read():unwrap()
     , file_path);
@@ -522,7 +523,7 @@ test "fs.append appends to file" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ const f = fs.open("{s}"):unwrap()
+        \\ const f = fs.open('{s}'):unwrap()
         \\ f:append(" world"):unwrap()
         \\ f:read():unwrap()
     , file_path);
@@ -541,7 +542,7 @@ test "fs.append creates missing file" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ const f = fs.open("{s}"):unwrap()
+        \\ const f = fs.open('{s}'):unwrap()
         \\ f:append("created"):unwrap()
         \\ f:read():unwrap()
     , file_path);
@@ -560,7 +561,7 @@ test "fs.readdir returns table of entries" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ type(fs.readdir("{s}"):unwrap()) == :table
+        \\ type(fs.readdir('{s}'):unwrap()) == :table
     , dir_path);
     defer alloc.free(source);
     try testing.top_true(source);
@@ -576,7 +577,7 @@ test "fs.readdir returns entries with name and kind" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ const entries = fs.readdir("{s}"):unwrap()
+        \\ const entries = fs.readdir('{s}'):unwrap()
         \\ const e1 = entries[1]
         \\ e1.name != :nil and e1.kind != :nil
     , dir_path);
@@ -593,7 +594,7 @@ test "fs.dir:readdir() returns entries" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ const dir = fs.open("{s}"):unwrap()
+        \\ const dir = fs.open('{s}'):unwrap()
         \\ const entries = dir:readdir():unwrap()
         \\ type(entries) == :table
     , dir_path);
@@ -611,7 +612,7 @@ test "fs.readdir works with current directory" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ const entries = fs.readdir("{s}"):unwrap()
+        \\ const entries = fs.readdir('{s}'):unwrap()
         \\ type(entries) == :table
     , dir_path);
     defer alloc.free(source);
