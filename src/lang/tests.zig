@@ -246,15 +246,6 @@ test "arithmetic" {
     try t.top_number("5.0 / 2.0", 2.5);
 }
 
-test "len" {
-    try t.top_number("len(\"hi\")", 2);
-    try t.top_number("len(\"\")", 0);
-    try t.top_number("len(\"abcde\")", 5);
-    try t.top_number("len((1, 2, 3))", 3);
-    try t.top_number("len((1,))", 1);
-    try t.top_number("len({})", 0);
-}
-
 test "concat operator" {
     // string concat
     try t.top_string("'hello' ~ ' world'", "hello world");
@@ -320,88 +311,12 @@ test "concat operator" {
 // semantic type checking of stdlib functions
 //
 
-test "tonumber accepts string" {
-    try t.top_number("tonumber(\"42\"):unwrap()", 42);
-}
-
-test "tonumber rejects number" {
-    try t.expectCompileError("tonumber(42)", .ParseError);
-}
-
-test "tonumber rejects atom" {
-    try t.expectCompileError("tonumber(:foo)", .ParseError);
-}
-
-test "tostring accepts any" {
-    try t.top_string("tostring(42)", "42");
-}
-
-test "sleep rejects string" {
-    try t.expectCompileError("sleep(\"slow\")", .ParseError);
-}
-
-test "tonumber result type is tuple" {
-    try t.top_type("tonumber(\"42\")", .tuple);
-}
-
-test "tostring result type is string" {
-    try t.top_type("tostring(42)", .string);
-}
-
-test "fmt accepts string" {
-    try t.top_string("fmt(\"%v\", \"hi\")", "hi");
-}
-
-test "fmt rejects non-string format" {
-    try t.expectCompileError("fmt(42)", .ParseError);
-}
-
-test "string method upper works" {
-    try t.top_string("\"hello\":upper()", "HELLO");
-}
-
-test "string method sub with wrong type rejected" {
-    try t.expectCompileError("\"hello\":sub(\"x\", 2)", .ParseError);
-}
-
-test "string method sub with extra args rejected" {
-    try t.expectCompileError("\"hello\":sub(2, 2, 3)", .ParseError);
-}
-
-test "string method find returns index" {
-    try t.top_number("\"hello\":find(\"el\")", 1);
-}
-
-test "string method find rejects number needle" {
-    try t.expectCompileError("\"hello\":find(42)", .ParseError);
-}
-
-test "string method replace works" {
-    try t.top_string("\"hello\":replace(\"l\", \"x\")", "hexxo");
-}
-
-test "string method replace rejects wrong type" {
-    try t.expectCompileError("\"hello\":replace(1, \"x\")", .ParseError);
-}
-
-test "string method add works" {
-    try t.top_string("\"hello\":add(\" world\")", "hello world");
-}
-
-// TODO: how would i even test it?
 test "@doc annotates functions without changing runtime behavior" {
     try t.top_number(
         \\ @doc "adds numbers"
         \\ fn add(a, b) a + b
         \\ add(20, 22)
     , 42);
-}
-
-test "stdlib json time and string modules are exposed" {
-    try t.top_string("json.encode((\"a\", \"b\", \"c\")):unwrap()", "[\"a\",\"b\",\"c\"]");
-    try t.top_number("json.decode(\"{\\\"a\\\":1}\"):unwrap().a", 1);
-    try t.top_true("time.now() > 0");
-    try t.top_number("len(string.split(\"a,b\", \",\"))", 2);
 }
 
 test "return statement" {
@@ -623,19 +538,6 @@ test "field assignment works" {
         \\ sys.a = sys.a + 1
         \\ sys.a
     , 2);
-}
-
-test "meatballs are distinct" {
-    try t.top_string(
-        \\ const a = set_metatable({}, {__tostring = fn(self) "foo"})
-        \\ const b = set_metatable({}, {__tostring = fn(self) "bar"})
-        \\ tostring(a)
-    , "foo");
-
-    try t.top_string(
-        \\ const a = set_metatable(:true, {__tostring = fn(self) "foo"})
-        \\ tostring(1 == 1)
-    , "foo");
 }
 
 test "string conversion metamethods __tostring" {
@@ -1415,6 +1317,37 @@ test "for range with two params and preceding locals" {
     , 5);
 }
 
+test "triple-quoted multiline strings compile and evaluate" {
+    try t.top_string(
+        \\ """
+        \\ hello
+        \\ world
+        \\ """
+    , "hello\nworld");
+
+    try t.top_string(
+        \\ """inline"""
+    , "inline");
+}
+
+test "test.skip keyword is valid syntax" {
+    try t.top_nil(
+        \\ test / skip "skipped" do 1 + 1 end
+    );
+}
+
+test "suite keyword compiles and returns nil" {
+    try t.top_nil(
+        \\ suite "example" do
+        \\     test "inner" do 1 end
+        \\ end
+    );
+
+    try t.top_nil(
+        \\ suite "empty" do end
+    );
+}
+
 test "compile report carries span and message" {
     try t.expectCompileFailure(
         "break(1)",
@@ -1607,65 +1540,6 @@ test "basic loop with break" {
         \\         break(a)
         \\ end
     , 5);
-}
-
-test "natives register as functions" {
-    try t.top_type("len", .function);
-    try t.top_type("tonumber", .function);
-    try t.top_type("assert", .function);
-
-    try t.top_true("assert(type(len) == :function)");
-}
-
-test "read reads from file path" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(io, .{
-        .sub_path = "readme.rv",
-        .data = "hello\nworld",
-    });
-
-    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
-    defer alloc.free(module_dir);
-
-    try t.top_string_in_dir(module_dir,
-        \\ read({path = "readme.rv"}):unwrap()
-    , "hello");
-}
-
-test "read accepts delimiter and path" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(io, .{
-        .sub_path = "delim.txt",
-        .data = "a|b|c",
-    });
-
-    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
-    defer alloc.free(module_dir);
-
-    try t.top_string_in_dir(module_dir,
-        \\ read({path = "delim.txt", delimiter = "|"}):unwrap()
-    , "a");
-}
-
-test "read reads exact multiline text" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(io, .{
-        .sub_path = "exact.txt",
-        .data = "let line = :nil\nwhile do\n    let result = read()\n",
-    });
-
-    const module_dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
-    defer alloc.free(module_dir);
-
-    try t.top_string_in_dir(module_dir,
-        \\ read({path = "exact.txt"}):unwrap()
-    , "let line = :nil");
 }
 
 test "import caches modules and reuses the same table" {
@@ -1901,12 +1775,6 @@ test "structs reject bad inputs" {
         \\ }
         \\ User { age = "old" }
     , .ParseError);
-}
-
-test "string with rejects empty replacement char" {
-    try t.expectRuntimeFailureWithMessage(
-        \\ "abc":with(1, "")
-    , .TypeError, "arg 2: wants non-empty string, got string");
 }
 
 test "structs do not leak" {
@@ -2489,25 +2357,6 @@ test "and operator short-circuit" {
     , 0);
 }
 
-test "bullshit: metatable constructors closures and method chaining" {
-    try t.top_number(
-        \\ let Counter = set_metatable({}, {
-        \\   new = fn(start) do
-        \\     const state = {n = start}
-        \\     set_metatable(state, {
-        \\       inc = fn(s, step) do s.n = s.n + step s end,
-        \\       value = fn(s) s.n
-        \\     })
-        \\   end
-        \\ })
-        \\ let a = Counter.new(10)
-        \\ let b = Counter.new(1)
-        \\ a:inc(5):inc(7)
-        \\ b:inc(2)
-        \\ a:value() * 10 + b:value()
-    , 223);
-}
-
 test "string escaping works" {
     try t.top_string("\"hello\\nworld\"", "hello\nworld");
 }
@@ -2992,19 +2841,6 @@ test "for loop calls iterator" {
         \\ end
         \\ sum
     , 84);
-}
-
-test "expect returns err tuple on false" {
-    try t.top_atom(
-        \\ let r = expect(1 == 2)
-        \\ r[0]
-    , "err");
-}
-
-test "expect returns value on truthy" {
-    try t.top_number(
-        \\ expect(42)?
-    , 42);
 }
 
 //

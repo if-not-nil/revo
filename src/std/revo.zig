@@ -89,6 +89,12 @@ test "native eval works" {
     , 42);
 }
 
+test "revo.build compiles source" {
+    try testing.top_atom(
+        \\ revo.build("1 + 1")[0]
+    , "ok");
+}
+
 const std = @import("std");
 
 const revo = @import("../root.zig");

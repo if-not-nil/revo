@@ -648,3 +648,79 @@ const api = @import("api.zig");
 const root = @import("root.zig");
 const NativeResult = root.NativeResult;
 const dataToString = root.dataToString;
+const testing = revo.lang.testing;
+
+test "iter functions" {
+    try testing.top_string(
+        \\ map("abc", fn(c) "x")
+    , "xxx");
+
+    try testing.top_string(
+        \\ map("", fn(c) "x")
+    , "");
+
+    try testing.top_number(
+        \\ map((10, 20), fn(x) x * 2)[0] + map((10, 20), fn(x) x * 2)[1]
+    , 60);
+
+    try testing.top_number(
+        \\ map({a = 1, b = 2}, fn(v) v + 10).a
+    , 11);
+
+    try testing.top_number(
+        \\ reduce((1, 2, 3, 4), fn(acc, x) acc + x, 0)
+    , 10);
+
+    try testing.top_number(
+        \\ reduce("abc", fn(acc, c) acc + 1, 0)
+    , 3);
+
+    try testing.top_number(
+        \\ reduce("", fn(acc, c) acc + 1, 42)
+    , 42);
+
+    try testing.top_atom(
+        \\ each((1, 2, 3), fn(x) x)
+    , "ok");
+
+    try testing.top_atom(
+        \\ each("", fn(c) c)
+    , "ok");
+
+    try testing.top_number(
+        \\ const it = filter((1, 2, 3, 4, 5), fn(x) x > 3)
+        \\ it() + it()
+    , 9);
+
+    try testing.top_number(
+        \\ find((1, 2, 3, 4), fn(x) x > 2)
+    , 3);
+
+    try testing.top_atom(
+        \\ find((1, 2), fn(x) x > 10)
+    , "missing");
+
+    try testing.top_true(
+        \\ all?((1, 2, 3), fn(x) x > 0)
+    );
+
+    try testing.top_false(
+        \\ all?((1, 2, 0), fn(x) x > 0)
+    );
+
+    try testing.top_false(
+        \\ any?((1, 2), fn(x) x > 10)
+    );
+
+    try testing.top_true(
+        \\ any?((0, 0, 3), fn(x) x > 2)
+    );
+
+    try testing.top_true(
+        \\ all?("", fn(x) 0)
+    );
+
+    try testing.top_false(
+        \\ any?("", fn(x) 0)
+    );
+}

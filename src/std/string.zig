@@ -604,6 +604,17 @@ test "string methods" {
     try testing.top_number("\"hello\":index_of(\"ll\")", 2);
     try testing.top_string("string_of(97)", "a");
     try testing.top_string("string_of((72, 105))", "Hi");
+    try testing.top_string("'hello':upper()", "HELLO");
+    try testing.expectCompileError("'hello':sub('x', 2)", .ParseError);
+    try testing.expectCompileError("'hello':sub(2, 2, 3)", .ParseError);
+    try testing.top_number("'hello':find('el')", 1);
+    try testing.expectCompileError("'hello':find(42)", .ParseError);
+    try testing.top_string("'hello':replace('l', 'x')", "hexxo");
+    try testing.expectCompileError("'hello':replace(1, 'x')", .ParseError);
+    try testing.top_string("'hello':add(' world')", "hello world");
+    try testing.expectRuntimeFailureWithMessage(
+        \\ "abc":with(1, "")
+    , .TypeError, "arg 2: wants non-empty string, got string");
 }
 
 const std = @import("std");

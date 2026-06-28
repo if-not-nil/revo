@@ -159,29 +159,6 @@ pub const root_specs: []const api.FnSpec = &.{
     },
     .{ .name = "debug", .placements = &.{api.g}, .params = &.{}, .ret = "table", .doc = "returns debug info as a table", .f = define(&[_]TypeSpec{}, debug_) },
     .{
-        .name = "@range",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "start", "number" },
-            .{ "step", "number" },
-            .{ "stop", "number" },
-        },
-        .ret = "tuple",
-        .doc = "creates a range tuple (start, step, stop)",
-        .f = define(&[_]TypeSpec{ .number, .number, .number }, range_),
-    },
-    .{
-        .name = "@range_from",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "start", "number" },
-            .{ "step", "number" },
-        },
-        .ret = "tuple",
-        .doc = "creates a range tuple (start, step) without stop",
-        .f = define(&[_]TypeSpec{ .number, .number }, range_from_),
-    },
-    .{
         .name = "unwrap",
         .placements = &.{api.g},
         .params = &.{
@@ -755,16 +732,6 @@ pub fn tostring(args: []const Data, vm: *VM) !NativeResult {
     return .{ .ok = try vm.adoptDataString(str) };
 }
 
-/// > @range_from(start: number, step: number) -> tuple
-/// creates a range tuple (start, step) without stop
-fn range_from_(args: []const Data, vm: *VM) !NativeResult {
-    const start = expect_number(args[0]) orelse return .errType(0, "number", dataToString(args[0]));
-    const step = expect_number(args[1]) orelse return .errType(1, "number", dataToString(args[1]));
-    const tag = try vm.internAtom("range_from");
-    const id = try vm.tuples.create(&.{ Data.new.atom(tag), Data.new.num(start), Data.new.num(step) });
-    return .okData(Data.new.tuple(id));
-}
-
 /// > unwrap(result: tuple) -> any
 /// unwraps result tuple, panics if not :ok
 pub fn try_(args: []const Data, vm: *VM) !NativeResult {
@@ -795,17 +762,6 @@ pub fn unwrap_err_(args: []const Data, vm: *VM) !NativeResult {
     }
 
     return panic_(&[1]Data{revo.Data.new.core(.err)}, vm);
-}
-
-/// > @range(start: number, step: number, stop: number) -> tuple
-/// creates a range tuple (start, step, stop)
-pub fn range_(args: []const Data, vm: *VM) !NativeResult {
-    const start = expect_number(args[0]) orelse return .errType(0, "number", dataToString(args[0]));
-    const step = expect_number(args[1]) orelse return .errType(1, "number", dataToString(args[1]));
-    const stop = expect_number(args[2]) orelse return .errType(2, "number", dataToString(args[2]));
-    const tag = revo.core_atoms.atom_id(.range);
-    const id = try vm.tuples.create(&.{ Data.new.atom(tag), Data.new.num(start), Data.new.num(step), Data.new.num(stop) });
-    return .okData(Data.new.tuple(id));
 }
 
 fn expect_number(data: Data) ?f64 {
@@ -1394,6 +1350,13 @@ test "type predicates" {
     try testing.top_true("table?({})");
     try testing.top_true("atom?(:ok)");
     try testing.top_true("function?(fn() 42)");
+
+    try testing.top_true("tuple?((1, 2))");
+    try testing.top_false("tuple?(42)");
+    try testing.top_true("struct Foo { x = 1 } struct_val?(Foo{})");
+    try testing.top_false("struct Foo { x = 1 } struct_val?(42)");
+    try testing.top_true("struct Foo { x = 1 } struct_type?(Foo)");
+    try testing.top_false("struct Foo { x = 1 } struct_type?(42)");
 }
 
 test "array methods" {
@@ -1439,4 +1402,100 @@ test "stdlib json time and string modules are exposed" {
     try testing.top_number("json.decode(\"{\\\"a\\\":1}\"):unwrap().a", 1);
     try testing.top_true("time.now() > 0");
     try testing.top_number("len(string.split(\"a,b\", \",\"))", 2);
+}
+
+test "len" {
+    try testing.top_number("len(\"hi\")", 2);
+    try testing.top_number("len(\"\")", 0);
+    try testing.top_number("len(\"abcde\")", 5);
+    try testing.top_number("len((1, 2, 3))", 3);
+    try testing.top_number("len((1,))", 1);
+    try testing.top_number("len({})", 0);
+}
+
+test "meatballs are distinct" {
+    try testing.top_string(
+        \\ const a = set_metatable({}, {__tostring = fn(self) "foo"})
+        \\ const b = set_metatable({}, {__tostring = fn(self) "bar"})
+        \\ tostring(a)
+    , "foo");
+
+    try testing.top_string(
+        \\ const a = set_metatable(:true, {__tostring = fn(self) "foo"})
+        \\ tostring(1 == 1)
+    , "foo");
+}
+
+test "bullshit: metatable constructors closures and method chaining" {
+    try testing.top_number(
+        \\ let Counter = set_metatable({}, {
+        \\   new = fn(start) do
+        \\     const state = {n = start}
+        \\     set_metatable(state, {
+        \\       inc = fn(s, step) do s.n = s.n + step s end,
+        \\       value = fn(s) s.n
+        \\     })
+        \\   end
+        \\ })
+        \\ let a = Counter.new(10)
+        \\ let b = Counter.new(1)
+        \\ a:inc(5):inc(7)
+        \\ b:inc(2)
+        \\ a:value() * 10 + b:value()
+    , 223);
+}
+
+test "natives register as functions" {
+    try testing.top_type("len", .function);
+    try testing.top_type("tonumber", .function);
+    try testing.top_type("assert", .function);
+    try testing.top_true("assert(type(len) == :function)");
+}
+
+test "expect" {
+    try testing.top_atom(
+        \\ let r = expect(1 == 2)
+        \\ r[0]
+    , "err");
+
+    try testing.top_number(
+        \\ expect(42)?
+    , 42);
+}
+
+test "read works" {
+    const io = std.testing.io;
+
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(io, .{ .sub_path = "readme.rv", .data = "hello\nworld" });
+        const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
+        defer std.testing.allocator.free(module_dir);
+        try testing.top_string_in_dir(module_dir,
+            \\ read({path = "readme.rv"}):unwrap()
+        , "hello");
+    }
+
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(io, .{ .sub_path = "delim.txt", .data = "a|b|c" });
+        const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
+        defer std.testing.allocator.free(module_dir);
+        try testing.top_string_in_dir(module_dir,
+            \\ read({path = "delim.txt", delimiter = "|"}):unwrap()
+        , "a");
+    }
+
+    {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.writeFile(io, .{ .sub_path = "exact.txt", .data = "let line = :nil\nwhile do\n    let result = read()\n" });
+        const module_dir = try tmp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
+        defer std.testing.allocator.free(module_dir);
+        try testing.top_string_in_dir(module_dir,
+            \\ read({path = "exact.txt"}):unwrap()
+        , "let line = :nil");
+    }
 }
