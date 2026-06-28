@@ -635,3 +635,16 @@ test "repl multiple string methods in sequence" {
     _ = try env.session.step(&env.out.writer, "\"abc\":starts_with?(\"a\")");
     try std.testing.expect(std.mem.find(u8, env.out.written()[before3..], "error:") == null);
 }
+
+test "global declared in one compilation can be reassigned in another" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var env = try initTestEnv(alloc);
+
+    _ = try env.session.step(&env.out.writer, "global test1 = 123");
+
+    const before = env.out.written().len;
+    _ = try env.session.step(&env.out.writer, "test1 = 789");
+    try std.testing.expect(std.mem.find(u8, env.out.written()[before..], "error:") == null);
+}

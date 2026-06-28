@@ -251,8 +251,11 @@ fn compileAssignSimple(
                 try self.emit(.store_upval, slot);
             } else {
                 if (self.functions.items.len == 1) {
+                    const atom = try self.vm.internAtom(name);
                     const known = self.declared_globals.contains(name) or
-                        self.vm.stdlib_globals.contains(try self.vm.internAtom(name));
+                        self.vm.stdlib_globals.contains(atom) or
+                        self.vm.globals.contains(atom) or
+                        self.vm.const_globals.contains(atom);
                     if (!known) {
                         const msg = try std.fmt.allocPrint(
                             self.alloc,
@@ -261,7 +264,7 @@ fn compileAssignSimple(
                         );
                         return self.fail(.InvalidAssignmentTarget, target, msg);
                     }
-                    try self.emit(.store_global, try self.vm.internAtom(name));
+                    try self.emit(.store_global, atom);
                 } else {
                     const msg = try std.fmt.allocPrint(
                         self.alloc,
