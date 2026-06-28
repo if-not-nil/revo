@@ -2809,6 +2809,17 @@ test "compiler: named parameters errors" {
     , .ParseError);
 }
 
+test "named parameters with generics" {
+    try t.top_number(
+        \\ fn identity[T](x: T) x
+        \\ identity(x = 42)
+    , 42);
+    try t.top_string(
+        \\ fn identity[T](x: T) x
+        \\ identity(x = "hi")
+    , "hi");
+}
+
 test "double assignment" {
     try t.top_number(
         \\ let a = {}
@@ -2886,6 +2897,17 @@ test "optional params arity errors" {
         \\ const f = fn(a, ?b) a
         \\ f(1, 2, 3)
     , .ParseError);
+}
+
+test "optional params with typed function" {
+    try t.top_atom(
+        \\ const f = fn(a: number, ?b: number) b
+        \\ f(42)
+    , "no");
+    try t.top_number(
+        \\ const f = fn(a: number, ?b: number) a + (b orelse 0)
+        \\ f(3, 7)
+    , 10);
 }
 
 //
