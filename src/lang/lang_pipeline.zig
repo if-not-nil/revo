@@ -207,7 +207,7 @@ fn resolveModuleFile(vm: *VM, name: []const u8) !?[]const u8 {
     }
 
     for (vm.package_path.items) |tmpl| {
-        const sub = if (std.mem.indexOfScalar(u8, tmpl, '?')) |pos|
+        const sub = if (std.mem.findScalar(u8, tmpl, '?')) |pos|
             try std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ tmpl[0..pos], name, tmpl[pos + 1 ..] })
         else
             try alloc.dupe(u8, tmpl);

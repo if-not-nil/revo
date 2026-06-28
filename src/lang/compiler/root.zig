@@ -1343,7 +1343,7 @@ pub const Compiler = struct {
 
         if (binding.target.expr == .ident) {
             const name = binding.target.expr.ident;
-            if (!ast.isDiscardName(name) and std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?") != null)
+            if (!ast.isDiscardName(name) and std.mem.findAny(u8, name[0..name.len -| 1], "!?") != null)
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = binding.target.span, .role = .primary, .message = name },
@@ -1420,7 +1420,7 @@ pub const Compiler = struct {
         type_params: []const []const u8,
     ) InternalLowerError!void {
         if (!ast.isDiscardName(name) and !std.mem.eql(u8, name, "<fn>")) {
-            if (std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?")) |_|
+            if (std.mem.findAny(u8, name[0..name.len -| 1], "!?")) |_|
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = body.span, .role = .primary, .message = name },

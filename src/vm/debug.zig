@@ -248,7 +248,7 @@ test "eval error messages and failure rendering include source name" {
     var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer buf.deinit();
     try failure.render(std.testing.allocator, &buf.writer, "ignored");
-    try std.testing.expect(std.mem.indexOf(u8, buf.written(), "error: boom") != null);
+    try std.testing.expect(std.mem.find(u8, buf.written(), "error: boom") != null);
 }
 
 test "failure rendering includes stack trace frames" {
@@ -285,7 +285,7 @@ test "failure rendering includes stack trace frames" {
     defer buf.deinit();
     try failure.render(std.testing.allocator, &buf.writer, "unused");
 
-    try std.testing.expect(std.mem.indexOf(u8, buf.written(), "stack trace:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, buf.written(), "0: inner at file.rv:2:4") != null);
-    try std.testing.expect(std.mem.indexOf(u8, buf.written(), "1: <module> at file.rv:pc=7") != null);
+    try std.testing.expect(std.mem.find(u8, buf.written(), "stack trace:") != null);
+    try std.testing.expect(std.mem.find(u8, buf.written(), "0: inner at file.rv:2:4") != null);
+    try std.testing.expect(std.mem.find(u8, buf.written(), "1: <module> at file.rv:pc=7") != null);
 }

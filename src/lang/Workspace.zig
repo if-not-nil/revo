@@ -634,7 +634,7 @@ pub fn hover(
         while (i < snap.text.len) : (i += 1) {
             if (cur == def.range.start.line) {
                 const start = i;
-                const end = std.mem.indexOfScalarPos(u8, snap.text, i, '\n') orelse snap.text.len;
+                const end = std.mem.findScalarPos(u8, snap.text, i, '\n') orelse snap.text.len;
                 def_source = std.mem.trim(u8, snap.text[start..end], " \t\r");
                 break;
             }
@@ -1899,8 +1899,8 @@ test "workspace query surface" {
     var hov = try ws.hover(alloc, id, .{ .line = 2, .character = 1 }, query_opts);
     try std.testing.expect(hov != null);
     defer if (hov) |*h| h.deinit(alloc);
-    try std.testing.expect(std.mem.indexOf(u8, hov.?.text, "int") != null);
-    try std.testing.expect(std.mem.indexOf(u8, hov.?.text, "_type:") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "int") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "_type:") != null);
 }
 
 test "workspace diagnostics query" {
@@ -1991,7 +1991,7 @@ test "workspace diagnostics merge semantic and lower failures" {
     }
     try std.testing.expect(err_count >= 2);
     try std.testing.expect(report.message.len != 0);
-    try std.testing.expect(std.mem.indexOf(u8, report.message, "return type") != null);
+    try std.testing.expect(std.mem.find(u8, report.message, "return type") != null);
 }
 
 test "workspace stale version tracking" {

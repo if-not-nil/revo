@@ -23,7 +23,7 @@ pub fn compileLocalBinding(
     mutable: bool,
     type_name: ?*ast.TypeExpr,
 ) !void {
-    if (ast.isDiscardName(name)) {} else if (std.mem.indexOfAny(u8, name[0..name.len -| 1], "!?")) |_|
+    if (ast.isDiscardName(name)) {} else if (std.mem.findAny(u8, name[0..name.len -| 1], "!?")) |_|
         return self.setFailureParts(
             .ParseError,
             .{ .span = value.span, .role = .primary, .message = name },

@@ -972,8 +972,8 @@ fn parsePubPrefix(self: *Parser, _: Token) anyerror!*Node {
 }
 
 fn importPathName(alloc: std.mem.Allocator, path: []const u8) ![]const u8 {
-    const basename = if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| path[i + 1 ..] else path;
-    return if (std.mem.lastIndexOf(u8, basename, ".")) |i| try alloc.dupe(u8, basename[0..i]) else try alloc.dupe(u8, basename);
+    const basename = if (std.mem.findScalarLast(u8, path, '/')) |i| path[i + 1 ..] else path;
+    return if (std.mem.findLast(u8, basename, ".")) |i| try alloc.dupe(u8, basename[0..i]) else try alloc.dupe(u8, basename);
 }
 
 /// import "path" or import { ... }

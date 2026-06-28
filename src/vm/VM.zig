@@ -942,9 +942,9 @@ pub fn evalFailure(self: *VM, err: EvalError) EvalFailure {
 
         const msg = self.panic_message.?;
         const is_struct_panic =
-            std.mem.indexOf(u8, msg, " for struct `") != null or
-            (std.mem.indexOf(u8, msg, " on `") != null and
-                std.mem.indexOf(u8, msg, " wants ") != null);
+            std.mem.find(u8, msg, " for struct `") != null or
+            (std.mem.find(u8, msg, " on `") != null and
+                std.mem.find(u8, msg, " wants ") != null);
 
         const top_is_non_module = blk: {
             if (hot_frames.len == 0) break :blk false;

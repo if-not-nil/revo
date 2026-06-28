@@ -803,8 +803,8 @@ test "single line span" {
     );
     try std.testing.expect(buf.written().len != 0);
     const output = buf.written();
-    try std.testing.expect(std.mem.indexOf(u8, output, "-->") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "let y = 2") != null);
+    try std.testing.expect(std.mem.find(u8, output, "-->") != null);
+    try std.testing.expect(std.mem.find(u8, output, "let y = 2") != null);
 }
 
 test "multi-line span with bracket" {
@@ -826,14 +826,14 @@ test "multi-line span with bracket" {
         &.{},
     );
     const output = buf.written();
-    try std.testing.expect(std.mem.indexOf(u8, output, "-->") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "before") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "const x: string = 1 +") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "|   2 +") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "|   3") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "+-^") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "x wants string, got int") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "after") != null);
+    try std.testing.expect(std.mem.find(u8, output, "-->") != null);
+    try std.testing.expect(std.mem.find(u8, output, "before") != null);
+    try std.testing.expect(std.mem.find(u8, output, "const x: string = 1 +") != null);
+    try std.testing.expect(std.mem.find(u8, output, "|   2 +") != null);
+    try std.testing.expect(std.mem.find(u8, output, "|   3") != null);
+    try std.testing.expect(std.mem.find(u8, output, "+-^") != null);
+    try std.testing.expect(std.mem.find(u8, output, "x wants string, got int") != null);
+    try std.testing.expect(std.mem.find(u8, output, "after") != null);
 }
 
 test "report copy preserves multiple error parts" {
@@ -900,6 +900,6 @@ test "render report prints multiple error blocks" {
     };
 
     try renderReport(alloc, &buf.writer, report);
-    try std.testing.expect(std.mem.indexOf(u8, buf.written(), "first problem") != null);
-    try std.testing.expect(std.mem.indexOf(u8, buf.written(), "second problem") != null);
+    try std.testing.expect(std.mem.find(u8, buf.written(), "first problem") != null);
+    try std.testing.expect(std.mem.find(u8, buf.written(), "second problem") != null);
 }

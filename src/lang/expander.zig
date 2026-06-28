@@ -362,7 +362,7 @@ fn instantiateTemplate(
     singles: []const SingleCapture,
     groups: []const GroupCapture,
 ) ExpandError!*Node {
-    if (std.mem.indexOf(u8, template, "%<") != null) return error.UnsupportedMacroTemplate;
+    if (std.mem.find(u8, template, "%<") != null) return error.UnsupportedMacroTemplate;
 
     var replacements = std.StringHashMap(*Node).init(allocator);
     defer replacements.deinit();

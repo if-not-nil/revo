@@ -131,7 +131,7 @@ fn appendPending(alloc: std.mem.Allocator, stream: *StreamEntry, chunk: []const 
 }
 
 fn tryExtractPendingDelimited(vm: *VM, stream: *StreamEntry, delimiter: u8) !?Data {
-    const idx = std.mem.indexOfScalar(u8, stream.pending, delimiter) orelse return null;
+    const idx = std.mem.findScalar(u8, stream.pending, delimiter) orelse return null;
     const line = try vm.ownDataString(stream.pending[0..idx]);
     const rest = stream.pending[idx + 1 ..];
     if (rest.len > 0) {

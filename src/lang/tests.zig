@@ -1622,7 +1622,7 @@ test "runtime renderer includes source path" {
                 failure.report.source_name orelse "<source>",
                 source,
             );
-            try std.testing.expect(std.mem.indexOf(u8, buf.written(), "examples/fail.rv:1:1") != null);
+            try std.testing.expect(std.mem.find(u8, buf.written(), "examples/fail.rv:1:1") != null);
         },
     }
 }
@@ -1654,9 +1654,9 @@ test "runtime renderer includes stack trace call chain" {
             defer buf.deinit();
             try failure.render(alloc, &buf.writer, source);
 
-            try std.testing.expect(std.mem.indexOf(u8, buf.written(), "stack trace:") != null);
-            try std.testing.expect(std.mem.indexOf(u8, buf.written(), "0: b at <source>:2:") != null);
-            try std.testing.expect(std.mem.indexOf(u8, buf.written(), "1: a at <source>:4:") != null);
+            try std.testing.expect(std.mem.find(u8, buf.written(), "stack trace:") != null);
+            try std.testing.expect(std.mem.find(u8, buf.written(), "0: b at <source>:2:") != null);
+            try std.testing.expect(std.mem.find(u8, buf.written(), "1: a at <source>:4:") != null);
         },
     }
 }

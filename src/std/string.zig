@@ -391,7 +391,7 @@ fn find_f(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(args[0].asString().?);
     const needle = vm.stringValue(args[1].asString().?);
 
-    if (std.mem.indexOf(u8, str, needle)) |pos| {
+    if (std.mem.find(u8, str, needle)) |pos| {
         return .{ .ok = Data.new.num(pos) };
     }
     return .{ .ok = revo.Data.new.core(.missing) };
@@ -419,7 +419,7 @@ fn split_f(args: []const Data, vm: *VM) !NativeResult {
     defer parts.deinit(vm.runtime.alloc);
 
     var pos: usize = 0;
-    while (std.mem.indexOf(u8, str[pos..], delim)) |idx| {
+    while (std.mem.find(u8, str[pos..], delim)) |idx| {
         const abs_idx = pos + idx;
         const part = try vm.ownDataStringNoDedup(str[pos..abs_idx]);
         try parts.append(vm.runtime.alloc, part);
@@ -551,7 +551,7 @@ fn contains(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(str_id);
     const search = vm.stringValue(search_id);
 
-    return .okBool(std.mem.indexOf(u8, str, search) != null);
+    return .okBool(std.mem.find(u8, str, search) != null);
 }
 
 /// > string:index_of(substr: string) -> number | nil
@@ -563,7 +563,7 @@ fn index_of(args: []const Data, vm: *VM) !NativeResult {
     const str = vm.stringValue(str_id);
     const search = vm.stringValue(search_id);
 
-    if (std.mem.indexOf(u8, str, search)) |idx| {
+    if (std.mem.find(u8, str, search)) |idx| {
         return .{ .ok = Data.new.num(idx) };
     }
     return .{ .ok = revo.Data.new.core(.nil) };

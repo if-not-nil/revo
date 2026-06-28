@@ -1219,7 +1219,7 @@ fn resolveImportPath(raw_path: []const u8, base_dir: ?[]const u8, vm: *VM) ![]co
     }
 
     for (vm.package_path.items) |tmpl| {
-        const sub = if (std.mem.indexOfScalar(u8, tmpl, '?')) |pos|
+        const sub = if (std.mem.findScalar(u8, tmpl, '?')) |pos|
             try std.fmt.allocPrint(alloc, "{s}{s}{s}", .{ tmpl[0..pos], raw_path, tmpl[pos + 1 ..] })
         else
             try alloc.dupe(u8, tmpl);

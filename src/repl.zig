@@ -551,7 +551,7 @@ test "repl handles commands" {
     try std.testing.expectEqual(@as(usize, 0), env.vm.globals.count());
     try std.testing.expectEqual(@as(usize, 0), env.vm.const_globals.count());
     try std.testing.expectEqual(@as(usize, 0), env.session.source_acc.items.len);
-    try std.testing.expect(std.mem.indexOf(u8, env.out.written(), "session cleared") != null);
+    try std.testing.expect(std.mem.find(u8, env.out.written(), "session cleared") != null);
     try std.testing.expect(try env.session.step(&env.out.writer, ":help"));
     try std.testing.expect(!(try env.session.step(&env.out.writer, ":q")));
 }
@@ -568,7 +568,7 @@ test "repl keeps globals after runtime failure" {
 
     const before_call = env.out.written().len;
     try std.testing.expect(try env.session.step(&env.out.writer, "a(5, \"hi\")"));
-    try std.testing.expect(std.mem.indexOfPos(u8, env.out.written(), before_call, "asdf") != null);
+    try std.testing.expect(std.mem.findPos(u8, env.out.written(), before_call, "asdf") != null);
 }
 
 test "repl can call a global function later" {
@@ -582,7 +582,7 @@ test "repl can call a global function later" {
     const before_call = env.out.written().len;
     const ok2 = try env.session.step(&env.out.writer, "f(1, 3)");
     try std.testing.expect(ok2);
-    try std.testing.expect(std.mem.indexOfPos(u8, env.out.written(), before_call, "4\n") != null);
+    try std.testing.expect(std.mem.findPos(u8, env.out.written(), before_call, "4\n") != null);
 }
 
 // the workspace caches compiled bytecode by FileId; re-opening <repl> with
@@ -599,7 +599,7 @@ test "repl string methods work on multiple string literals" {
     const before = env.out.written().len;
     _ = try env.session.step(&env.out.writer, "\"abc\":sub(1,1)");
     // second step should succeed but may error with wrong method name
-    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before..], "error:") == null);
+    try std.testing.expect(std.mem.find(u8, env.out.written()[before..], "error:") == null);
 }
 
 // same bug with methods in reverse order
@@ -613,7 +613,7 @@ test {
 
     const before = env.out.written().len;
     _ = try env.session.step(&env.out.writer, "\"abc\":trim()");
-    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before..], "error:") == null);
+    try std.testing.expect(std.mem.find(u8, env.out.written()[before..], "error:") == null);
 }
 
 test "repl multiple string methods in sequence" {
@@ -625,13 +625,13 @@ test "repl multiple string methods in sequence" {
     _ = try env.session.step(&env.out.writer, "\"abc\":trim()");
     const before = env.out.written().len;
     _ = try env.session.step(&env.out.writer, "\"abc\":split(\"b\")");
-    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before..], "error:") == null);
+    try std.testing.expect(std.mem.find(u8, env.out.written()[before..], "error:") == null);
 
     const before2 = env.out.written().len;
     _ = try env.session.step(&env.out.writer, "\"abc\":replace(\"b\", \"d\")");
-    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before2..], "error:") == null);
+    try std.testing.expect(std.mem.find(u8, env.out.written()[before2..], "error:") == null);
 
     const before3 = env.out.written().len;
     _ = try env.session.step(&env.out.writer, "\"abc\":starts_with?(\"a\")");
-    try std.testing.expect(std.mem.indexOf(u8, env.out.written()[before3..], "error:") == null);
+    try std.testing.expect(std.mem.find(u8, env.out.written()[before3..], "error:") == null);
 }
