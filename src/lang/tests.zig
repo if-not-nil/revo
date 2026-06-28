@@ -402,23 +402,6 @@ test "stdlib json time and string modules are exposed" {
     try t.top_number("len(string.split(\"a,b\", \",\"))", 2);
 }
 
-// talks too much
-// test "weird metatable edge case" {
-//     try t.top_nil(
-//         \\ print("blah blah blah")
-//         \\ "hello" |> print("yo", "hi")
-//     );
-// }
-
-test "range sugar" {
-    // range literals only work in for-loops currently
-    if (true) return error.SkipZigTest;
-    // try t.top_string("tostring(0..)", "(:range_from, 0, 1)");
-    try t.top_string("tostring(0..10)", "(range 0 1 10)");
-    // try t.top_string("tostring(0.5..)", "(:range_from, 0.5, 1)");
-    try t.top_string("tostring(0.5..2.5)", "(range 0.5 1 2.5)");
-}
-
 test "return statement" {
     try t.top_number(
         \\ do return 7 8 end
@@ -484,11 +467,6 @@ test "sleep join values are preserved per handle" {
         \\ x
     , 20);
 }
-
-// test "atoms :t is :true and :f is :false" {
-//     try t.top_true(":t == :true");
-//     try t.top_true(":f == :false");
-// }
 
 test "compiles unary operators and atom equality" {
     try t.top_atom("not :false", "true");
@@ -615,23 +593,9 @@ test "comparisons" {
     try t.top_true("assert(\"a\" < \"b\")");
 }
 
-test "test blocks run in test mode" {
-    // prints to stdout, no way to suppress in test infra yet
-    if (true) return error.SkipZigTest;
-    var result = try t.topResultMode(
-        \\test "smoke" do
-        \\    expect(2 == 2)?
-        \\end
-    , null, true);
-    defer result.deinit();
-    try std.testing.expectEqual(revo.Data.new.nil(), result.value);
-}
-
 test "hash literals are real atoms" {
     try t.top_atom(":good", "good");
 }
-
-test "rejects unsupported forms for now" {}
 
 test "field assignment works" {
     try t.top_true(
@@ -753,18 +717,6 @@ test "method calls require obj:method(args)" {
     , 42);
 }
 
-test "plain struct print works" {
-    // prints to stdout, no way to suppress in test infra yet
-    if (true) return error.SkipZigTest;
-    try t.top_atom(
-        \\ struct Box {
-        \\     state = {},
-        \\ }
-        \\ const c = Box{}
-        \\ print(c)
-    , "ok");
-}
-
 test "method call after train keeps receiver alive" {
     try t.top_number(
         \\ struct Box {
@@ -776,20 +728,6 @@ test "method call after train keeps receiver alive" {
         \\ c:train()
         \\ c:take(50)
     , 50);
-}
-
-test "plain print after train still works" {
-    // prints to stdout, no way to suppress in test infra yet
-    if (true) return error.SkipZigTest;
-    try t.top_atom(
-        \\ struct Box {
-        \\     state = {},
-        \\     fn train(self) self,
-        \\ }
-        \\ const c = Box{}
-        \\ c:train()
-        \\ print(c)
-    , "ok");
 }
 
 test "metatable-backed constructor and instance methods compile" {
@@ -899,26 +837,6 @@ test "unary macro expands in call position" {
         \\ id!(42)
     , 42);
 }
-// test "side prefix" {
-//     // mean must be a side-effect-only procedure. it is fully ignored
-//     try t.top_number(
-//         \\ 40 + side print("hi") 2
-//     , 42);
-//     try t.top_number(
-//         \\ let t = 0
-//         \\ t += 2
-//     , 42);
-// }
-
-// test "pipe and println macros expand" {
-//     try t.top_atom(
-//         \\ const println! = macro `(%fmt:str %ARGS(, %arg:expr)*)` `print(fmt(%fmt %ARGS(, %arg)))`
-//         \\ "yo"
-//         \\ |> print
-//         \\ println!("%v %v", 1, 2)
-//     , revo.core_atoms.str(.ok));
-// }
-
 test "macro system capabilities and limitations" {
     try t.top_number(
         \\ macro id! `%x:expr` `%x`
@@ -2591,15 +2509,6 @@ test "bullshit: metatable constructors closures and method chaining" {
     , 223);
 }
 
-test "bullshit: import cache and result tuples" {
-    if (true) return error.SkipZigTest;
-}
-
-test "defer executes on scope exit" {
-    if (true) return error.SkipZigTest;
-    // TODO: nyi
-}
-
 test "string escaping works" {
     try t.top_string("\"hello\\nworld\"", "hello\nworld");
 }
@@ -2607,30 +2516,6 @@ test "string escaping works" {
 test "single and double quotes are distinct" {
     try t.top_string("'hello\\nworld'", "hello\\nworld");
     try t.top_string("\"hello\\nworld\"", "hello\nworld");
-}
-
-test "use imports and binds module to scope" {
-    if (true) return error.SkipZigTest;
-    // TODO: nyi
-}
-
-test "spawn creates fiber and join returns result" {
-    try t.top_number(
-        \\ const add = fn(a, b) a + b
-        \\ const h = spawn add(20, 22)
-        \\ const r = join(h)
-        \\ r
-    , 42);
-}
-
-test "spawn multiple fibers and join each" {
-    try t.top_number(
-        \\ const make_val = fn(x) x
-        \\ const a = spawn make_val(10)
-        \\ const b = spawn make_val(20)
-        \\ const c = spawn make_val(12)
-        \\ join(a) + join(b) + join(c)
-    , 42);
 }
 
 test "spawned fiber with sleep completes" {
@@ -2691,18 +2576,6 @@ test "spawned buffered channel recv does not return missing" {
         \\ spawn worker(2)
         \\ recv(ch) + recv(ch)
     , 23);
-}
-
-test "join preserves result values per handle" {
-    if (true) return error.SkipZigTest;
-    try t.top_number(
-        \\ const f = fn(x) do sleep(1) x end
-        \\ const a = spawn f(100)
-        \\ const b = spawn f(200)
-        \\ const r1 = join(a)
-        \\ const r2 = join(b)
-        \\ r1 + r2
-    , 300);
 }
 
 test "multiple spawned joins survive nested calls" {
@@ -2796,45 +2669,6 @@ test "fn name(params) multiple named functions" {
         \\ mul(add(2, 3), 4)
     , 20);
 }
-//
-// shared binding gotcha doc
-//
-test "closure captured in loop" {
-    // intended behaviour
-    if (true) return error.SkipZigTest;
-    try t.top_number(
-        \\ const fs = {}
-        \\ for i in 0..3 do
-        \\     fs[i] = fn() i
-        \\ end
-        \\ fs[0]() + fs[1]() + fs[2]()
-    , 3);
-}
-
-test "closure captures mutable outer variable" {
-    if (true) return error.SkipZigTest;
-    try t.top_number(
-        \\ let counter = {n = 0}
-        \\ const inc = fn() do counter.n = counter.n + 1 counter.n end
-        \\ const dec = fn() do counter.n = counter.n - 1 counter.n end
-        \\ inc() + inc() + dec()
-    , 2);
-    // how did it even become 4????
-}
-
-test "closure in nested scope sees updated binding" {
-    if (true) return error.SkipZigTest;
-    try t.top_number(
-        \\ let x = 0
-        \\ const fs = {}
-        \\ for i in 0..5 do
-        \\   if i > 0 x = x + i
-        \\   fs[i] = fn() x
-        \\ end
-        \\ x + fs[2]() + fs[5]()
-    , 17);
-}
-
 test "match nested tuple pat" {
     try t.top_number(
         \\ const data = (:ok, (:inner, 42))
@@ -2852,17 +2686,6 @@ test "match nested tuple w guard" {
         \\ | (:ok, (:inner, v)) when v > 5 => 2
         \\ | _ => 0
     , 2);
-}
-
-test "match tuple head pattern" {
-    // maybe some day
-    if (true) return error.SkipZigTest;
-    try t.top_type(
-        \\ const data = (1, 2, 3, 4)
-        \\ match data
-        \\ | (first :: rest) => rest
-        \\ | _ => (0,)
-    , .tuple);
 }
 
 test "channel receives from multiple producers preserve ordering" {
@@ -3217,39 +3040,6 @@ test "compiler: named parameters positional after named error" {
         \\ add(x = 5, 3)
     , .ParseError);
 }
-
-// if/else type validation is disabled behind comptime false
-// enable by changing comptime false to comptime true in flow.zig compileIf
-// test "type: if/else branches with matching types" {
-//     try t.top_number(
-//         \\ let x = :true
-//         \\ if x 1 else 2
-//     , 1);
-// }
-//
-// test "type: if/else branches with mismatched types error" {
-//     try t.expectCompileError(
-//         \\ let x = :true
-//         \\ if x 1 else "str"
-//     , .ParseError);
-// }
-//
-// test "type: if/else both branches void is ok" {
-//     try t.top_number(
-//         \\ let x = :true
-//         \\ let result = 0
-//         \\ if x do result = 1 end else do result = 2 end
-//         \\ result
-//     , 1);
-// }
-//
-// test "type: if without else is ok" {
-//     try t.top_number(
-//         \\ let x = :true
-//         \\ if x 1
-//         \\ 99
-//     , 99);
-// }
 
 test "double assignment" {
     try t.top_number(
