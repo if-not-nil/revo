@@ -239,9 +239,6 @@ test {
 
 test "arithmetic" {
     try t.top_number("1 + 2 * 3", 7);
-}
-
-test "negative and float arithmetic" {
     try t.top_number("-1", -1);
     try t.top_number("1.5 + 2.25", 3.75);
     try t.top_number("5.5 - 0.5", 5.0);
@@ -251,6 +248,11 @@ test "negative and float arithmetic" {
 
 test "len" {
     try t.top_number("len(\"hi\")", 2);
+    try t.top_number("len(\"\")", 0);
+    try t.top_number("len(\"abcde\")", 5);
+    try t.top_number("len((1, 2, 3))", 3);
+    try t.top_number("len((1,))", 1);
+    try t.top_number("len({})", 0);
 }
 
 test "concat operator" {
@@ -406,6 +408,14 @@ test "return statement" {
     try t.top_number(
         \\ do return 7 8 end
     , 7);
+    try t.top_atom(
+        \\ fn f() do return :ok end
+        \\ f()
+    , "ok");
+    try t.top_number(
+        \\ fn f() do return 42 end
+        \\ f()
+    , 42);
 }
 
 test "fiber syntax spawn join yield" {
@@ -603,6 +613,16 @@ test "field assignment works" {
         \\ sys.answer = 1
         \\ sys.answer
     );
+    try t.top_true(
+        \\ const sys = {a = {b = 1}}
+        \\ sys.a.b = 2
+        \\ sys.a.b == 2
+    );
+    try t.top_number(
+        \\ const sys = {a = 1}
+        \\ sys.a = sys.a + 1
+        \\ sys.a
+    , 2);
 }
 
 test "meatballs are distinct" {
@@ -1288,11 +1308,18 @@ test "while loop counts down" {
     , 0);
 }
 
-test "break is loop-only" {
+test "break restrictions" {
     try t.expectCompileError("break(1)", .UnsupportedSyntax);
+    try t.top_atom(
+        \\ const x = fn()
+        \\   for i in 0..5 do break
+        \\   return :asdf
+        \\ end
+        \\ x()
+    , "asdf");
 }
 
-test "break for loop early" {
+test "break in for loops" {
     try t.top_number(
         \\ let result = 0
         \\ for i in 0..10 do
@@ -1301,9 +1328,20 @@ test "break for loop early" {
         \\ end
         \\ result
     , 10);
+    try t.top_number(
+        \\ for i in 0..10 do
+        \\     if i == 7 break(i)
+        \\ end
+    , 7);
+    try t.top_atom(
+        \\ const x = for i in 0..5 do
+        \\   break
+        \\ end
+        \\ x
+    , "nil");
 }
 
-test "break while loop early" {
+test "break in while loops" {
     try t.top_number(
         \\ let x = 0
         \\ let result = 0
@@ -1314,17 +1352,6 @@ test "break while loop early" {
         \\ end
         \\ result
     , 10);
-}
-
-test "break for loop with value" {
-    try t.top_number(
-        \\ for i in 0..10 do
-        \\     if i == 7 break(i)
-        \\ end
-    , 7);
-}
-
-test "break while loop with value" {
     try t.top_number(
         \\ let i = 0
         \\ while i < 10 do
@@ -1332,25 +1359,6 @@ test "break while loop with value" {
         \\     i = i + 1
         \\ end
     , 7);
-}
-
-test "break for without value returns nil" {
-    try t.top_atom(
-        \\ const x = for i in 0..5 do
-        \\   break
-        \\ end
-        \\ x
-    , "nil");
-}
-
-test "break works inside fn" {
-    try t.top_atom(
-        \\ const x = fn()
-        \\   for i in 0..5 do break
-        \\   return :asdf
-        \\ end
-        \\ x()
-    , "asdf");
 }
 
 test "while body result is loop value after iterations" {
@@ -1579,7 +1587,7 @@ test "runtime renderer includes stack trace call chain" {
     }
 }
 
-test "fn into unpack" {
+test "function return value destructuring" {
     try t.top_number(
         \\ const vector_mul = fn(a, b, factor)
         \\    (a * factor, b * factor)
@@ -1589,7 +1597,7 @@ test "fn into unpack" {
     , 20);
 }
 
-test "iterative loop" {
+test "basic loop with break" {
     try t.top_number(
         \\ let a = 1
         \\ loop do
@@ -2121,7 +2129,7 @@ test "assignment to constant fails" {
 //
 // match
 //
-test "match falls through to wildcard" {
+test "match wildcards" {
     try t.top_number(
         \\ const x = 999
         \\ match x
@@ -2129,9 +2137,6 @@ test "match falls through to wildcard" {
         \\ | 2 => do 2 end
         \\ | v => do v end
     , 999);
-}
-
-test "match wildcard arm after explicit arms runs" {
     try t.top_number(
         \\ const nextword = "."
         \\ let a = match nextword
@@ -2144,7 +2149,7 @@ test "match wildcard arm after explicit arms runs" {
     , 13);
 }
 
-test "match guard prevents match" {
+test "match guards" {
     try t.top_number(
         \\ const x = 15
         \\ match x
@@ -2152,9 +2157,6 @@ test "match guard prevents match" {
         \\ | v when v > 10 => do 2 end
         \\ | v => do 3 end
     , 2);
-}
-
-test "match guard really prevents match" {
     try t.top_number(
         \\ let n = 0
         \\ for i in 0..7 do
@@ -2170,7 +2172,7 @@ test "match guard really prevents match" {
     , 1);
 }
 
-test "match patterns" {
+test "match tuple patterns" {
     try t.top_number(
         \\ const x = (:ok, 42)
         \\ match x
@@ -2178,9 +2180,6 @@ test "match patterns" {
         \\ | (:ok, v) => v
         \\ | (:err, e) => 2
     , 42);
-}
-
-test "match patterns with guards" {
     try t.top_number(
         \\ const x = (:ok, 42)
         \\ match x
@@ -2526,7 +2525,7 @@ test "spawned fiber with sleep completes" {
     , 42);
 }
 
-test "channel send and recv between fibers" {
+test "channel with fibers" {
     try t.top_number(
         \\ const ch = chan(0)
         \\ const sender = fn(c, v) do send(c, v) v end
@@ -2535,24 +2534,6 @@ test "channel send and recv between fibers" {
         \\ join(s)
         \\ msg
     , 42);
-}
-
-test "channel buffered send then recv" {
-    try t.top_number(
-        \\ const ch = chan(2)
-        \\ send(ch, 10)
-        \\ send(ch, 32)
-        \\ recv(ch) + recv(ch)
-    , 42);
-}
-
-test "yield suspends and resumes fiber" {
-    try t.top_type(
-        \\ do yield end
-    , .atom);
-}
-
-test "channel coordinate multiple workers" {
     try t.top_number(
         \\ const ch = chan(0)
         \\ const worker = fn(id) do send(ch, id * 10) id end
@@ -2564,6 +2545,28 @@ test "channel coordinate multiple workers" {
         \\ join(b)
         \\ x + y
     , 30);
+}
+
+test "buffered channels" {
+    try t.top_number(
+        \\ const ch = chan(2)
+        \\ send(ch, 10)
+        \\ send(ch, 32)
+        \\ recv(ch) + recv(ch)
+    , 42);
+    try t.top_number(
+        \\ const ch = chan(3)
+        \\ send(ch, 1)
+        \\ send(ch, 2)
+        \\ send(ch, 3)
+        \\ recv(ch) + recv(ch) + recv(ch)
+    , 6);
+}
+
+test "yield suspends and resumes fiber" {
+    try t.top_type(
+        \\ do yield end
+    , .atom);
 }
 
 test "spawned buffered channel recv does not return missing" {
@@ -2597,56 +2600,41 @@ test "multiple spawned joins survive nested calls" {
 // comptime
 //
 
-test "comp evaluates arithmetic at compile time" {
+test "comp arithmetic" {
     try t.top_number(
         \\ comp (1 + 2 * 3)
     , 7);
-}
-
-test "comp evaluates nested expressions" {
     try t.top_number(
         \\ comp ((10 / 2) + (3 * 4))
     , 17);
-}
-
-test "comp with negative numbers" {
     try t.top_number(
         \\ comp (-5 + 10)
     , 5);
 }
 
-test "comp result can be used in runtime expressions" {
+test "comp result in runtime" {
     try t.top_number(
         \\ let x = comp (2 + 3)
         \\ x * 2
     , 10);
 }
 
-test "comp w string concat" {
+test "comp string and bool ops" {
     try t.top_string(
         \\ comp ("hello" ~ " " ~ "world")
     , "hello world");
-}
-
-test "comp w comparison" {
     try t.top_atom(
         \\ comp (1 < 2)
     , "true");
-}
-
-test "comp w bool ops" {
     try t.top_atom(
         \\ comp (:true and :true)
     , "true");
 }
 
-test "comp runtime failures report the comp span" {
+test "comp errors" {
     try t.expectCompileFailure(
         \\ comp (1 / 0)
     , .ParseError, 1, 8, "division by zero!");
-}
-
-test "proc generated comp failures report the macro call site" {
     try t.expectCompileFailure(
         \\ proc bad_comp!(iter) do
         \\   {(:comp_block, (:binary, :div, (:number, 1), (:number, 0)), :false)}
@@ -2669,16 +2657,13 @@ test "fn name(params) multiple named functions" {
         \\ mul(add(2, 3), 4)
     , 20);
 }
-test "match nested tuple pat" {
+test "match nested patterns" {
     try t.top_number(
         \\ const data = (:ok, (:inner, 42))
         \\ match data
         \\ | (:ok, (:inner, v)) => v
         \\ | _ => 0
     , 42);
-}
-
-test "match nested tuple w guard" {
     try t.top_number(
         \\ const data = (:ok, (:inner, 10))
         \\ match data
@@ -2698,16 +2683,6 @@ test "channel receives from multiple producers preserve ordering" {
         \\ const v2 = recv(ch)
         \\ join(a) + join(b) + v1 + v2
     , 303);
-}
-
-test "buffered channel fill then drain" {
-    try t.top_number(
-        \\ const ch = chan(3)
-        \\ send(ch, 1)
-        \\ send(ch, 2)
-        \\ send(ch, 3)
-        \\ recv(ch) + recv(ch) + recv(ch)
-    , 6);
 }
 
 test "channel select w/ multiple waiters" {
@@ -2745,76 +2720,37 @@ test "try ? unwraps ok tuple" {
     try t.top_number(
         \\ (:ok, 42)?
     , 42);
-}
-
-test "try ? returns error tuple" {
-    try t.expectRuntimeFailureWithMessage(
-        \\ (:err, :not_found)?
-    , .Panic, ":not_found");
-}
-
-test "try ? with function call" {
     try t.top_number(
         \\ const f = fn() (:ok, 10)
         \\ f()?
     , 10);
+    try t.top_number(
+        \\ fn ok() -> (:ok, num) do
+        \\   (:ok, 1)
+        \\ end
+        \\ ok()?
+    , 1);
 }
 
-test "try ? stops execution on error" {
+test "try ? error propagation" {
+    try t.expectRuntimeFailureWithMessage(
+        \\ (:err, :not_found)?
+    , .Panic, ":not_found");
     try t.expectRuntimeFailureWithMessage(
         \\ const f = fn() (:err, :not_found)
         \\ f()?
         \\ 99
     , .Panic, ":not_found");
+    try t.expectRuntimeFailureWithMessage(
+        \\ const f = fn() (:err, :fail)
+        \\ f()?
+    , .Panic, ":fail");
 }
 
-test "try ? chains with pipe operator" {
+test "try ? chains with pipe" {
     try t.top_number(
         \\ (:ok, 5)? |> fn(x) x * 2
     , 10);
-}
-
-test "orelse with error left side" {
-    try t.top_number(
-        \\ (:err, :fail) orelse 42
-    , 42);
-}
-
-test "orelse with ok tuple left side unwraps" {
-    try t.top_number(
-        \\ (:ok, 100) orelse 42
-    , 100);
-}
-
-test "orelse with nil left side" {
-    try t.top_number(
-        \\ :nil orelse 50
-    , 50);
-}
-
-test "orelse with normal value left side" {
-    try t.top_number(
-        \\ 10 orelse 20
-    , 10);
-}
-
-test "orelse chains" {
-    try t.top_number(
-        \\ (:err, :a) orelse (:err, :b) orelse 99
-    , 99);
-}
-
-test "orelse right side evaluates on error" {
-    try t.top_number(
-        \\ const f = fn() (:err, :no)
-        \\ f() orelse 77
-    , 77);
-}
-
-test "combined ? and orelse" {
-    try t.top_number(
-        \\ (:ok, 15)? orelse 33
-    , 15);
 }
 
 test "try ? in pattern matching" {
@@ -2826,76 +2762,71 @@ test "try ? in pattern matching" {
     , 100);
 }
 
-test "error propagation stops at module level" {
-    try t.expectRuntimeFailureWithMessage(
-        \\ const f = fn() (:err, :fail)
-        \\ f()?
-    , .Panic, ":fail");
-}
-
-test "tonumber on invalid string returns err tuple and doesnt crash" {
-    try t.top_atom(
-        \\ const asdf = tonumber("asdf")
-        \\ assert_eq(asdf[0], :err)
-    , "err");
-}
-
-test "orelse unwraps after fallback" {
-    try t.top_number(
-        \\ (:err, :fail) orelse (:ok, 88)
-    , 88);
-}
-
-test "nested ok tuples? extracts inner" {
+test "nested ok tuples extracts inner" {
     try t.top_type(
         \\ (:ok, (:inner, 42))?
     , .tuple);
 }
 
-test "top-level ? unwraps ok tuple" {
+test "orelse type dispatch" {
     try t.top_number(
-        \\ fn ok() -> (:ok, num) do
-        \\   (:ok, 1)
-        \\ end
-        \\ ok()?
-    , 1);
+        \\ (:err, :fail) orelse 42
+    , 42);
+    try t.top_number(
+        \\ (:ok, 100) orelse 42
+    , 100);
+    try t.top_number(
+        \\ :nil orelse 50
+    , 50);
+    try t.top_number(
+        \\ 10 orelse 20
+    , 10);
+    try t.top_number(
+        \\ (:err, :a) orelse (:err, :b) orelse 99
+    , 99);
+    try t.top_number(
+        \\ (:ok, 15)? orelse 33
+    , 15);
+}
+
+test "orelse right side" {
+    try t.top_number(
+        \\ const f = fn() (:err, :no)
+        \\ f() orelse 77
+    , 77);
+    try t.top_number(
+        \\ (:err, :fail) orelse (:ok, 88)
+    , 88);
 }
 
 //
 // pipe
 //
+// pipe
+//
 
-test "pipe: implicit call ident" {
+test "pipe: implicit single call" {
     try t.top_number(
         \\ const f = fn(a) a * 2
         \\ 21 |> f
     , 42);
-}
-
-test "pipe: implicit call empty parens" {
     try t.top_number(
         \\ const f = fn(a) a * 2
         \\ 21 |> f()
     , 42);
 }
 
-test "pipe: implicit call chained idents" {
+test "pipe: implicit chained calls" {
     try t.top_number(
         \\ fn a(x) x * 2
         \\ fn b(x) x + 2
         \\ 20 |> a |> b
     , 42);
-}
-
-test "pipe: implicit call chained empty parens" {
     try t.top_number(
         \\ fn a(x) x * 2
         \\ fn b(x) x + 2
         \\ 20 |> a() |> b()
     , 42);
-}
-
-test "pipe: implicit call (mixed chain)" {
     try t.top_number(
         \\ fn a(x) x * 2
         \\ fn b(x) x + 2
@@ -2999,42 +2930,30 @@ test "pipe: nested scope capture" {
     , "HELLO");
 }
 
-test "compiler: named parameters basic call" {
+test "compiler: named parameters" {
     try t.top_number(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(x = 5, y = 3)
     , 8);
-}
-
-test "compiler: named parameters reordered" {
     try t.top_number(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(y = 3, x = 5)
     , 8);
-}
-
-test "compiler: named parameters mixed with positional" {
     try t.top_number(
         \\ const add3 = fn(x: int, y: int, z: int) do x + y + z end
         \\ add3(1, y = 2, z = 3)
     , 6);
 }
 
-test "compiler: named parameters unknown parameter error" {
+test "compiler: named parameters errors" {
     try t.expectCompileError(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(x = 5, z = 3)
     , .ParseError);
-}
-
-test "compiler: named parameters duplicate parameter error" {
     try t.expectCompileError(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(x = 5, x = 3)
     , .ParseError);
-}
-
-test "compiler: named parameters positional after named error" {
     try t.expectCompileError(
         \\ const add = fn(x: int, y: int) do x + y end
         \\ add(x = 5, 3)
@@ -3092,56 +3011,41 @@ test "expect returns value on truthy" {
 // optional param
 //
 
-test "optional param omitted defaults to :no" {
+test "optional params basic" {
     try t.top_atom(
         \\ const f = fn(a, ?b) b
         \\ f(42)
     , "no");
-}
-
-test "optional param provided passes through" {
     try t.top_number(
         \\ const f = fn(a, ?b) b
         \\ f(42, 10)
     , 10);
-}
-
-test "optional param with required and optional both used" {
     try t.top_number(
         \\ const f = fn(a, ?b) a + b
         \\ f(3, 7)
     , 10);
 }
 
-test "multiple optional params" {
+test "optional params multiple" {
     try t.top_atom(
         \\ const f = fn(a, ?b, ?c) c
         \\ f(1)
     , "no");
-}
-
-test "second optional param provided while first omitted" {
     try t.top_number(
         \\ const f = fn(a, ?b, ?c) c
         \\ f(1, :no, 42)
     , 42);
-}
-
-test "all params optional" {
     try t.top_atom(
         \\ const f = fn(?a, ?b) a
         \\ f()
     , "no");
 }
 
-test "too few args on fn with optional" {
+test "optional params arity errors" {
     try t.expectCompileError(
         \\ const f = fn(a, ?b) a
         \\ f()
     , .ParseError);
-}
-
-test "too many args on fn with optional" {
     try t.expectCompileError(
         \\ const f = fn(a, ?b) a
         \\ f(1, 2, 3)
