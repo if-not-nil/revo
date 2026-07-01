@@ -427,7 +427,7 @@ fn getEntryPtr(socket_data: Data, vm: *VM) !*SocketEntry {
     return @as(*SocketEntry, @ptrFromInt(addr));
 }
 
-/// poison the pointer slot and free the entry,,, idempotent
+/// poison the pointer slot and free the entry, idempotent
 fn closeEntry(socket_data: Data, vm: *VM) !void {
     const entry_ptr = getEntryPtr(socket_data, vm) catch |e| switch (e) {
         error.SocketClosed => return,

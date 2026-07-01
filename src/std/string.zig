@@ -3,7 +3,6 @@
 //
 // one spec per registration entry. registration happens in root.zig
 // via api.registerAll
-// // // // //
 
 pub const specs: []const api.FnSpec = &.{
     .{

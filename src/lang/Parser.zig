@@ -24,8 +24,8 @@ const BP: struct {
 
 const diagnostic = @import("./diagnostic.zig");
 
-// left < right = left-assoc (a + b + c = (a + b) + c)
-// left > right = right-assoc (a = b = c = a = (b = c))
+// left < right = left-assoc    a + b + c :== (a + b) + c
+// left > right = right-assoc   a = b = c :== a = (b = c)
 const BindingPower = struct {
     left: u8,
     right: u8,
@@ -1056,7 +1056,7 @@ fn parseQuasiquote(self: *Parser, token: Token) anyerror!*Node {
     }
 
     var modified = try std.ArrayList(u8).initCapacity(self.alloc, raw.len);
-    var splices = std.ArrayList([]const u8).initCapacity(self.alloc, splice_count) catch unreachable;
+    var splices = try std.ArrayList([]const u8).initCapacity(self.alloc, splice_count);
 
     i = 0;
     var counter: usize = 0;

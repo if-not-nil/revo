@@ -18,9 +18,6 @@ pub fn maybeCollectGarbage(self: *VM) void {
     if (!self.gc_enabled or !self.gc_pending) return;
     if (self.host_call_depth > 0) return;
 
-    // const std = @import("std");
-    // std.log.debug("here", .{});
-
     self.gc_bytes_allocated = 0;
     self.tables.clearMarks();
     self.tuples.clearMarks();

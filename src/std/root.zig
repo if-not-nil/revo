@@ -764,10 +764,6 @@ pub fn unwrap_err_(args: []const Data, vm: *VM) !NativeResult {
     return panic_(&[1]Data{revo.Data.new.core(.err)}, vm);
 }
 
-fn expect_number(data: Data) ?f64 {
-    return data.asNum();
-}
-
 fn as_stack_index(value: Data) ?usize {
     const num = value.asNum() orelse return null;
     // SAFETY: asIndex returns null for non-integer/out-of-range numbers

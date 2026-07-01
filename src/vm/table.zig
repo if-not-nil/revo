@@ -541,8 +541,6 @@ test "table push appends positional values" {
     try std.testing.expectEqual(Data.new.num(30), table.getRaw(Data.new.num(2)).?);
 }
 
-const tt = revo.lang.testing;
-
 //
 // integer array index boundary tests
 //
@@ -654,7 +652,7 @@ test "putRaw: integer key > len in empty table goes to hash" {
 //
 
 test "table lookup order" {
-    try tt.top_string(
+    try testing.top_string(
         \\ const mt = {metafield = "second-", __index = fn(self) "last"}
         \\ const t = set_metatable({normal = "first-"}, mt)
         \\ t.normal ~ t.metafield ~ t.something
@@ -662,13 +660,13 @@ test "table lookup order" {
 }
 
 test "computed table keys use runtime values" {
-    try tt.top_number(
+    try testing.top_number(
         \\ const key = "answer"
         \\ const t = {[key] = 41}
         \\ t["answer"]
     , 41);
 
-    try tt.top_number(
+    try testing.top_number(
         \\ const k = :x
         \\ const t = {[k] = 9}
         \\ t.x

@@ -12,10 +12,6 @@ pub const BackendState = struct {
     control_w: c_int = -1,
 };
 
-fn print(comptime fmt: []const u8, args: anytype) void {
-    if (comptime false) std.debug.print(fmt, args);
-}
-
 pub fn init(bs: *BackendState) anyerror!void {
     var fds: [2]c_int = undefined;
     if (std.c.pipe(&fds) == -1) return error.Unexpected;
@@ -109,16 +105,9 @@ fn worker(wfd: c_int, job: *async_backend.AsyncJob) void {
     }
 
     var rec: CompletionRecord = .{ .job_ptr = job, .fiber_id = job.fiber_id, .kind = @as(u8, @intFromEnum(job.kind)), .status = status, .bytes = bytes };
-    print("async backend worker: kind={d} status={d} bytes={d}\n", .{ @as(u8, @intFromEnum(job.kind)), status, bytes });
     // write record to pipe; best-effort but log if odd
     const written = std.c.write(wfd, @ptrCast(@alignCast(&rec)), @sizeOf(CompletionRecord));
-    if (written != @as(isize, @sizeOf(CompletionRecord))) {
-        if (written < 0) {
-            print("async backend worker: pipe write failed (errno={d})\n", .{@as(i32, @intFromEnum(std.posix.errno(written)))});
-        } else {
-            print("async backend worker: partial write {d}/{d}\n", .{ written, @sizeOf(CompletionRecord) });
-        }
-    }
+    _ = written;
 }
 
 pub fn submit(self: *BackendState, vm_ptr: *anyopaque, job: *async_backend.AsyncJob) anyerror!async_backend.AsyncTicket {
@@ -141,7 +130,6 @@ pub fn submit(self: *BackendState, vm_ptr: *anyopaque, job: *async_backend.Async
 }
 
 fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
-    print("process_completion: kind={d} status={d} bytes={d}\n", .{ rec.kind, rec.status, rec.bytes });
     const job = rec.job_ptr;
     switch (job.kind) {
         .socket_send => {
@@ -187,7 +175,6 @@ fn process_completion(vm: *revo.VM, rec: CompletionRecord) !void {
                         .pending = &.{},
                     },
                 };
-                print("process_completion: accept wrapped fd={d}\n", .{new_fd});
                 try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
             } else {
                 try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));

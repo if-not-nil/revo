@@ -231,26 +231,6 @@ pub fn printBenchStats(times: []std.Io.Duration) void {
     std.debug.print("| worst   {d:.3}ms / {d}ns\n", .{ worst_ms, worst });
 }
 
-test "eval error messages and failure rendering include source name" {
-    if (true) return error.SkipZigTest;
-    try std.testing.expectEqualStrings("stack underflow!", EvalErrorKind.StackUnderflow.message());
-    try std.testing.expectEqualStrings("import failed!", EvalErrorKind.ImportFailed.message());
-
-    var failure = EvalFailure{
-        .kind = .TypeError,
-        .report = .{
-            .source_name = "file.rv",
-        },
-        .part_len = 1,
-    };
-    failure.parts[0] = diagnostic.Part{ .@"error" = "boom" };
-
-    var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer buf.deinit();
-    try failure.render(std.testing.allocator, &buf.writer, "ignored");
-    try std.testing.expect(std.mem.find(u8, buf.written(), "error: boom") != null);
-}
-
 test "failure rendering includes stack trace frames" {
     var failure = EvalFailure{
         .kind = .TypeError,
