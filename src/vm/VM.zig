@@ -476,11 +476,6 @@ pub fn pop(self: *VM) !Data {
     return fiber.registers[fiber.registers_len];
 }
 
-fn absoluteRegisterIndex(self: *VM, reg: opcode.Register) !usize {
-    const frame = try self.currentFrame();
-    return frame.base + reg;
-}
-
 pub fn ensureRegCapacity(fiber: *Fiber, alloc: std.mem.Allocator, needed: usize) !void {
     if (needed <= fiber.registers.len) return;
     const new_cap = @max(needed, fiber.registers.len * 2);
@@ -1287,9 +1282,8 @@ fn callNonClosureFunction(
                         },
                         .native_error => |native_err| return native_err,
                         .parked => {
-                            self.currentFiber().parked_result_slot = try self.absoluteRegisterIndex(
-                                instr.c,
-                            );
+                            const frame = try self.currentFrame();
+                            self.currentFiber().parked_result_slot = frame.base + instr.c;
                             try self.ensureAbsoluteSlot(base + instr.c);
                             try self.writeRegisterFast(
                                 base,

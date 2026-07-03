@@ -1,6 +1,6 @@
 const std = @import("std");
 const Workspace = @import("Workspace.zig");
-const RunMode = @import("lang_pipeline.zig").RunMode;
+const RunMode = @import("pipeline.zig").RunMode;
 const FileId = @import("Workspace.zig").FileId;
 
 pub const Project = @This();

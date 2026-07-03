@@ -1,5 +1,5 @@
 pub const ast = @import("ast.zig");
-pub const pipeline = @import("lang_pipeline.zig");
+pub const pipeline = @import("pipeline.zig");
 pub const expander = @import("expander.zig");
 pub const proc = @import("proc.zig");
 pub const Lexer = @import("Lexer.zig");
@@ -81,6 +81,6 @@ test {
     _ = @import("testing.zig");
     _ = @import("tests.zig");
     _ = @import("semantic.zig");
-    _ = @import("lang_pipeline.zig");
+    _ = @import("pipeline.zig");
     _ = @import("Workspace.zig");
 }
