@@ -37,13 +37,6 @@ pub fn compileLocalBinding(
             "name with ! is reserved for macros",
             &.{},
         )
-    else if (std.mem.endsWith(u8, name, "?"))
-        return self.setFailureParts(
-            .ParseError,
-            .{ .span = value.span, .role = .primary, .message = name },
-            "name with ? is reserved for functions returning bool",
-            &.{},
-        )
     else if (!ast.isDiscardName(name))
         if (state.currentFunctionState(self)) |fn_state|
             for (fn_state.import_locals.items) |il|

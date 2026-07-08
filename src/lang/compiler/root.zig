@@ -1357,13 +1357,6 @@ pub const Compiler = struct {
                     "name with ! is reserved for macros",
                     &.{},
                 );
-            if (std.mem.endsWith(u8, name, "?") and !ast.isDiscardName(name))
-                return self.setFailureParts(
-                    .ParseError,
-                    .{ .span = binding.target.span, .role = .primary, .message = name },
-                    "name with ? is reserved for functions returning bool",
-                    &.{},
-                );
             if (binding.value.expr == .fn_expr) {
                 try self.compileFn(
                     binding.value.expr.fn_expr.params,
@@ -1420,27 +1413,22 @@ pub const Compiler = struct {
         type_params: []const []const u8,
     ) InternalLowerError!void {
         if (!ast.isDiscardName(name) and !std.mem.eql(u8, name, "<fn>")) {
-            if (std.mem.findAny(u8, name[0..name.len -| 1], "!?")) |_|
+            if (std.mem.findAny(u8, name[0..name.len -| 1], "!?")) |_| {
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = body.span, .role = .primary, .message = name },
                     "! and ? are only allowed at the end of names",
                     &.{},
-                )
-            else if (std.mem.endsWith(u8, name, "!"))
+                );
+            }
+            if (std.mem.endsWith(u8, name, "!")) {
                 return self.setFailureParts(
                     .ParseError,
                     .{ .span = body.span, .role = .primary, .message = name },
                     "function name with ! is reserved for macros",
                     &.{},
-                )
-            else if (std.mem.endsWith(u8, name, "?"))
-                return self.setFailureParts(
-                    .ParseError,
-                    .{ .span = body.span, .role = .primary, .message = name },
-                    "name with ? is reserved for functions returning bool",
-                    &.{},
                 );
+            }
         }
 
         const jump_over = try self.jump(.jump);
@@ -1461,7 +1449,7 @@ pub const Compiler = struct {
         s.return_type = if (return_type) |rt| switch (rt.kind) {
             .named => |n| n,
             else => @tagName(rt.kind),
-        } else null;
+        } else if (std.mem.endsWith(u8, name, "?")) "bool" else null;
 
         // push function state early so evalTypeExpr can resolve type params
         const params_len: LocalSlot = @intCast(params.len);
