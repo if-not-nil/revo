@@ -299,7 +299,7 @@ fn append_fn(args: []const Data, vm: *VM) !NativeResult {
     const permissions = if (args.len > 2) parsePermissions(vm, args[2]) catch return try NativeResult.Err(vm, "InvalidPermissions") else .default_file;
 
     const data = vm.stringValue(args[1].asString().?);
-    const file = Dir.cwd().openFile(vm.runtime.io, handle.path, .{ .mode = .write_only }) catch |err| switch (err) {
+    const file = Dir.cwd().openFile(vm.runtime.io, handle.path, .{ .mode = .read_write }) catch |err| switch (err) {
         error.FileNotFound => Dir.cwd().createFile(vm.runtime.io, handle.path, .{
             .truncate = false,
             .permissions = permissions,
