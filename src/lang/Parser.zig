@@ -1517,10 +1517,11 @@ fn expect(self: *Parser, kind: TokenType) error{UnexpectedToken}!Token {
     return token;
 }
 
-/// consume identifier or error
+/// consume identifier or keyword
 fn expectIdent(self: *Parser) error{ExpectedIdentifier}!Token {
     const token = self.peek();
-    if (token.type != .ident) return error.ExpectedIdentifier;
+    if (token.type != .ident and !std.mem.startsWith(u8, @tagName(token.type), "kw_"))
+        return error.ExpectedIdentifier;
     self.pos += 1;
     return token;
 }
