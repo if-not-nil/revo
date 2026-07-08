@@ -546,18 +546,6 @@ fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) !Toke
     defer buf.deinit(self.alloc);
     while (!self.atEnd()) {
         const c = self.advance();
-        if (c == '\n') {
-            const text = try buf.toOwnedSlice(self.alloc);
-            self.pending_error_span = null;
-            return .{
-                .type = .string,
-                .text = text,
-                .line = line,
-                .column = column,
-                .start = start,
-                .end = self.pos - 1,
-            };
-        }
         if (c == '\'') {
             const text = try buf.toOwnedSlice(self.alloc);
             self.pending_error_span = null;
