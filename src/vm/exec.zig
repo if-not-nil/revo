@@ -374,6 +374,8 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             };
             if (str_and_num) |pair| {
                 const str = self.stringValue(pair.s);
+                if (!std.math.isFinite(pair.n))
+                    return self.fail(error.IncompatibleTypes, "cannot multiply string by non-finite number", .{});
                 const count: usize = @intCast(
                     std.math.clamp(@as(i64, @intFromFloat(pair.n)), 0, std.math.maxInt(i32)),
                 );
@@ -1001,7 +1003,7 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
             regWrite(regs, base, instr.a, Data.new.num(current));
             if (instr.c != 0) {
                 const index_reg = regRead(regs, base, instr.c);
-                const index = index_reg.asNum() orelse 0.0;
+                const index = if (index_reg.asNum()) |n| if (std.math.isFinite(n)) n else 0.0 else 0.0;
                 if (has_next) regWrite(regs, base, instr.c, Data.new.num(index + 1));
             }
             regWrite(regs, base, @intCast(instr.bx), Data.new.boolean(has_next));

@@ -54,6 +54,10 @@ fn swapFiberAndRun(vm: *revo.VM, source_path: []const u8, program: []const revo.
     fiber_wd.debug_info_id = vm.pending_debug_info_id;
 
     const prev = vm.swapFiber(fiber_wd);
+    errdefer {
+        var finished = vm.swapFiber(prev);
+        revo.VM.Fiber.deinit(&finished, vm.runtime.alloc);
+    }
     const result = try vm.runReport();
     return .{ .result = result, .prev = prev };
 }
