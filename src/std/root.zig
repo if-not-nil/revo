@@ -685,11 +685,14 @@ pub fn debug_(args: []const Data, vm: *VM) !NativeResult {
 
 /// > len(arg0: any) -> number|nil
 /// returns length of string or table
-/// for strings: byte length, for tables: array part length
+/// for strings: byte length, for tables: array + map parts
+/// uses __len metamethod if available
 pub fn len_(args: []const Data, vm: *VM) !NativeResult {
+    const mm = try vm.getMetamethodByAtom(args[0], revo.core_atoms.atom_id(.__len));
+    if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
     return switch (args[0].tag()) {
         .string => .okData(Data.new.num(vm.stringValue(args[0].asString().?).len)),
-        .table => .okData(Data.new.num((try vm.tables.get(args[0].asTable().?)).array.items.len)),
+        .table => .okData(Data.new.num((try vm.tables.get(args[0].asTable().?)).count())),
         .tuple => .okData(Data.new.num((try vm.tuples.get(args[0].asTuple().?)).items.len)),
         else => .errType(1, "string, table, or tuple", typeof(args[0])),
     };

@@ -421,10 +421,10 @@ fn values(args: []const Data, vm: *VM) !NativeResult {
 }
 
 /// > table:len() -> number
-/// returns length of table array part
+/// returns total entry count (array + map)
 fn len(args: []const Data, vm: *VM) !NativeResult {
     const table = try vm.tables.get(args[0].asTable().?);
-    return .okData(Data.new.num(table.array.items.len));
+    return .okData(Data.new.num(table.count()));
 }
 
 /// > table:has?(key: any) -> bool

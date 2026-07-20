@@ -23,6 +23,7 @@ pub const core_atoms = enum(usize) {
     __debug,
     __call,
     __iter,
+    __len,
     done,
     obj,
     pos,

@@ -262,6 +262,11 @@ pub const Session = struct {
         self.source_acc.clearRetainingCapacity();
         self.vm.globals.clearRetainingCapacity();
         self.vm.const_globals.clearRetainingCapacity();
+        // restore stdlib globals after clr
+        var it = self.vm.stdlib_globals.iterator();
+        while (it.next()) |entry| {
+            self.vm.globals.put(entry.key_ptr.*, entry.value_ptr.*) catch {};
+        }
     }
 
     fn clearSnippet(self: *Session) void {
@@ -413,6 +418,7 @@ pub const Session = struct {
         if (analysis.diagnostics) |lang_err| {
             try self.printBuildError(out, source, lang_err);
             analysis.diagnostics = null;
+            self.clearSnippet();
             return true;
         }
 

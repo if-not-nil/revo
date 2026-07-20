@@ -1391,16 +1391,24 @@ pub const Compiler = struct {
                 binding.value,
                 "binding",
             );
-            try values.declarePatternLocals(
-                self,
-                binding.target,
-                kind != .con,
-            );
+            if (kind == .global) {
+                try values.declareGlobalPattern(self, binding.target);
+            } else {
+                try values.declarePatternLocals(
+                    self,
+                    binding.target,
+                    kind != .con,
+                );
+            }
         }
 
         try self.compile(binding.value, true);
         const src_idx = self.active_registers - 1;
-        try values.bindDeclaredPattern(self, binding.target, src_idx, kind);
+        if (kind == .global) {
+            try values.bindPattern(self, binding.target, src_idx, kind);
+        } else {
+            try values.bindDeclaredPattern(self, binding.target, src_idx, kind);
+        }
     }
 
     pub fn compileFn(

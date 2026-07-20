@@ -142,6 +142,24 @@ pub fn declarePatternLocals(
     }
 }
 
+pub fn declareGlobalPattern(
+    self: *Compiler,
+    pattern: *const Node,
+) !void {
+    switch (pattern.expr) {
+        .ident => |name| {
+            if (ast.isDiscardName(name)) return;
+            try self.declared_globals.put(name, {});
+        },
+        .tuple_pattern => |items| {
+            for (items) |item| {
+                try declareGlobalPattern(self, item);
+            }
+        },
+        else => {},
+    }
+}
+
 pub fn bindPattern(
     self: *Compiler,
     pattern: *const Node,
@@ -316,8 +334,8 @@ fn compileAssignSimple(
             } else {
                 try self.compile(index.key, true);
                 try self.compile(value, true);
+                try self.regDupe();
                 try self.emit(.table_set, 0);
-                try self.regRelease();
             }
         },
         else => {
