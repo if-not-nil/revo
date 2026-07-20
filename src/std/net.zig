@@ -1,4 +1,4 @@
-pub const specs: []const api.FnSpec = &.{
+pub const specs: []const api.FnSpec = if (@import("build_options").is_freestanding) &.{} else &.{
     // net module
     .{
         .name = "connect",

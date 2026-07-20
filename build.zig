@@ -7,6 +7,7 @@ const Module = Build.Module;
 const logger = std.log.scoped(.@"build/revo");
 
 const VERSION = "0.0.0";
+
 const release_targets: []const []const u8 = &.{
     "x86_64-linux-musl",
     // "aarch64-linux-musl",
@@ -14,6 +15,7 @@ const release_targets: []const []const u8 = &.{
     "aarch64-macos",
     "x86_64-windows",
 };
+
 const release_target_queries = blk: {
     @setEvalBranchQuota(10_000);
     // pre-computes queries
@@ -45,6 +47,7 @@ const Features = packed struct {
         return @popCount(@as(BackInt, @bitCast(self))) == @bitSizeOf(BackInt);
     }
 };
+
 const BinaryType = enum { nightly, release };
 
 fn emptyStr(s: []const u8) bool {
@@ -109,9 +112,25 @@ pub fn build(b: *Build) !void {
         target = b.standardTargetOptions(.{});
     }
 
+    // TODO: nan-boxing stores pointer tags in the high bits of a 64-bit value
+    // 32bit builds are unsupported until a good implementation of tagged data is made
+    // (wasm32 is fine: 32-bit pointers fit below the tag region)
+    const is_freestanding = target.result.os.tag == .freestanding or
+        target.result.cpu.arch == .wasm64;
+
     const optimize = b.standardOptimizeOption(.{});
 
-    const features_str = b.option([]const u8, "features", "available: isocline, lsp") orelse "isocline,lsp";
+    // botch: wasm64 has a codegen bug in Debug mode that causes "memory access out of
+    // bounds" at runtime for some reason
+    // force ReleaseFast for ALL modules linked into the wasm binary, so the VM code gets the fix too
+    const effective_optimize = if (is_freestanding) .ReleaseSmall else optimize;
+    if (optimize != effective_optimize)
+        logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
+
+    const features_str = b.option([]const u8, "features", "available: isocline, lsp") orelse
+        // isocline needs libc, lsp is untested on freestanding
+        if (is_freestanding) "lsp" else "isocline,lsp";
+
     const test_filters = b.option(
         []const []const u8,
         "test-filter",
@@ -128,19 +147,21 @@ pub fn build(b: *Build) !void {
 
     // used for dev builds
     const debug_options = b.addOptions();
+    debug_options.addOption(bool, "is_freestanding", is_freestanding);
     debug_options.addOption(bool, "isocline", features.isocline);
     debug_options.addOption([]const u8, "version", dev_version);
     debug_options.addOption(bool, "lsp_enabled", features.lsp);
     const debug_options_mod = debug_options.createModule();
 
     // used for release builds
+    // note: is_freestanding captures top-level, not per-release.
+    // this doesn't really matter but it might break something
     const release_options = b.addOptions();
+    release_options.addOption(bool, "is_freestanding", is_freestanding);
     release_options.addOption(bool, "isocline", features.isocline);
     release_options.addOption([]const u8, "version", VERSION);
     release_options.addOption(bool, "lsp_enabled", features.lsp);
     const release_options_mod = release_options.createModule();
-
-    const is_freestanding = target.result.os.tag == .freestanding;
 
     //
     // modules
@@ -151,7 +172,7 @@ pub fn build(b: *Build) !void {
                 const ioscline_c = b.addTranslateC(.{
                     .root_source_file = isocline_dep.path("include/isocline.h"),
                     .target = target,
-                    .optimize = optimize,
+                    .optimize = effective_optimize,
                 });
                 ioscline_c.addIncludePath(isocline_dep.path("include/"));
                 const isocline_mod = ioscline_c.createModule();
@@ -169,20 +190,20 @@ pub fn build(b: *Build) !void {
     const vm_mod = b.addModule("vm", .{
         .root_source_file = b.path("src/vm/root.zig"),
         .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .optimize = effective_optimize,
+        .link_libc = !is_freestanding,
     });
     const revo_mod = b.addModule("revo", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .optimize = effective_optimize,
+        .link_libc = !is_freestanding,
     });
     const c_mod = b.addModule("c", .{
         .root_source_file = b.path("src/c/root.zig"),
         .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .optimize = effective_optimize,
+        .link_libc = !is_freestanding,
     });
     const revolt_mod = b.createModule(.{
         .root_source_file = if (features.lsp)
@@ -190,47 +211,54 @@ pub fn build(b: *Build) !void {
         else
             b.path("src/lsp/noop.zig"),
         .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .optimize = effective_optimize,
+        .link_libc = !is_freestanding,
         .imports = &.{
             .{ .name = "lsp", .module = lsp_kit_dep.module("lsp") },
         },
     });
     const exe_mod = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path(if (is_freestanding) "src/main_wasm.zig" else "src/main.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = effective_optimize,
         .link_libc = !is_freestanding,
         .imports = &.{
             .{ .name = "lsp_main", .module = revolt_mod },
         },
     });
-    const erevo_mod = b.addModule("erevo", .{
-        .root_source_file = b.path("src/c/erevo.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    const all_mods = [_]*Module{
+    const erevo_mod = if (!is_freestanding)
+        b.addModule("erevo", .{
+            .root_source_file = b.path("src/c/erevo.zig"),
+            .target = target,
+            .optimize = effective_optimize,
+            .link_libc = !is_freestanding,
+        })
+    else
+        null;
+
+    const all_mods: []const *Module = if (is_freestanding) &.{
         vm_mod,  revo_mod,
         c_mod,   revolt_mod,
-        exe_mod, erevo_mod,
+        exe_mod,
+    } else &.{
+        vm_mod,  revo_mod,
+        c_mod,   revolt_mod,
+        exe_mod, erevo_mod.?,
     };
     const imports = [_]Module.Import{
         .{ .name = "revo", .module = revo_mod },
         .{ .name = "vm", .module = vm_mod },
         .{ .name = "c", .module = c_mod },
     };
+    const shared_build_options = if (optimize == .Debug) debug_options_mod else release_options_mod;
     for (all_mods) |mod| {
         for (imports) |imp| {
             mod.addImport(imp.name, imp.module);
         }
+        mod.addImport("build_options", shared_build_options);
     }
 
     exe_mod.addImport("isocline", isocline_mod);
-    if (!is_freestanding) {
-        exe_mod.addImport("build_options", if (optimize == .Debug) debug_options_mod else release_options_mod);
-    }
 
     const header_wf = b.addWriteFiles();
     const header_data = bindings.data(b.allocator) catch |err| {
@@ -245,93 +273,102 @@ pub fn build(b: *Build) !void {
     const c_test = b.addTest(.{ .root_module = c_mod, .filters = test_filters });
     const revolt_test = b.addTest(.{ .root_module = revolt_mod, .filters = test_filters });
 
-    const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
-    const lib = b.addLibrary(.{ .name = "erevo", .root_module = erevo_mod });
+    if (is_freestanding) {
+        const wasm_lib = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
+        wasm_lib.entry = .disabled;
+        wasm_lib.rdynamic = true;
+        // initial_memory not set, it defaults to 1 wasm page (64kb)
+        const wasm_install = b.addInstallArtifact(wasm_lib, .{});
+        b.getInstallStep().dependOn(&wasm_install.step);
+    } else {
+        const exe = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
+        const lib = b.addLibrary(.{ .name = "erevo", .root_module = erevo_mod.? });
 
-    if (optimize == .Debug) exe.lto = .none;
-    exe.rdynamic = true; // Expose exports to dynamic libraries
-    if (builtin.os.tag == .linux and with_glibc) {
-        exe.use_llvm = true;
-        exe.use_lld = true;
-    }
+        if (optimize == .Debug) exe.lto = .none;
+        exe.rdynamic = true;
+        if (builtin.os.tag == .linux and with_glibc) {
+            exe.use_llvm = true;
+            exe.use_lld = true;
+        }
 
-    const exe_install = b.addInstallArtifact(exe, .{});
-    const lib_install = b.addInstallArtifact(lib, .{});
-    const header_install = b.addInstallDirectory(.{
-        .source_dir = header_wf.getDirectory(),
-        .install_subdir = "revo",
-        .install_dir = .header,
-    });
-
-    b.getInstallStep().dependOn(&exe_install.step);
-    lib_install.step.dependOn(&header_install.step);
-
-    const lib_step = b.step("lib", "build the erevo library");
-    lib_step.dependOn(&lib_install.step);
-
-    //
-    // run step
-    //
-    const run_step = b.step("run", "run the cli");
-    {
-        const run_exe = b.addRunArtifact(exe);
-        run_exe.addArgs(b.args orelse &.{});
-        run_step.dependOn(&run_exe.step);
-    }
-
-    //
-    // check step
-    //
-    const check_step = b.step("check", "type-check without codegen or linking");
-    check_step.dependOn(&vm_test.step);
-    check_step.dependOn(&revo_test.step);
-    check_step.dependOn(&exe_test.step);
-    check_step.dependOn(&c_test.step);
-    check_step.dependOn(&revolt_test.step);
-
-    //
-    // tests
-    //
-    const test_step = b.step("test", "run all tests");
-    {
-        const test_vm_step = b.step("test-vm", "test only the vm module");
-        test_vm_step.dependOn(&b.addRunArtifact(vm_test).step);
-        test_step.dependOn(test_vm_step);
-
-        const test_revo_step = b.step("test-revo", "test only the revo module");
-        test_revo_step.dependOn(&b.addRunArtifact(revo_test).step);
-        test_step.dependOn(test_revo_step);
-
-        const test_exe_step = b.step("test-exe", "test only the exe root");
-        test_exe_step.dependOn(&b.addRunArtifact(exe_test).step);
-        test_step.dependOn(test_exe_step);
-    }
-
-    //
-    // c test suite
-    //
-    const test_c_step = b.step("test-c", "run c api tests");
-    {
-        const c_test_exe = b.addExecutable(.{
-            .name = "revo-c-test",
-            .root_module = b.createModule(.{
-                .target = target,
-                .optimize = optimize,
-                .link_libc = true,
-            }),
+        const exe_install = b.addInstallArtifact(exe, .{});
+        const lib_install = b.addInstallArtifact(lib, .{});
+        const header_install = b.addInstallDirectory(.{
+            .source_dir = header_wf.getDirectory(),
+            .install_subdir = "revo",
+            .install_dir = .header,
         });
-        c_test_exe.root_module.addCSourceFile(.{
-            .file = b.path("src/c/tests.c"),
-            .flags = &.{
-                "-std=c99", "-Wall", "-Wextra",
-            },
-        });
-        c_test_exe.root_module.addIncludePath(header_wf.getDirectory());
-        c_test_exe.root_module.linkLibrary(lib);
-        c_test_exe.root_module.linkSystemLibrary("m", .{ .needed = true });
 
-        const c_test_run = b.addRunArtifact(c_test_exe);
-        test_c_step.dependOn(&c_test_run.step);
+        b.getInstallStep().dependOn(&exe_install.step);
+        lib_install.step.dependOn(&header_install.step);
+
+        const lib_step = b.step("lib", "build the erevo library");
+        lib_step.dependOn(&lib_install.step);
+
+        //
+        // run step
+        //
+        const run_step = b.step("run", "run the cli");
+        {
+            const run_exe = b.addRunArtifact(exe);
+            run_exe.addArgs(b.args orelse &.{});
+            run_step.dependOn(&run_exe.step);
+        }
+
+        //
+        // check step
+        //
+        const check_step = b.step("check", "type-check without codegen or linking");
+        check_step.dependOn(&vm_test.step);
+        check_step.dependOn(&revo_test.step);
+        check_step.dependOn(&exe_test.step);
+        check_step.dependOn(&c_test.step);
+        check_step.dependOn(&revolt_test.step);
+
+        //
+        // tests
+        //
+        const test_step = b.step("test", "run all tests");
+        {
+            const test_vm_step = b.step("test-vm", "test only the vm module");
+            test_vm_step.dependOn(&b.addRunArtifact(vm_test).step);
+            test_step.dependOn(test_vm_step);
+
+            const test_revo_step = b.step("test-revo", "test only the revo module");
+            test_revo_step.dependOn(&b.addRunArtifact(revo_test).step);
+            test_step.dependOn(test_revo_step);
+
+            const test_exe_step = b.step("test-exe", "test only the exe root");
+            test_exe_step.dependOn(&b.addRunArtifact(exe_test).step);
+            test_step.dependOn(test_exe_step);
+        }
+
+        //
+        // c test suite
+        //
+        const test_c_step = b.step("test-c", "run c api tests");
+        {
+            const c_test_exe = b.addExecutable(.{
+                .name = "revo-c-test",
+                .root_module = b.createModule(.{
+                    .target = target,
+                    .optimize = optimize,
+                    .link_libc = !is_freestanding,
+                }),
+            });
+            c_test_exe.root_module.addCSourceFile(.{
+                .file = b.path("src/c/tests.c"),
+                .flags = &.{
+                    "-std=c99", "-Wall", "-Wextra",
+                },
+            });
+            c_test_exe.root_module.addIncludePath(header_wf.getDirectory());
+            c_test_exe.root_module.linkLibrary(lib);
+            c_test_exe.root_module.linkSystemLibrary("m", .{ .needed = true });
+
+            const c_test_run = b.addRunArtifact(c_test_exe);
+            test_c_step.dependOn(&c_test_run.step);
+        }
     }
 
     //
@@ -345,6 +382,8 @@ pub fn build(b: *Build) !void {
 
         for (release_targets, release_target_queries) |target_str, query| {
             const release_target = b.resolveTargetQuery(query);
+            const release_is_fs = release_target.result.os.tag == .freestanding or
+                release_target.result.cpu.arch == .wasm64;
 
             const rel_revolt_mod = b.createModule(.{
                 .root_source_file = if (features.lsp)
@@ -353,22 +392,29 @@ pub fn build(b: *Build) !void {
                     b.path("src/lsp/noop.zig"),
                 .target = release_target,
                 .optimize = .ReleaseFast,
-                .link_libc = true,
-                .imports = &(imports ++ [_]Module.Import{
+                .link_libc = !release_is_fs,
+                .imports = &[_]Module.Import{
+                    .{ .name = "revo", .module = revo_mod },
+                    .{ .name = "vm", .module = vm_mod },
+                    .{ .name = "c", .module = c_mod },
+                    .{ .name = "build_options", .module = release_options_mod },
                     .{ .name = "lsp", .module = lsp_kit_dep.module("lsp") },
-                }),
+                },
             });
 
             const release_mod = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
                 .target = release_target,
                 .optimize = .ReleaseFast,
-                .link_libc = true,
-                .imports = &(imports ++ [_]Module.Import{
-                    .{ .name = "isocline", .module = isocline_mod },
+                .link_libc = !release_is_fs,
+                .imports = &[_]Module.Import{
+                    .{ .name = "revo", .module = revo_mod },
+                    .{ .name = "vm", .module = vm_mod },
+                    .{ .name = "c", .module = c_mod },
                     .{ .name = "build_options", .module = release_options_mod },
+                    .{ .name = "isocline", .module = isocline_mod },
                     .{ .name = "lsp_main", .module = rel_revolt_mod },
-                }),
+                },
             });
 
             const release_exe = b.addExecutable(.{

@@ -1,18 +1,22 @@
 const std = @import("std");
 const revo = @import("revo");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 const Allocator = std.mem.Allocator;
 const VM = revo.VM;
-const builtin = @import("builtin");
 
-const isocline_c = @import("isocline");
+const isocline_c = if (builtin.link_libc) @import("isocline") else struct {};
 
-const signal_c = if (build_options.isocline) @cImport(@cInclude("signal.h")) else struct {};
-const libc = @cImport({
+const signal_c = if (build_options.isocline and builtin.link_libc)
+    @cImport(@cInclude("signal.h"))
+else
+    struct {};
+
+const libc = if (builtin.link_libc) @cImport({
     @cInclude("stdlib.h");
     @cInclude("string.h");
     @cInclude("unistd.h");
-});
+}) else struct {};
 
 const IsoclineContext = struct {
     vm: *VM,
@@ -25,6 +29,7 @@ const splash_texts = [_][]const u8{
     "hi",
     "make your readme .nfo",
     "the moon is flat",
+    "green needle",
     "the earth landing is fake",
     "It took Python 33 years to get syntax highlighting in REPL btw",
     "used to be the first language on earth",
@@ -69,7 +74,7 @@ fn splashSeed(vm: *VM, banner_buffer: *[128]u8, out: *std.Io.Writer) usize {
     seed ^= @intFromPtr(banner_buffer);
     seed ^= @intFromPtr(out);
     seed ^= @intFromPtr(&splash_texts);
-    if (@import("builtin").target.requiresLibC())
+    if (builtin.link_libc)
         seed ^= @as(u64, @intCast(libc.getpid())) << 32;
     seed ^= @as(u64, @intFromPtr(&splashSeed)) >> 1;
     var rng = std.Random.SplitMix64.init(seed);

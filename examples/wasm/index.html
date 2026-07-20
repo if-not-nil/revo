@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8">
+	<meta name="color-scheme" content="light dark">
+	<style>
+		body {
+			font-family: system-ui, sans-serif;
+			max-width: 760px;
+			margin: 1em auto;
+			padding: 0 1em;
+		}
+
+		h1 {
+			margin-bottom: .25em;
+		}
+
+		label {
+			font-weight: 600;
+		}
+
+		textarea {
+			width: 100%;
+			box-sizing: border-box;
+			font-family: monospace;
+			font-size: 14px;
+			tab-size: 2;
+		}
+
+		#code {
+			min-height: 6em;
+		}
+
+		#output {
+			min-height: 8em;
+			background: #ffffff0f;
+		}
+
+		button {
+			font-size: 14px;
+			padding: .4em 1.2em;
+			cursor: pointer;
+		}
+	</style>
+</head>
+
+<body>
+	<h1>revo wasm</h1>
+	<p>try by compiling the wasm binary, running `python3 -m http.server` in the project's root directory and going to
+		`http://localhost:8000/examples/wasm/`</p>
+
+	<textarea id="code" style="margin-bottom:.75em">
+		print("hello world")
+		return 42
+	</textarea>
+	<button id="run">eval</button><br />
+
+	<label for="output" style="display:block;margin-top:1em">program result:</label>
+	<textarea id="output" readonly style="display:inline-block;background:#ffffff0f"></textarea>
+
+	<label for="io-output" style="display:block;margin-top:1em">io output:</label>
+	<textarea id="io-output" readonly style="min-height:6em;background:#ffffff0f" /></textarea>
+
+	<script type="module">
+		import {Revo} from '../../wasm/revo.js'
+
+		const outputBox = document.getElementById('output')
+		const ioBox = document.getElementById('io-output')
+		const codeInput = document.getElementById('code')
+
+		let vm = await Revo.create({
+			wasmUrl: 'revo.wasm',
+			stdout(text) {
+				ioBox.value += text
+				ioBox.scrollTop = ioBox.scrollHeight
+			},
+			stderr(text) {
+				ioBox.value += 'stderr: ' + text
+				ioBox.scrollTop = ioBox.scrollHeight
+			},
+		})
+
+		function evalCode() {
+			ioBox.value = ''
+			const result = vm.eval(codeInput.value)
+			if (result.ok) {
+				outputBox.value = result.value ?? ''
+			} else if (result.value !== null) {
+				outputBox.value = result.value
+			} else {
+				outputBox.value = 'internal failure'
+			}
+		}
+
+		document.getElementById('run').addEventListener('click', evalCode)
+		evalCode()
+	</script>
+</body>
+
+</html>

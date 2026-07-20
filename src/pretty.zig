@@ -1,7 +1,7 @@
 const std = @import("std");
 const revo = @import("revo");
 
-pub var supports_color: bool = true;
+pub var supports_color: bool = !revo.is_freestanding;
 
 pub fn isColorSupported(env: *std.process.Environ.Map, io: std.Io) bool {
     if (env.contains("NO_COLOR")) return false;
@@ -47,9 +47,13 @@ pub fn replStyleDef(styleName: []const u8) [:0]const u8 {
 }
 
 pub fn fatal(comptime format: []const u8, args: anytype, vm: ?*revo.VM) noreturn {
-    std.debug.print("a very unexpected error occured. please report to https://github.com/if-not-nil/revo", .{});
-    if (vm) |v|
-        std.debug.print("info:\npc {}", .{v.currentFiber().pc});
-
-    std.debug.panic(format, args);
+    if (comptime !revo.is_freestanding) {
+        std.debug.print("a very unexpected error occured. please report to https://github.com/if-not-nil/revo", .{});
+        if (vm) |v|
+            std.debug.print("info:\npc {}", .{v.currentFiber().pc});
+        std.debug.panic(format, args);
+    } else {
+        // no os level panic handler on freestanding so just trap directly
+        @trap();
+    }
 }

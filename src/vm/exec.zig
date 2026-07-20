@@ -73,7 +73,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
                     self,
                     timeout_ms,
                 ) catch return .{ .err = self.evalFailure(error.Panic) };
-            } else {
+            } else if (comptime !revo.is_freestanding) {
                 _ = revo.std_net.pollIoWaiters(self, timeout_ms) catch
                     return .{ .err = self.evalFailure(error.Panic) };
             }

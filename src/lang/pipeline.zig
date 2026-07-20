@@ -389,7 +389,7 @@ pub fn build(vm: *VM, source: Source, opts: BuildOptions) !BuildResult {
     if (opts.module_scope)
         parsed.root = try wrapModule(arena.allocator(), parsed.root);
 
-    if (!opts.skip_preload)
+    if (!opts.skip_preload and comptime !revo.is_freestanding)
         preloadImports(vm, parsed.root, arena.allocator()) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => revo.pretty.fatal("preload: {s}", .{@errorName(err)}, vm),

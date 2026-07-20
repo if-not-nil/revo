@@ -8,3 +8,4 @@ zig-out
 .zig-cache
 /zig-pkg
 __pycache__
+*.wasm

@@ -1,0 +1,78 @@
+# revo wasm
+
+revo works on any platform llvm works on, albeit without io and, for now, only for 64-bit systems
+
+## building
+
+```sh
+zig build -Dtarget=wasm64-freestanding -Doptimize=ReleaseFast
+```
+
+the artifact is installed to `zig-out/bin/revo.wasm`. a copy lives at
+`examples/wasm/revo.wasm` for the browser playground
+
+> [!NOTE]
+> -Doptimize=Debug is broken for wasm64! there's a codegen bug that causes memory
+> access out of bounds at runtime.
+> i have no idea why, so you'd need to use any other optimize (made with -Doptimize=ReleaseFast in mind)
+
+## what's here
+
+**`revo.js`**
+esm module exporting the `Revo` class (one wasm instance per object) and a
+`run()` convenience function. wraps the raw wasm exports with alloc/free
+management, text encoding, and io callback plumbing
+
+`examples/wasm/index.html` is a browser playground with an editor, output area,
+and inline test runner done via revo.js
+
+```javascript
+import { Revo } from './lib/revo.js'
+
+const revo = await Revo.create({ wasmUrl: '/revo.wasm' })
+const r = revo.eval('print("hello")')
+console.log(r.ok, r.value)
+revo.destroy()
+```
+
+```javascript
+// nodejs: preload the wasm binary
+import { readFileSync } from 'fs'
+import { Revo } from './lib/revo.js'
+
+const buf = readFileSync('./revo.wasm')
+const revo = await Revo.fromBuffer(buf)
+console.log(revo.eval('1 + 2').value)
+revo.destroy()
+```
+
+**`test_wasm.mjs`**
+node tests. `cd ..; node ./wasm/test_wasm.mjs; cd ./wasm`
+
+## making your own wasm library
+
+the wasm exports are defined in `src/main_wasm.zig`:
+
+**`revo_wasm_init() -> bool`**
+create the vm. returns false if already initialized or alloc fails
+
+**`revo_wasm_deinit()`**
+tear down the vm. safe to call multiple times
+
+**`revo_wasm_eval(source_ptr, source_len, out_ptr, out_cap) -> usize`**
+compile and run revo source. returns untruncated output length. call
+`revo_wasm_ok()` to distinguish results from errors
+
+**`revo_wasm_ok() -> bool`**
+true = successful eval, false = compile/runtime error
+
+**`revo_wasm_alloc(len) -> ?[*]u8`**
+allocate memory from the wasm heap (used for copying strings in/out)
+
+**`revo_wasm_free(ptr, len)`**
+free memory allocated by `revo_wasm_alloc`
+
+to build your own library on top, create a module that imports `"revo"` and
+`"vm"`, then expose your own exports that call into the vm api. the key
+constraint is the io vtable; your module needs env imports for io or must
+provide its own stub vtable

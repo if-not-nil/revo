@@ -49,13 +49,14 @@ pub const CRevoData = extern struct {
         );
         return switch (tag) {
             .number => Data.numberRaw(@bitCast(self.value)),
-            .string => Data.new.str(@intCast(self.value)),
-            .atom => Data.new.atom(@intCast(self.value)),
-            .function => Data.new.function(@intCast(self.value)),
-            .table => Data.new.table(@intCast(self.value)),
-            .tuple => Data.new.tuple(@intCast(self.value)),
+            // low bits hold the id; high bits are tag bits it can discard
+            .string => Data.new.str(@truncate(self.value)),
+            .atom => Data.new.atom(@truncate(self.value)),
+            .function => Data.new.function(@truncate(self.value)),
+            .table => Data.new.table(@truncate(self.value)),
+            .tuple => Data.new.tuple(@truncate(self.value)),
             .struct_val, .struct_type => unreachable,
-            .foreign => Data.new.foreign(@ptrFromInt(self.value)),
+            .foreign => Data.new.foreign(@ptrFromInt(@as(usize, @truncate(self.value)))),
         };
     }
 

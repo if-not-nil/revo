@@ -345,9 +345,11 @@ pub fn deinit(self: *VM) void {
 
     self.module_cache.deinit();
 
-    for (self.loaded_extensions.items) |*lib| {
-        if (builtin.target.os.tag != .windows)
-            lib.close();
+    if (!revo.is_freestanding) {
+        for (self.loaded_extensions.items) |*lib| {
+            if (builtin.target.os.tag != .windows)
+                lib.close();
+        }
     }
     self.loaded_extensions.deinit(self.runtime.alloc);
     self.gc_mark_stack.deinit(self.runtime.alloc);

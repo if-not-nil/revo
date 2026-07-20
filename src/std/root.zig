@@ -169,28 +169,6 @@ pub const root_specs: []const api.FnSpec = &.{
         .f = define(&[_]TypeSpec{.tuple}, try_),
     },
     .{
-        .name = "@dotest",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "name", "string" },
-            .{ "body", "function" },
-        },
-        .ret = ":ok",
-        .doc = "internal, do not use unless you know what you're doing. runs a test",
-        .f = define(&[_]TypeSpec{ .string, .function }, dotest),
-    },
-    .{
-        .name = "@dosuite",
-        .placements = &.{api.g},
-        .params = &.{
-            .{ "name", "string" },
-            .{ "body", "function" },
-        },
-        .ret = ":ok",
-        .doc = "internal, pls dont use. runs a test suite",
-        .f = define(&[_]TypeSpec{ .string, .function }, dosuite),
-    },
-    .{
         .name = "chan",
         .placements = &.{api.g},
         .params = &.{
@@ -233,6 +211,17 @@ pub const root_specs: []const api.FnSpec = &.{
         .f = define(&[_]TypeSpec{.number}, sleep),
     },
     .{
+        .name = "panic",
+        .placements = &.{api.g},
+        .params = &.{
+            .{ "args", "any..." },
+        },
+        .ret = "never",
+        .doc = "panics with given message",
+        .variadic = true,
+        .f = defineVariadic(&[_]TypeSpec{}, panic_),
+    },
+    .{
         .name = "print",
         .placements = &.{api.g},
         .params = &.{
@@ -244,16 +233,34 @@ pub const root_specs: []const api.FnSpec = &.{
         .f = defineVariadic(&[_]TypeSpec{}, print),
     },
     .{
-        .name = "panic",
+        .name = "gensym",
         .placements = &.{api.g},
-        .params = &.{
-            .{ "args", "any..." },
-        },
-        .ret = "never",
-        .doc = "panics with given message",
-        .variadic = true,
-        .f = defineVariadic(&[_]TypeSpec{}, panic_),
+        .params = &.{},
+        .ret = "string",
+        .doc =
+        \\ returns a unique interned string for use as an identifier
+        \\
+        \\   # in a proc macro: generate a fresh identifier to avoid name capture
+        \\   proc swap!(iter) do
+        \\     let tmp = gensym()
+        \\     let a = iter:next()
+        \\     let b = iter:next()
+        \\     `((do
+        \\         let %tmp = %a
+        \\         %a = %b
+        \\         %b = %tmp
+        \\       end))
+        \\   end
+        \\
+        \\   let x = 1
+        \\   let y = 2
+        \\   swap!(x, y)
+        ,
+        .f = define(&[_]TypeSpec{}, gensym),
     },
+};
+
+pub const root_specs_os: []const api.FnSpec = &.{
     .{
         .name = "c_use",
         .placements = &.{api.g},
@@ -289,32 +296,6 @@ pub const root_specs: []const api.FnSpec = &.{
         .f = define(&[_]TypeSpec{}, cwd),
     },
     .{
-        .name = "gensym",
-        .placements = &.{api.g},
-        .params = &.{},
-        .ret = "string",
-        .doc =
-        \\ returns a unique interned string for use as an identifier
-        \\
-        \\   # in a proc macro: generate a fresh identifier to avoid name capture
-        \\   proc swap!(iter) do
-        \\     let tmp = gensym()
-        \\     let a = iter:next()
-        \\     let b = iter:next()
-        \\     `((do
-        \\         let %tmp = %a
-        \\         %a = %b
-        \\         %b = %tmp
-        \\       end))
-        \\   end
-        \\
-        \\   let x = 1
-        \\   let y = 2
-        \\   swap!(x, y)
-        ,
-        .f = define(&[_]TypeSpec{}, gensym),
-    },
-    .{
         .name = "system",
         .placements = &.{api.g},
         .params = &.{
@@ -333,6 +314,28 @@ pub const root_specs: []const api.FnSpec = &.{
         .ret = "any",
         .doc = "imports a revo module by path",
         .f = define(&[_]TypeSpec{.string}, import),
+    },
+    .{
+        .name = "@dotest",
+        .placements = &.{api.g},
+        .params = &.{
+            .{ "name", "string" },
+            .{ "body", "function" },
+        },
+        .ret = ":ok",
+        .doc = "internal, do not use unless you know what you're doing. runs a test",
+        .f = define(&[_]TypeSpec{ .string, .function }, dotest),
+    },
+    .{
+        .name = "@dosuite",
+        .placements = &.{api.g},
+        .params = &.{
+            .{ "name", "string" },
+            .{ "body", "function" },
+        },
+        .ret = ":ok",
+        .doc = "internal, pls dont use. runs a test suite",
+        .f = define(&[_]TypeSpec{ .string, .function }, dosuite),
     },
 };
 
@@ -359,6 +362,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         @import("net.zig").specs,
         @import("fs.zig").specs,
         @import("revo.zig").specs,
+        if (!revo.is_freestanding) root_specs_os else &.{},
     };
     try api.registerAll(vm, &all, mtPrototype);
 
@@ -694,21 +698,17 @@ pub fn len_(args: []const Data, vm: *VM) !NativeResult {
 /// > inspect(any) -> any
 /// prints one value and returns it back
 pub fn inspect(args: []const Data, vm: *VM) !NativeResult {
-    _ = try print(args, vm);
+    if (comptime !revo.is_freestanding)
+        _ = try print(args, vm);
     return .okData(args[0]);
 }
 
 pub fn typeof(d: Data) []const u8 {
     return switch (d.tag()) {
         .atom => if (d.asAtom().? == revo.core_atoms.atom_id(.nil)) "nil" else "atom",
-        .number => "number",
-        .string => "string",
-        .function => "function",
-        .table => "table",
-        .tuple => "tuple",
         .struct_val => "struct",
         .struct_type => "type",
-        .foreign => "foreign",
+        else => |e| @tagName(e),
     };
 }
 
@@ -872,7 +872,11 @@ pub fn assert_eq(args: []const Data, vm: *VM) !NativeResult {
 ///     print("hello", 42, "world")
 pub fn print(args: []const Data, vm: *VM) !NativeResult {
     var pbuf: [256]u8 = undefined;
-    var pw = std.Io.File.stdout().writerStreaming(vm.runtime.io, &pbuf);
+    const stdout_file = if (comptime revo.is_freestanding)
+        std.Io.File{ .handle = {}, .flags = .{ .nonblocking = false } }
+    else
+        std.Io.File.stdout();
+    var pw = stdout_file.writerStreaming(vm.runtime.io, &pbuf);
     defer _ = pw.flush() catch {};
     if (args.len == 0) {
         _ = try pw.interface.writeAll("\n");

@@ -1,8 +1,11 @@
-pub const async_backend_impl = if (builtin.target.os.tag == .windows)
+pub const is_freestanding = @import("build_options").is_freestanding;
+
+pub const async_backend_impl = if (builtin.target.os.tag == .windows or is_freestanding or !builtin.link_libc)
     @import("./runtime/async_backend_none.zig")
 else
     @import("./runtime/async_backend_posix.zig");
-pub const has_async_backend = builtin.target.os.tag != .windows;
+
+pub const has_async_backend = builtin.target.os.tag != .windows and !is_freestanding and builtin.link_libc;
 
 pub const Runtime = struct {
     alloc: std.mem.Allocator,
@@ -170,6 +173,8 @@ pub const core_atoms = vm.core_atoms;
 pub const isFalse = vm.isFalse;
 
 pub fn printBuildError(gpa: std.mem.Allocator, source_info: lang.Source, err: lang.Error) void {
+    // todo
+    if (comptime is_freestanding) return;
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
     lang.renderError(gpa, &buf.writer, source_info, err) catch {};
@@ -178,6 +183,8 @@ pub fn printBuildError(gpa: std.mem.Allocator, source_info: lang.Source, err: la
 }
 
 pub fn printEvalError(gpa: std.mem.Allocator, source: []const u8, failure: EvalFailure) void {
+    // todo
+    if (comptime is_freestanding) return;
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
     failure.render(gpa, &buf.writer, source) catch {};
