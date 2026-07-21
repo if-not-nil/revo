@@ -277,7 +277,7 @@ pub const root_specs_os: []const api.FnSpec = &.{
         .params = &.{
             .{ "opts", "table?" },
         },
-        .ret = "(:ok, string) | (:err, string)",
+        .ret = "!string",
         .doc =
         \\ reads from stdin or a path 
         \\ opts:
@@ -362,6 +362,7 @@ pub fn register_stdlib(vm: *revo.VM) !void {
         @import("net.zig").specs,
         @import("fs.zig").specs,
         @import("revo.zig").specs,
+        @import("compress.zig").specs,
         if (!revo.is_freestanding) root_specs_os else &.{},
     };
     try api.registerAll(vm, &all, mtPrototype);

@@ -17,6 +17,7 @@ pub const time_specs = @import("time.zig").specs;
 pub const net_specs = @import("net.zig").specs;
 pub const fs_specs = @import("fs.zig").specs;
 pub const revo_specs = @import("revo.zig").specs;
+pub const compress_specs = @import("compress.zig").specs;
 
 pub const all_specs: []const []const FnSpec = &.{
     root_specs,
@@ -30,6 +31,7 @@ pub const all_specs: []const []const FnSpec = &.{
     net_specs,
     fs_specs,
     revo_specs,
+    compress_specs,
 };
 
 /// look up a function by name across all spec tables.

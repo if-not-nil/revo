@@ -20,7 +20,7 @@ pub const specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "code", "string" },
         },
-        .ret = "(:ok, string) | (:err, string)",
+        .ret = "!string",
         .doc =
         \\builds it as a module, gives you back its' bytecode in a string
         \\the string is only useful for writing to a file or executing

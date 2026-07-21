@@ -16,7 +16,7 @@ pub const specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "value", "any" },
         },
-        .ret = "(:ok, string) | (:err, string)",
+        .ret = "!string",
         .doc = "encodes value as json string",
         .f = root.define(&.{.any}, encode),
     },
