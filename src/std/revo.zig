@@ -7,7 +7,7 @@ pub const specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "code", "string" },
         },
-        .ret = "(:ok, any) | (:err, string)",
+        .ret = "!any/string",
         .doc =
         \\evaluates it as a module, gives you back its' return value
         \\you can treat it as a function's body

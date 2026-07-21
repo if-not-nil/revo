@@ -26,7 +26,7 @@ pub const specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "source", "string" },
         },
-        .ret = "(:ok, any) | (:err, string)",
+        .ret = "!any/string",
         .doc = "decodes json string into revo value",
         .f = root.define(&.{.string}, decode),
     },

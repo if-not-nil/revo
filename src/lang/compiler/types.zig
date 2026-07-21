@@ -294,10 +294,15 @@ const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInf
 
 pub fn resolveTypeName(ctx: anytype, name: []const u8) TypeInfo {
     if (name.len > 0 and name[0] == '!') {
-        const inner = resolveTypeName(ctx, name[1..]);
+        const rest = name[1..];
+        const slash = std.mem.indexOfScalar(u8, rest, '/');
+        const ok_name = if (slash) |i| rest[0..i] else rest;
+        const err_name = if (slash) |i| rest[i + 1..] else "any";
+        const ok_type = resolveTypeName(ctx, ok_name);
+        const err_type = resolveTypeName(ctx, err_name);
         const alloc = ctx.alloc;
-        const ok_types = alloc.dupe(TypeInfo, &.{inner}) catch return .any;
-        const err_types = alloc.dupe(TypeInfo, &.{.any}) catch {
+        const ok_types = alloc.dupe(TypeInfo, &.{ok_type}) catch return .any;
+        const err_types = alloc.dupe(TypeInfo, &.{err_type}) catch {
             alloc.free(ok_types);
             return .any;
         };

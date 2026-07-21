@@ -101,7 +101,7 @@ pub const root_specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "value", "string" },
         },
-        .ret = "(:ok, number) | (:err, string)",
+        .ret = "!number/string",
         .doc = "converts string to number",
         .f = define(&[_]TypeSpec{.any}, tonumber),
     },
@@ -111,7 +111,7 @@ pub const root_specs: []const api.FnSpec = &.{
         .params = &.{
             .{ "value", "any" },
         },
-        .ret = "(:ok, any) | (:err, :ExpectFailed)",
+        .ret = "!any/:ExpectFailed",
         .doc = "used in tests, returns value or :err",
         .f = define(&[_]TypeSpec{.any}, expect),
     },
@@ -122,7 +122,7 @@ pub const root_specs: []const api.FnSpec = &.{
             .{ "a", "any" },
             .{ "b", "any" },
         },
-        .ret = "(:ok, any) | (:err, :NotEqual)",
+        .ret = "!any/:NotEqual",
         .doc = "panics if values are not equal",
         .f = define(&[_]TypeSpec{ .any, .any }, expect_eq),
     },

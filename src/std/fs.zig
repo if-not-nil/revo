@@ -6,7 +6,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "path", "string" },
         },
-        .ret = "(:ok, table) | (:err, atom)",
+        .ret = "!table/atom",
         .doc =
         \\wraps a path in a file handle table
         \\use `file.close()` when you're done with the handle
@@ -19,7 +19,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "path", "string" },
         },
-        .ret = "(:ok, table) | (:err, atom)",
+        .ret = "!table/atom",
         .doc = "returns table of directory entries",
         .f = root.define(&.{.string}, readdir_fn),
     },
@@ -30,7 +30,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "self", "table" },
         },
-        .ret = "(:ok, table) | (:err, atom)",
+        .ret = "!table/atom",
         .doc = "returns table of directory entries for the dir handle's path",
         .f = root.define(&.{.any}, readdir_meth_fn),
     },
@@ -40,7 +40,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "path", "string" },
         },
-        .ret = "(:ok, bool) | (:err, atom)",
+        .ret = "!bool/atom",
         .doc = "does path exist?",
         .f = root.define(&.{.string}, exists_fn),
     },
@@ -50,7 +50,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "path", "string" },
         },
-        .ret = "(:ok, atom) | (:err, atom)",
+        .ret = "!atom/atom",
         .doc = "removes a file or empty directory at path",
         .f = root.define(&.{.string}, remove_fn),
     },
@@ -61,7 +61,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
             .{ "path", "string" },
             .{ "permissions", "atom|number?" },
         },
-        .ret = "(:ok, atom) | (:err, atom)",
+        .ret = "!atom/atom",
         .doc = "creates a directory, using default permissions when omitted",
         .variadic = true,
         .f = root.defineVariadic(&.{.string}, mkdir_fn),
@@ -73,7 +73,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
             .{ "old_path", "string" },
             .{ "new_path", "string" },
         },
-        .ret = "(:ok, atom) | (:err, atom)",
+        .ret = "!atom/atom",
         .doc = "renames a file or directory",
         .f = root.define(&.{ .string, .string }, rename_fn),
     },
@@ -84,7 +84,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "self", "table" },
         },
-        .ret = "(:ok, string) | (:err, atom)",
+        .ret = "!string/atom",
         .doc = "reads the full file contents as a string",
         .f = root.define(&.{.any}, read_fn),
     },
@@ -96,7 +96,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
             .{ "data", "any" },
             .{ "permissions", "atom|number?" },
         },
-        .ret = "(:ok, number) | (:err, atom)",
+        .ret = "!number/atom",
         .doc =
         \\overwrites the file with the provided string
         \\optional permissions default to the platform file default
@@ -112,7 +112,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
             .{ "data", "any" },
             .{ "permissions", "atom|number?" },
         },
-        .ret = "(:ok, number) | (:err, atom)",
+        .ret = "!number/atom",
         .doc =
         \\appends data to the file, creating it if needed
         \\optional permissions default to the platform file default
@@ -126,7 +126,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "self", "table" },
         },
-        .ret = "(:ok, table) | (:err, atom)",
+        .ret = "!table/atom",
         .doc = "get file metadata as a table",
         .f = root.define(&.{.any}, stat_fn),
     },
@@ -136,7 +136,7 @@ pub const specs: []const api.FnSpec = if (@import("build_options").is_freestandi
         .params = &.{
             .{ "self", "table" },
         },
-        .ret = "(:ok, atom) | (:err, atom)",
+        .ret = "!atom/atom",
         .doc =
         \\closes a file handle table
         \\this is currently a logical close for wrapper handles
