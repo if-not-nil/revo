@@ -293,6 +293,23 @@ const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInf
 });
 
 pub fn resolveTypeName(ctx: anytype, name: []const u8) TypeInfo {
+    if (name.len > 0 and name[0] == '!') {
+        const inner = resolveTypeName(ctx, name[1..]);
+        const alloc = ctx.alloc;
+        const ok_types = alloc.dupe(TypeInfo, &.{inner}) catch return .any;
+        const err_types = alloc.dupe(TypeInfo, &.{.any}) catch {
+            alloc.free(ok_types);
+            return .any;
+        };
+        const ok_variant = UnionVariant{ .name = ":ok", .types = ok_types };
+        const err_variant = UnionVariant{ .name = ":err", .types = err_types };
+        const variants = alloc.dupe(UnionVariant, &.{ ok_variant, err_variant }) catch {
+            alloc.free(ok_types);
+            alloc.free(err_types);
+            return .any;
+        };
+        return .{ .@"union" = variants };
+    }
     if (type_name_map.get(name)) |res| return res;
     // temp: strip suffixes: ? (for optional) and ... (forvariadic)
     const stripped = if (std.mem.endsWith(u8, name, "..."))
