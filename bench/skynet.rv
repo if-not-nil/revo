@@ -1,3 +1,5 @@
+# skynet benchmark of https://github.com/atemerev/skynet
+# ported to revo by cb:0riginaln0 gh:0riginaln0
 let start = time.now()
 
 fn skynet(num, size) do
