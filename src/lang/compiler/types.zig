@@ -16,6 +16,10 @@ pub const TypeInfo = union(enum) {
     atom: []const u8,
     tuple: []const TypeInfo,
     @"union": []const UnionVariant,
+    table: struct {
+        key: ?*const TypeInfo,
+        value: *const TypeInfo,
+    },
     struct_type: []const u8,
     function: *const FunctionSignature,
     any,
@@ -43,9 +47,14 @@ pub const TypeInfo = union(enum) {
                 }
                 break :blk true;
             } else false,
+            .table => |ti| if (other == .table) blk: {
+                const o = other.table;
+                if (!eql(ti.value.*, o.value.*)) break :blk false;
+                if (ti.key) |tk| break :blk if (o.key) |ok| eql(tk.*, ok.*) else false;
+                break :blk o.key == null;
+            } else false,
             .function => |f| if (other == .function) blk: {
                 const o = other.function;
-                // structural compare: pointer match is fast path
                 if (f == o) break :blk true;
                 if (!f.return_type.eql(o.return_type)) break :blk false;
                 if (f.params.len != o.params.len) break :blk false;
@@ -85,6 +94,7 @@ pub const ANY_FN_SIG: FunctionSignature = .{ .params = &.{}, .return_type = .any
 pub fn typeName(T: TypeInfo) []const u8 {
     return switch (T) {
         .struct_type, .atom, .type_var => |s| s,
+        .table => "table",
         else => @tagName(T),
     };
 }
@@ -93,6 +103,12 @@ pub fn typeName(T: TypeInfo) []const u8 {
 pub fn formatType(alloc: std.mem.Allocator, ti: TypeInfo) ![]const u8 {
     return switch (ti) {
         .type_var => |n| try alloc.dupe(u8, n),
+        .table => |tbl| blk: {
+            if (tbl.key) |k| {
+                break :blk try std.fmt.allocPrint(alloc, "table<{s}, {s}>", .{ typeName(k.*), typeName(tbl.value.*) });
+            }
+            break :blk try std.fmt.allocPrint(alloc, "table<{s}>", .{typeName(tbl.value.*)});
+        },
         .@"union" => |variants| blk: {
             var buf = try std.ArrayList(u8).initCapacity(alloc, 64);
             errdefer buf.deinit(alloc);
@@ -268,6 +284,19 @@ pub fn inferOrelseType(left: TypeInfo, right: TypeInfo) TypeInfo {
     return .any;
 }
 
+pub fn okTypeFromUnion(ti: TypeInfo) TypeInfo {
+    const variants = switch (ti) {
+        .@"union" => |us| us,
+        else => return .any,
+    };
+    for (variants) |v| {
+        if (v.types.len == 1 and (std.mem.eql(u8, v.name, ":ok") or std.mem.eql(u8, v.name, "ok"))) {
+            return v.types[0];
+        }
+    }
+    return .any;
+}
+
 pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.ArrayList(UnionVariant)) !void {
     switch (ti) {
         .@"union" => |us| for (us) |u| try variants.append(alloc, u),
@@ -281,7 +310,7 @@ pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.Ar
     }
 }
 
-const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInfo).initComptime(.{
+pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInfo).initComptime(.{
     .{ "int", .int },
     .{ "float", .float },
     .{ "num", .int },
@@ -290,49 +319,20 @@ const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInf
     .{ "bool", .bool },
     .{ "any", .any },
     .{ "nil", TypeInfo{ .atom = ":nil" } },
+    .{ "tuple", .any },
+    .{ "table", TypeInfo{ .struct_type = "table" } },
+    .{ "function", .any },
+    .{ "atom", .any },
+    .{ "never", .any },
+    .{ "parked", .any },
 });
 
 pub fn resolveTypeName(ctx: anytype, name: []const u8) TypeInfo {
-    if (name.len > 0 and name[0] == '!') {
-        const rest = name[1..];
-        const slash = std.mem.indexOfScalar(u8, rest, '/');
-        const ok_name = if (slash) |i| rest[0..i] else rest;
-        const err_name = if (slash) |i| rest[i + 1..] else "any";
-        const ok_type = resolveTypeName(ctx, ok_name);
-        const err_type = resolveTypeName(ctx, err_name);
-        const alloc = ctx.alloc;
-        const ok_types = alloc.dupe(TypeInfo, &.{ok_type}) catch return .any;
-        const err_types = alloc.dupe(TypeInfo, &.{err_type}) catch {
-            alloc.free(ok_types);
-            return .any;
-        };
-        const ok_variant = UnionVariant{ .name = ":ok", .types = ok_types };
-        const err_variant = UnionVariant{ .name = ":err", .types = err_types };
-        const variants = alloc.dupe(UnionVariant, &.{ ok_variant, err_variant }) catch {
-            alloc.free(ok_types);
-            alloc.free(err_types);
-            return .any;
-        };
-        return .{ .@"union" = variants };
-    }
     if (type_name_map.get(name)) |res| return res;
-    // temp: strip suffixes: ? (for optional) and ... (forvariadic)
-    const stripped = if (std.mem.endsWith(u8, name, "..."))
-        name[0 .. name.len - 3]
-    else if (std.mem.endsWith(u8, name, "?"))
-        name[0 .. name.len - 1]
-    else
-        name;
-
-    if (stripped.len != name.len) {
-        if (type_name_map.get(stripped)) |res| return res;
-    }
-
-    if (std.mem.eql(u8, stripped, "function")) return .{ .function = &ANY_FN_SIG };
-    if (stripped.len > 0 and stripped[0] == ':') return .{ .atom = stripped };
-    if (ctx.resolveTypeAlias(stripped)) |aliased| return aliased;
-
-    return .{ .struct_type = stripped };
+    if (std.mem.eql(u8, name, "function")) return .{ .function = &ANY_FN_SIG };
+    if (name.len > 0 and name[0] == ':') return .{ .atom = name };
+    if (ctx.resolveTypeAlias(name)) |aliased| return aliased;
+    return .{ .struct_type = name };
 }
 
 pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
@@ -358,7 +358,10 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .for_loop => |v| inferExprType(ctx, v.body),
         .while_loop => |v| inferExprType(ctx, v.body),
         .break_expr => |val| if (val) |v| inferExprType(ctx, v) else .any,
-        .try_expr => |inner| inferExprType(ctx, inner),
+        .try_expr => |inner| blk: {
+            const it = inferExprType(ctx, inner);
+            break :blk if (it == .@"union") okTypeFromUnion(it) else it;
+        },
         .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
         .comp_block => |cb| inferExprType(ctx, cb.expr),
         .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .any,
@@ -401,49 +404,7 @@ pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
-pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
-    return switch (te.kind) {
-        .named => |name| {
-            if (ctx.isTypeParam(name)) return TypeInfo{ .type_var = name };
-            return resolveTypeName(ctx, name);
-        },
-        .atom => |name| TypeInfo{ .atom = name },
-        .tuple => |items| blk: {
-            var types = try std.ArrayList(TypeInfo).initCapacity(ctx.alloc, items.len);
-            errdefer types.deinit(ctx.alloc);
-            for (items) |item| try types.append(ctx.alloc, try evalTypeExpr(ctx, item));
-            break :blk TypeInfo{ .tuple = try types.toOwnedSlice(ctx.alloc) };
-        },
-        .union_of => |variants| blk: {
-            var collected = try std.ArrayList(UnionVariant).initCapacity(ctx.alloc, 4);
-            errdefer collected.deinit(ctx.alloc);
-            for (variants) |v| {
-                try collectVariants(ctx.alloc, try evalTypeExpr(ctx, v), &collected);
-            }
-            break :blk TypeInfo{ .@"union" = try collected.toOwnedSlice(ctx.alloc) };
-        },
-        .function => |f| blk: {
-            var params = try std.ArrayList(TypeInfo).initCapacity(ctx.alloc, f.params.len);
-            errdefer params.deinit(ctx.alloc);
-            var param_names = try std.ArrayList([]const u8).initCapacity(ctx.alloc, f.params.len);
-            errdefer param_names.deinit(ctx.alloc);
-
-            for (f.params) |p| {
-                try params.append(ctx.alloc, if (p.type_name) |tn| try evalTypeExpr(ctx, tn) else .any);
-                try param_names.append(ctx.alloc, p.name);
-            }
-            const return_type = if (f.return_type) |rt| try evalTypeExpr(ctx, rt) else .any;
-            const sig_ptr = try ctx.alloc.create(FunctionSignature);
-
-            sig_ptr.* = .{
-                .param_names = try param_names.toOwnedSlice(ctx.alloc),
-                .params = try params.toOwnedSlice(ctx.alloc),
-                .return_type = return_type,
-            };
-            break :blk TypeInfo{ .function = sig_ptr };
-        },
-    };
-}
+pub const evalTypeExpr = @import("../type_parser.zig").evalTypeExpr;
 
 /// substitute type params in a TypeInfo tree
 /// subst is any type with `get(key: []const u8) ?TypeInfo`

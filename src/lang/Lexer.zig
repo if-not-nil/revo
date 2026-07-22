@@ -91,6 +91,7 @@ pub const TokenType = enum {
     pipe,
     pipe_forward,
     huh,
+    bang,
     lparen,
     rparen,
     lbracket,
@@ -314,10 +315,10 @@ fn next(self: *Lexer) !Token {
             self.makeToken(.fat_arrow, start, self.pos, line, column)
         else
             self.makeToken(.assign, start, self.pos, line, column),
-        '!' => if (self.matchChar('='))
-            self.makeToken(.neq, start, self.pos, line, column)
-        else
-            return error.UnexpectedCharacter,
+    '!' => if (self.matchChar('='))
+        self.makeToken(.neq, start, self.pos, line, column)
+    else
+        self.makeToken(.bang, start, self.pos, line, column),
         '<' => if (self.matchChar('='))
             self.makeToken(.lte, start, self.pos, line, column)
         else
@@ -1033,7 +1034,7 @@ test "lexer reports unterminated strings comments and unexpected characters" {
     try std.testing.expectError(error.UnterminatedString, lex(std.testing.allocator, "\"unterminated"));
     try std.testing.expectError(error.UnterminatedComment, lex(std.testing.allocator, "## never closed"));
     try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "@"));
-    try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "!"));
+    try std.testing.expectEqual(TokenType.bang, (try lex(std.testing.allocator, "!"))[0].type);
     try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "$"));
 }
 

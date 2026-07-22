@@ -107,6 +107,11 @@ pub const TypeExpr = struct {
             params: []const FnParam,
             return_type: ?*TypeExpr,
         },
+        parameterized: struct {
+            name: []const u8,
+            params: []const *TypeExpr,
+        },
+        error_union: *TypeExpr,
     };
 
     pub fn printAt(self: *const TypeExpr, writer: *std.Io.Writer, depth: ?usize) !void {
@@ -143,6 +148,19 @@ pub const TypeExpr = struct {
                     try writer.writeAll(" -> ");
                     try ret.printAt(writer, null);
                 }
+            },
+            .parameterized => |p| {
+                try writer.writeAll(p.name);
+                try writer.writeByte('<');
+                for (p.params, 0..) |param, i| {
+                    if (i > 0) try writer.writeAll(", ");
+                    try param.printAt(writer, null);
+                }
+                try writer.writeByte('>');
+            },
+            .error_union => |inner| {
+                try writer.writeByte('!');
+                try inner.printAt(writer, null);
             },
         }
     }
@@ -871,6 +889,10 @@ fn walkTypeExprWithVisitor(comptime Visitor: type, visitor: *Visitor, te: *const
                 if (p.type_name) |t| walkTypeExprWithVisitor(Visitor, visitor, t);
             }
             if (f.return_type) |ret| walkTypeExprWithVisitor(Visitor, visitor, ret);
+        },
+        .error_union => |inner| walkTypeExprWithVisitor(Visitor, visitor, inner),
+        .parameterized => |p| {
+            for (p.params) |param| walkTypeExprWithVisitor(Visitor, visitor, param);
         },
     }
 }

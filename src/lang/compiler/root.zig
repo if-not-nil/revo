@@ -13,6 +13,7 @@ const ProgramCounter = revo.ProgramCounter;
 const ast = @import("../ast.zig");
 const Node = ast.Node;
 const Binding = ast.Binding;
+const type_parser = @import("../type_parser.zig");
 const expander = @import("../expander.zig");
 const flow = @import("flow.zig");
 const fold = @import("fold.zig");
@@ -1166,7 +1167,7 @@ pub const Compiler = struct {
                 } else false;
                 if (is_type_param) continue;
                 type_check.checkType(
-                    types.resolveTypeName(self, expected_type),
+                    type_parser.parseTypeString(self, expected_type) catch types.resolveTypeName(self, expected_type),
                     actual_type,
                 ) catch |err| switch (err) {
                     error.TypeError => {

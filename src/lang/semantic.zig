@@ -5,6 +5,7 @@ const ast = @import("./ast.zig");
 const diagnostic = @import("diagnostic.zig");
 const struct_layout = @import("compiler/types.zig");
 const types_mod = @import("compiler/types.zig");
+const type_parser = @import("type_parser.zig");
 const revo = @import("revo");
 
 /// run semantic analysis; known_globals are names that exist at runtime (builtins)
@@ -265,19 +266,11 @@ const SemanticChecker = struct {
         var param_names = try std.ArrayList([]const u8).initCapacity(self.alloc, spec.params.len);
         for (spec.params) |p| {
             try param_names.append(self.alloc, p[0]);
-            const resolved = types_mod.resolveTypeName(self, p[1]);
-            try param_types.append(self.alloc, switch (resolved) {
-                .struct_type, .function => types_mod.TypeInfo.any,
-                else => resolved,
-            });
+            try param_types.append(self.alloc, type_parser.parseTypeString(self, p[1]) catch .any);
         }
         const names_slice = try param_names.toOwnedSlice(self.alloc);
         const types_slice = try param_types.toOwnedSlice(self.alloc);
-        const resolved_ret = types_mod.resolveTypeName(self, spec.ret);
-        const ret: types_mod.TypeInfo = switch (resolved_ret) {
-            .struct_type, .function => .any,
-            else => resolved_ret,
-        };
+        const ret = type_parser.parseTypeString(self, spec.ret) catch .any;
         const sig_ptr = try self.alloc.create(FnSig);
         sig_ptr.* = .{
             .param_names = names_slice,
@@ -391,13 +384,15 @@ const SemanticChecker = struct {
             .try_expr => |inner| blk: {
                 const inner_type = try self.analyzeNode(inner);
                 if (inner_type != .any) {
-                    const is_result = if (inner_type == .tuple and inner_type.tuple.len >= 1) chk: {
-                        const first = inner_type.tuple[0];
-                        break :chk first == .atom and
-                            // handle both with-colon and without-colon conventions
-                            (std.mem.eql(u8, first.atom, ":ok") or std.mem.eql(u8, first.atom, "ok") or
-                                std.mem.eql(u8, first.atom, ":err") or std.mem.eql(u8, first.atom, "err"));
-                    } else false;
+                    const is_result = switch (inner_type) {
+                        .tuple => |items| items.len >= 1 and inner_type.tuple[0] == .atom and
+                            (std.mem.eql(u8, inner_type.tuple[0].atom, ":ok") or
+                                std.mem.eql(u8, inner_type.tuple[0].atom, "ok") or
+                                std.mem.eql(u8, inner_type.tuple[0].atom, ":err") or
+                                std.mem.eql(u8, inner_type.tuple[0].atom, "err")),
+                        .@"union" => true,
+                        else => false,
+                    };
                     if (!is_result) {
                         try self.appendError(
                             try std.fmt.allocPrint(self.alloc, "try expects :ok/:err tagged tuple, got {s}", .{types_mod.typeName(inner_type)}),
