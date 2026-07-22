@@ -1,4 +1,4 @@
-pub const MAX_FRAMES = 256;
+pub const MAX_FRAMES = 4;
 pub const INIT_REG_COUNT = 256;
 pub const ProgramCounter = usize;
 pub const ConstantID = usize;
@@ -117,9 +117,9 @@ pub const Fiber = struct {
         errdefer self.frames_hot.deinit(alloc);
         self.frames_cold = try std.ArrayList(FrameCold).initCapacity(alloc, MAX_FRAMES);
         errdefer self.frames_cold.deinit(alloc);
-        self.open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 8);
+        self.open_upvalues = try std.ArrayList(OpenUpvalueRef).initCapacity(alloc, 1);
         errdefer self.open_upvalues.deinit(alloc);
-        self.waiters = try std.ArrayList(FiberID).initCapacity(alloc, 2);
+        self.waiters = try std.ArrayList(FiberID).initCapacity(alloc, 1);
         errdefer self.waiters.deinit(alloc);
 
         return self;
@@ -278,12 +278,12 @@ pub fn init(runtime: revo.Runtime) !VM {
         .frames_hot = try std.ArrayList(FrameHot).initCapacity(runtime.alloc, 4),
         .frames_cold = try std.ArrayList(FrameCold).initCapacity(runtime.alloc, 4),
         .running = false,
-        .open_upvalues = try std.ArrayList(Fiber.OpenUpvalueRef).initCapacity(runtime.alloc, 8),
+        .open_upvalues = try std.ArrayList(Fiber.OpenUpvalueRef).initCapacity(runtime.alloc, 1),
         .state = .ready,
         .in_runq = false,
         .wait = .none,
         .parked_result_slot = null,
-        .waiters = try std.ArrayList(FiberID).initCapacity(runtime.alloc, 2),
+        .waiters = try std.ArrayList(FiberID).initCapacity(runtime.alloc, 1),
     });
 
     // set initial fiber result to no_result
