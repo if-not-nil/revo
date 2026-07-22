@@ -261,6 +261,20 @@ pub fn resolveLocalTypeHint(self: *const Compiler, name: []const u8) ?types.Type
     return null;
 }
 
+pub fn predeclareTypeAliases(self: *Compiler, exprs: []const *Node) !void {
+    for (exprs) |expr| switch (expr.expr) {
+        .decl => |decl| switch (decl.inner.expr) {
+            .type_alias => |t| {
+                if (self.type_aliases.contains(t.name)) continue;
+                const type_info = try type_parser.evalTypeExpr(self, t.type_expr);
+                try self.type_aliases.put(t.name, type_info);
+            },
+            else => {},
+        },
+        else => {},
+    };
+}
+
 pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
     for (exprs) |expr| switch (expr.expr) {
         .decl => |decl| switch (decl.inner.expr) {
@@ -270,6 +284,11 @@ pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
                 const name = binding.target.expr.ident;
                 if (ast.isDiscardName(name)) continue;
                 _ = try reuseOrDeclareLocal(self, name, decl.kind == .let);
+                // temporarily set type_params so isTypeParam works during evalTypeExpr
+                const fn_state = &self.functions.items[self.functions.items.len - 1];
+                const saved = fn_state.type_params;
+                fn_state.type_params = binding.value.expr.fn_expr.type_params;
+                defer fn_state.type_params = saved;
                 try declareFnSignature(self, name, binding.value.expr.fn_expr.params, binding.value.expr.fn_expr.return_type, binding.value.expr.fn_expr.type_params);
             },
             else => {},

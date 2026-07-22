@@ -91,7 +91,10 @@ const Parser = struct {
                 if (std.mem.endsWith(u8, text, "?")) {
                     const name = try ast.allocTypeExpr(self.alloc, start.span(), .{ .named = text[0 .. text.len - 1] });
                     const nil_atom = try ast.allocTypeExpr(self.alloc, start.span(), .{ .atom = ":nil" });
-                    return try ast.allocTypeExpr(self.alloc, start.span(), .{ .union_of = &.{ name, nil_atom } });
+                    const variants = try self.alloc.alloc(*ast.TypeExpr, 2);
+                    variants[0] = name;
+                    variants[1] = nil_atom;
+                    return try ast.allocTypeExpr(self.alloc, start.span(), .{ .union_of = variants });
                 }
                 if (self.match(.lt)) {
                     var params = try std.ArrayList(*ast.TypeExpr).initCapacity(self.alloc, 4);

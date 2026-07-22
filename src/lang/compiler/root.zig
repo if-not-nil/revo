@@ -1294,6 +1294,7 @@ pub const Compiler = struct {
             try state_mod.pushScope(self);
             pushed_scope = true;
             errdefer if (pushed_scope) state_mod.popScope(self);
+            try state_mod.predeclareTypeAliases(self, exprs);
             try state_mod.predeclareFunctionBindings(self, exprs);
         }
         for (exprs, 0..) |expr, idx| {
