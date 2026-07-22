@@ -404,7 +404,6 @@ pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
-
 /// substitute type params in a TypeInfo tree
 /// subst is any type with `get(key: []const u8) ?TypeInfo`
 pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anytype) !TypeInfo {

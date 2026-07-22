@@ -13,7 +13,6 @@ const ProgramCounter = revo.ProgramCounter;
 const ast = @import("../ast.zig");
 const Node = ast.Node;
 const Binding = ast.Binding;
-const type_parser = @import("../type_parser.zig");
 const expander = @import("../expander.zig");
 const flow = @import("flow.zig");
 const fold = @import("fold.zig");
@@ -1156,70 +1155,58 @@ pub const Compiler = struct {
 
         const min_args = @min(sig.param_types.len, reordered_args.len);
         for (0..min_args) |i| {
-            if (sig.param_types[i]) |expected_type| {
-                const actual_type = type_check.inferExprType(
-                    self,
-                    reordered_args[i],
-                );
-                // skip type check for type params (generics)
-                const is_type_param = for (sig.type_params) |tp| {
-                    if (std.mem.eql(u8, tp, expected_type)) break true;
-                } else false;
-                if (is_type_param) continue;
-                type_check.checkType(
-                    type_parser.parseTypeString(self, expected_type) catch types.resolveTypeName(self, expected_type),
-                    actual_type,
-                ) catch |err| switch (err) {
-                    error.TypeError => {
-                        const actual_str = try types.formatType(self.alloc, actual_type);
-                        const label = if (sig.param_names[i].len == 0)
-                            try std.fmt.allocPrint(
-                                self.alloc,
-                                "arg {d}",
-                                .{i + 1},
-                            )
-                        else
-                            try std.fmt.allocPrint(
-                                self.alloc,
-                                "arg {d} (`{s}`)",
-                                .{ i + 1, sig.param_names[i] },
-                            );
+            const expected_type = sig.param_types[i];
+            if (expected_type == .any) continue;
+            const actual_type = type_check.inferExprType(
+                self,
+                reordered_args[i],
+            );
+            // type params (generics) are .type_var, skip type check
+            if (expected_type == .type_var) continue;
+            type_check.checkType(
+                expected_type,
+                actual_type,
+            ) catch |err| switch (err) {
+                error.TypeError => {
+                    const expected_str = try types.formatType(self.alloc, expected_type);
+                    const actual_str = try types.formatType(self.alloc, actual_type);
+                    const label = if (sig.param_names[i].len == 0)
+                        try std.fmt.allocPrint(
+                            self.alloc,
+                            "arg {d}",
+                            .{i + 1},
+                        )
+                    else
+                        try std.fmt.allocPrint(
+                            self.alloc,
+                            "arg {d} (`{s}`)",
+                            .{ i + 1, sig.param_names[i] },
+                        );
 
-                        const headline = if (sig.param_names[i].len == 0)
-                            try std.fmt.allocPrint(
-                                self.alloc,
-                                "arg {d} to `{s}` wants {s}, got {s}",
-                                .{
-                                    i + 1,
-                                    fn_name,
-                                    expected_type,
-                                    actual_str,
-                                },
-                            )
-                        else
-                            try std.fmt.allocPrint(
-                                self.alloc,
-                                "arg {d} (`{s}`) to `{s}` wants {s}, got {s}",
-                                .{
-                                    i + 1,
-                                    sig.param_names[i],
-                                    fn_name,
-                                    expected_type,
-                                    actual_str,
-                                },
-                            );
-                        try self.appendFailureReport(.ParseError, &.{
-                            .{ .@"error" = headline },
-                            .{ .span = .{
-                                .span = reordered_args[i].span,
-                                .role = .primary,
-                                .message = label,
-                            } },
-                        });
-                        had_error = true;
-                    },
-                };
-            }
+                    const headline = if (sig.param_names[i].len == 0)
+                        try std.fmt.allocPrint(
+                            self.alloc,
+                            "arg {d} to `{s}` wants {s}, got {s}",
+                            .{ i + 1, fn_name, expected_str, actual_str },
+                        )
+                    else
+                        try std.fmt.allocPrint(
+                            self.alloc,
+                            "arg {d} (`{s}`) to `{s}` wants {s}, got {s}",
+                            .{ i + 1, sig.param_names[i], fn_name, expected_str, actual_str },
+                        );
+                    try self.appendFailureReport(.ParseError, &.{
+                        .{ .@"error" = headline },
+                        .{ .span = .{
+                            .span = reordered_args[i].span,
+                            .role = .primary,
+                            .message = label,
+                        } },
+                    });
+                    had_error = true;
+                },
+                else => |e| return e,
+            };
         }
         if (had_error) return error.LoweringFailed;
         return reordered_args;
@@ -1522,9 +1509,7 @@ pub const Compiler = struct {
             _ = rt;
         } else {
             const inferred_type = type_check.inferExprType(self, body);
-            const inferred_type_str = try self.alloc.dupe(u8, types.typeName(inferred_type));
-            sig.return_type = inferred_type_str;
-            sig.return_type_info = inferred_type;
+            sig.return_type = inferred_type;
 
             // propagate to parent state so callers find it via
             // findFnSignature (this state will be popped)
@@ -1532,7 +1517,6 @@ pub const Compiler = struct {
                 const parent = &self.functions.items[self.functions.items.len - 2];
                 if (parent.fn_signatures.get(name)) |parent_sig| {
                     parent_sig.return_type = sig.return_type;
-                    parent_sig.return_type_info = sig.return_type_info;
                 }
             }
         }

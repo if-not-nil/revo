@@ -44,11 +44,10 @@ pub const FunctionState = struct {
 
     pub const FnSig = struct {
         param_names: []const []const u8,
-        param_types: []const ?[]const u8,
-        return_type: ?[]const u8,
+        param_types: []const types.TypeInfo,
         required_count: usize,
         type_params: []const []const u8 = &.{},
-        return_type_info: types.TypeInfo = .any,
+        return_type: types.TypeInfo = .any,
     };
 
     pub fn init(alloc: std.mem.Allocator) !FunctionState {
@@ -358,35 +357,27 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
     errdefer param_names.deinit(self.alloc);
     for (params) |p| try param_names.append(self.alloc, p.name);
 
-    var param_types = try std.ArrayList(?[]const u8).initCapacity(self.alloc, params.len);
+    var param_types = try std.ArrayList(types.TypeInfo).initCapacity(self.alloc, params.len);
     errdefer param_types.deinit(self.alloc);
-    for (params) |p| try param_types.append(self.alloc, if (p.type_name) |tn| switch (tn.kind) {
-        .named => |n| n,
-        else => null,
-    } else null);
+    for (params) |p| try param_types.append(self.alloc, if (p.type_name) |tn|
+        type_parser.evalTypeExpr(self, tn) catch .any
+    else
+        .any);
 
     var required_count: usize = params.len;
     for (params) |p| {
         if (p.optional) required_count -= 1;
     }
 
-    const return_type_str = if (return_type) |rt| switch (rt.kind) {
-        .named => |n| n,
-        else => @tagName(rt.kind),
-    } else null;
-
-    const return_type_info = if (return_type) |rt|
-        type_parser.evalTypeExpr(self, rt) catch .any
-    else
-        types.TypeInfo.any;
-
     sig.* = .{
         .param_names = try param_names.toOwnedSlice(self.alloc),
         .param_types = try param_types.toOwnedSlice(self.alloc),
-        .return_type = return_type_str,
         .required_count = required_count,
         .type_params = type_params,
-        .return_type_info = return_type_info,
+        .return_type = if (return_type) |rt|
+            type_parser.evalTypeExpr(self, rt) catch .any
+        else
+            .any,
     };
     return sig;
 }

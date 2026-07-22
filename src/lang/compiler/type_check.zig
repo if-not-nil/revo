@@ -80,25 +80,15 @@ pub fn inferCallReturnType(
         const fn_name = callee.expr.ident;
         const sig = state_mod.findFnSignature(self, fn_name) orelse return .any;
         // generic fn with type params? subst from arg types
-        if (sig.type_params.len > 0) {
-            // synthetic return type from the what weve got
-            const ret_info: TypeInfo = if (sig.return_type_info != .any)
-                sig.return_type_info
-            else if (sig.return_type) |ret_str|
-                types_mod.resolveTypeName(self, ret_str)
-            else
-                .any;
-
-            if (ret_info != .any) {
-                var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
-                defer param_map.deinit();
-                for (sig.type_params, 0..) |tp, i| {
-                    param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
-                }
-                return types_mod.substituteTypeParams(self.alloc, ret_info, &param_map) catch .any;
+        if (sig.type_params.len > 0 and sig.return_type != .any) {
+            var param_map = std.StringHashMap(TypeInfo).init(self.alloc);
+            defer param_map.deinit();
+            for (sig.type_params, 0..) |tp, i| {
+                param_map.put(tp, if (i < type_args.len) types_mod.resolveTypeName(self, type_args[i]) else if (i < args.len and type_args.len == 0) inferExprType(self, args[i]) else .any) catch {};
             }
+            return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch .any;
         }
-        return if (sig.return_type) |ret| types_mod.resolveTypeName(self, ret) else .any;
+        return sig.return_type;
     }
 
     return .any;

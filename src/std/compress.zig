@@ -16,7 +16,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "base64_encode",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "string",
         .doc = "encodes data as standard base64 with padding",
         .f = root.define(&.{.string}, base64Encode),
@@ -24,7 +24,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "base64_decode",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decodes standard base64 string",
         .f = root.define(&.{.string}, base64Decode),
@@ -32,7 +32,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "base64url_encode",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "string",
         .doc = "encodes data as url-safe base64 without padding",
         .f = root.define(&.{.string}, base64UrlEncode),
@@ -40,7 +40,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "base64url_decode",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decodes url-safe base64 string",
         .f = root.define(&.{.string}, base64UrlDecode),
@@ -48,7 +48,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "gzip_compress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "compresses data using gzip format",
         .f = root.define(&.{.string}, gzipCompress),
@@ -56,7 +56,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "gzip_decompress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decompresses gzip data",
         .f = root.define(&.{.string}, gzipDecompress),
@@ -64,7 +64,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "zlib_compress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "compresses data using zlib format",
         .f = root.define(&.{.string}, zlibCompress),
@@ -72,7 +72,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "zlib_decompress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decompresses zlib data",
         .f = root.define(&.{.string}, zlibDecompress),
@@ -80,7 +80,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "deflate",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "compresses data using raw deflate",
         .f = root.define(&.{.string}, deflateCompress),
@@ -88,7 +88,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "inflate",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decompresses raw deflate data",
         .f = root.define(&.{.string}, inflateDecompress),
@@ -96,7 +96,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "zstd_decompress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decompresses zstd data",
         .f = root.define(&.{.string}, zstdDecompressFn),
@@ -104,7 +104,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "lzma_decompress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decompresses lzma data",
         .f = root.define(&.{.string}, lzmaDecompressFn),
@@ -112,7 +112,7 @@ pub const specs: []const api.FnSpec = &.{
     .{
         .name = "xz_decompress",
         .placements = &.{api.mod("compress")},
-        .params = &.{ .{ "data", "string" } },
+        .params = &.{.{ "data", "string" }},
         .ret = "!string",
         .doc = "decompresses xz data",
         .f = root.define(&.{.string}, xzDecompressFn),

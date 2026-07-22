@@ -315,10 +315,10 @@ fn next(self: *Lexer) !Token {
             self.makeToken(.fat_arrow, start, self.pos, line, column)
         else
             self.makeToken(.assign, start, self.pos, line, column),
-    '!' => if (self.matchChar('='))
-        self.makeToken(.neq, start, self.pos, line, column)
-    else
-        self.makeToken(.bang, start, self.pos, line, column),
+        '!' => if (self.matchChar('='))
+            self.makeToken(.neq, start, self.pos, line, column)
+        else
+            self.makeToken(.bang, start, self.pos, line, column),
         '<' => if (self.matchChar('='))
             self.makeToken(.lte, start, self.pos, line, column)
         else
