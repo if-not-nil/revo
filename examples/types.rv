@@ -200,7 +200,7 @@ let mixed = i1 + f1  # emits add (generic)
 
 # untyped / dynamic fallback
 
-# untyped code still works: no annotations, dynamic as before
+# untyped code still works
 let a = 10
 let b = 20
 let c = a + b
@@ -208,4 +208,17 @@ let c = a + b
 # tuple binding error showcase
 # const first, second = (1,)
 
-sum
+# type expression syntax
+
+# optional: T? expands to T | :nil
+let maybe: int? = 42
+let nothing: int? = :nil
+# let bad: int? = "str"   # expected int | :nil, got string
+
+# union types with |
+# const num_or_str: int | string = 42
+# const other: int | string = "hi"
+
+# parameterized table types are parsed but literals infer as plain `table`
+# let nums: table<int> = { 1, 2, 3 }       # wants table<int>, got table
+# let pairs: table<string, int> = { a = 1, b = 2 }
