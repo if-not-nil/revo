@@ -198,6 +198,7 @@ sleepers: std.ArrayList(SleepWaiter),
 io_waiters: std.ArrayList(WaitEntry),
 channels: std.AutoHashMap(ChannelID, ChannelState),
 waiting_cnt: usize,
+free_fibers: std.ArrayList(FiberID),
 
 /// init with a 64-slot runq
 pub fn init(alloc: std.mem.Allocator) !@This() {
@@ -214,6 +215,7 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
         .io_waiters = undefined,
         .channels = .init(alloc),
         .waiting_cnt = 0,
+        .free_fibers = undefined,
     };
     self.fibers = try std.ArrayList(Fiber).initCapacity(alloc, 1);
     errdefer self.fibers.deinit(alloc);
@@ -223,6 +225,8 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
     errdefer self.sleepers.deinit(alloc);
     self.io_waiters = try std.ArrayList(WaitEntry).initCapacity(alloc, 4);
     errdefer self.io_waiters.deinit(alloc);
+    self.free_fibers = try std.ArrayList(FiberID).initCapacity(alloc, 8);
+    errdefer self.free_fibers.deinit(alloc);
 
     return self;
 }
@@ -233,6 +237,7 @@ pub fn deinit(self: *@This()) void {
     self.alloc.free(self.ring_buf);
     self.sleepers.deinit(self.alloc);
     self.io_waiters.deinit(self.alloc);
+    self.free_fibers.deinit(self.alloc);
     var channel_it = self.channels.valueIterator();
     while (channel_it.next()) |channel| channel.deinit(self.alloc);
     self.channels.deinit();
@@ -312,6 +317,10 @@ pub fn finishFiber(self: *@This(), fid: FiberID, result: Data) !void {
     for (fiber.waiters.items) |waiter_id|
         try self.wakeFiber(waiter_id, fiber.result);
     fiber.waiters.items.len = 0;
+    fiber.frames_hot.items.len = 0;
+    fiber.frames_cold.items.len = 0;
+    fiber.open_upvalues.items.len = 0;
+    if (fid != 0) try self.free_fibers.append(self.alloc, fid);
 }
 
 /// park current fiber for a duration in ms

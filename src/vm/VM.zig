@@ -1841,15 +1841,41 @@ pub inline fn spawnRegister(
         return error.WrongArity;
     }
 
-    const child_id: FiberID = self.sched.fibers.items.len;
     const child_program = if (self.functions.segments.items.len > closure.segment_id)
         self.functions.segments.items[closure.segment_id]
     else
         fiber.program;
-    var child = try Fiber.init(self.runtime.alloc, child_id, child_program, closure.register_count);
-    errdefer child.deinit(self.runtime.alloc);
-    child.debug_info_id = fiber.debug_info_id;
-    child.state = .ready;
+
+    // cache parent register data before any append that could realloc the fibers array
+    const parent_regs = fiber.registers;
+    const parent_regs_len = fiber.registers_len;
+
+    const child_id: FiberID = if (self.sched.free_fibers.pop()) |fid| blk: {
+        const f = &self.sched.fibers.items[fid];
+        f.pc = 0;
+        f.program = child_program;
+        f.debug_info_id = fiber.debug_info_id;
+        f.running = false;
+        f.state = .ready;
+        f.in_runq = false;
+        f.wait = .none;
+        f.parked_result_slot = null;
+        f.err_atom = null;
+        f.registers_len = 0;
+        f.frames_hot.items.len = 0;
+        f.frames_cold.items.len = 0;
+        f.open_upvalues.items.len = 0;
+        f.waiters.items.len = 0;
+        break :blk fid;
+    } else blk: {
+        const fid = self.sched.fibers.items.len;
+        var child = try Fiber.init(self.runtime.alloc, fid, child_program, closure.register_count);
+        errdefer child.deinit(self.runtime.alloc);
+        try self.sched.fibers.append(self.runtime.alloc, child);
+        break :blk fid;
+    };
+
+    const child = &self.sched.fibers.items[child_id];
 
     if (closure.register_count > child.registers.len)
         child.registers = try self.runtime.alloc.realloc(child.registers, closure.register_count);
@@ -1857,11 +1883,10 @@ pub inline fn spawnRegister(
     @memset(child.registers[0..closure.register_count], revo.Data.new.core(.missing));
 
     for (0..argc) |idx| {
-        // this is safe
         const src_reg = instr.a + 1 + @as(opcode.Register, @intCast(idx));
         const src_slot = base + src_reg;
-        child.registers[idx] = if (src_slot < fiber.registers_len)
-            fiber.registers[src_slot]
+        child.registers[idx] = if (src_slot < parent_regs_len)
+            parent_regs[src_slot]
         else
             revo.Data.new.core(.missing);
     }
@@ -1874,9 +1899,7 @@ pub inline fn spawnRegister(
         closure.register_count,
     );
 
-    const child_closure_id = try self.detachClosureForFiber(
-        closure_id,
-    );
+    const child_closure_id = try self.detachClosureForFiber(closure_id);
     try child.frames_hot.append(self.runtime.alloc, .{
         .return_addr = @intCast(child.program.len),
         .base = 0,
@@ -1890,10 +1913,8 @@ pub inline fn spawnRegister(
     });
     child.pc = closure.addr;
 
-    try self.sched.fibers.append(self.runtime.alloc, child);
     try self.sched.enqueueRunnable(child_id);
     const result_slot = base + instr.c;
-    // re-acquire fiber pointer bc append above may have reallocated
     const cur = self.currentFiber();
     if (result_slot >= cur.registers_len) {
         try ensureRegCapacity(cur, self.runtime.alloc, result_slot + 1);
