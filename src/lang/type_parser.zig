@@ -64,10 +64,10 @@ const Parser = struct {
         if (self.match(.pipe)) {
             var variants = try std.ArrayList(*ast.TypeExpr).initCapacity(self.alloc, 4);
             errdefer variants.deinit(self.alloc);
-            try collectVariants(self.alloc, &variants, left);
-            try collectVariants(self.alloc, &variants, try self.parseAtom());
+            try flattenUnion(self.alloc, &variants, left);
+            try flattenUnion(self.alloc, &variants, try self.parseAtom());
             while (self.match(.pipe))
-                try collectVariants(self.alloc, &variants, try self.parseAtom());
+                try flattenUnion(self.alloc, &variants, try self.parseAtom());
             return try ast.allocTypeExpr(self.alloc, left.span, .{ .union_of = try variants.toOwnedSlice(self.alloc) });
         }
         return left;
@@ -160,7 +160,7 @@ const Parser = struct {
     }
 };
 
-fn collectVariants(alloc: std.mem.Allocator, variants: *std.ArrayList(*ast.TypeExpr), te: *ast.TypeExpr) !void {
+fn flattenUnion(alloc: std.mem.Allocator, variants: *std.ArrayList(*ast.TypeExpr), te: *ast.TypeExpr) !void {
     if (te.kind == .union_of) {
         try variants.appendSlice(alloc, te.kind.union_of);
     } else {
