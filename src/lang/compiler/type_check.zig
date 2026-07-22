@@ -28,7 +28,7 @@ pub fn checkType(expected: TypeInfo, actual: TypeInfo) !void {
     return error.TypeError;
 }
 
-pub const evalTypeExpr = types_mod.evalTypeExpr;
+pub const evalTypeExpr = @import("../type_parser.zig").evalTypeExpr;
 
 pub fn inferExprType(self: *Compiler, node: *const Node) TypeInfo {
     if (self.type_annotations) |map| {

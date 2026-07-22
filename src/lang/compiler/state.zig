@@ -7,6 +7,7 @@ const Register = revo.opcode.Register;
 const UpvalueSpec = revo.functions.UpvalueSpec;
 const types = @import("types.zig");
 
+const type_parser = @import("../type_parser.zig");
 const ast = @import("../ast.zig");
 const Node = ast.Node;
 
@@ -375,7 +376,7 @@ pub fn allocFnSig(self: *Compiler, params: []const ast.FnParam, return_type: ?*a
     } else null;
 
     const return_type_info = if (return_type) |rt|
-        types.evalTypeExpr(self, rt) catch .any
+        type_parser.evalTypeExpr(self, rt) catch .any
     else
         types.TypeInfo.any;
 

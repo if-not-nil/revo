@@ -1370,7 +1370,7 @@ pub const Compiler = struct {
             } else try self.compile(binding.value, true);
 
             const inferred_type = if (binding.type_name) |tn|
-                try types.evalTypeExpr(self, tn)
+                try type_check.evalTypeExpr(self, tn)
             else
                 type_check.inferExprType(self, binding.value);
             try state_mod.setLocalTypeHint(self, name, inferred_type);
@@ -1483,7 +1483,7 @@ pub const Compiler = struct {
                 .initialized = true,
                 .type_name = if (param.type_name) |tn| switch (tn.kind) {
                     .named => |n| n,
-                    else => types.typeName(try types.evalTypeExpr(self, tn)),
+                    else => types.typeName(try type_check.evalTypeExpr(self, tn)),
                 } else null,
                 .type_explicit = param.type_name != null,
             };
@@ -1492,7 +1492,7 @@ pub const Compiler = struct {
             if (param.type_name) |type_name| {
                 try fn_state.type_hints.append(self.alloc, .{
                     .name = param.name,
-                    .type_info = try types.evalTypeExpr(self, type_name),
+                    .type_info = try type_check.evalTypeExpr(self, type_name),
                 });
             }
         }

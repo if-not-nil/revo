@@ -77,7 +77,7 @@ pub fn compileLocalBinding(
     try syncLocalTableFields(self, slot, value);
 
     const inferred_type = if (type_name) |tn|
-        try types_mod.evalTypeExpr(self, tn)
+        try type_check.evalTypeExpr(self, tn)
     else
         type_check.inferExprType(self, value);
 
@@ -460,7 +460,7 @@ pub fn compileStruct(
             } else {
                 try seen.put(fname, true);
                 const field_type: types_mod.TypeInfo = if (item.field.type_name) |tn|
-                    try types_mod.evalTypeExpr(self, tn)
+                    try type_check.evalTypeExpr(self, tn)
                 else
                     types_mod.TypeInfo.any;
                 try field_defs.append(self.alloc, .{

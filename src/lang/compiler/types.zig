@@ -404,7 +404,6 @@ pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
-pub const evalTypeExpr = @import("../type_parser.zig").evalTypeExpr;
 
 /// substitute type params in a TypeInfo tree
 /// subst is any type with `get(key: []const u8) ?TypeInfo`

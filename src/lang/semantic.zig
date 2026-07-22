@@ -294,12 +294,12 @@ const SemanticChecker = struct {
         var required_count: usize = 0;
         for (fn_expr.params) |p| {
             try param_names.append(self.alloc, p.name);
-            try param_types.append(self.alloc, if (p.type_name) |tn| try types_mod.evalTypeExpr(self, tn) else .any);
+            try param_types.append(self.alloc, if (p.type_name) |tn| try type_parser.evalTypeExpr(self, tn) else .any);
             if (!p.optional) required_count += 1;
         }
         const params_slice = try param_types.toOwnedSlice(self.alloc);
         const names_slice = try param_names.toOwnedSlice(self.alloc);
-        const ret = if (fn_expr.return_type) |rt| try types_mod.evalTypeExpr(self, rt) else .any;
+        const ret = if (fn_expr.return_type) |rt| try type_parser.evalTypeExpr(self, rt) else .any;
         const sig_ptr = try self.alloc.create(FnSig);
         sig_ptr.* = .{
             .param_names = names_slice,
@@ -531,7 +531,7 @@ const SemanticChecker = struct {
 
     fn analyzeTypeAlias(self: *SemanticChecker, alias: anytype, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
-        const t = types_mod.evalTypeExpr(self, alias.type_expr) catch .any;
+        const t = type_parser.evalTypeExpr(self, alias.type_expr) catch .any;
         try self.type_aliases.put(alias.name, t);
         return .any;
     }
@@ -553,7 +553,7 @@ const SemanticChecker = struct {
                 }
                 try seen.put(field.name, {});
                 const field_type: types_mod.TypeInfo = if (field.type_name) |tn|
-                    try types_mod.evalTypeExpr(self, tn)
+                    try type_parser.evalTypeExpr(self, tn)
                 else if (field.default_value) |dflt|
                     types_mod.inferExprType(self, dflt)
                 else
@@ -611,7 +611,7 @@ const SemanticChecker = struct {
             const fn_type: types_mod.TypeInfo = .{ .function = &sig.sig };
             if (binding.type_name) |type_expr| {
                 try self.typed_names.put(name, {});
-                const expected = try types_mod.evalTypeExpr(self, type_expr);
+                const expected = try type_parser.evalTypeExpr(self, type_expr);
                 if (!types_mod.canCoerce(fn_type, expected)) {
                     const name_str = try types_mod.formatType(self.alloc, expected);
                     try self.appendTypeMismatch(
@@ -647,7 +647,7 @@ const SemanticChecker = struct {
             try self.table_field_map.put(name, fields);
             if (binding.type_name) |type_expr| {
                 try self.typed_names.put(name, {});
-                const expected = try types_mod.evalTypeExpr(self, type_expr);
+                const expected = try type_parser.evalTypeExpr(self, type_expr);
                 if (!types_mod.canCoerce(.{ .struct_type = "table" }, expected)) {
                     const name_str = try types_mod.formatType(self.alloc, expected);
                     try self.appendTypeMismatch(
@@ -674,7 +674,7 @@ const SemanticChecker = struct {
         const value_type = try self.analyzeNode(binding.value);
         if (binding.type_name) |type_expr| {
             try self.typed_names.put(name, {});
-            const expected = try types_mod.evalTypeExpr(self, type_expr);
+            const expected = try type_parser.evalTypeExpr(self, type_expr);
             if (!types_mod.canCoerce(value_type, expected)) {
                 const name_str = try types_mod.formatType(self.alloc, expected);
                 try self.appendTypeMismatch(
