@@ -1,18 +1,16 @@
+let start = time.now()
+
 fn skynet(num, size) do
-  print(type(skynet), "a")
-  if size == 1 return num
+  if size <= 1 return num
   size /= 10
   let acc = 0
   for i in 0..10 do
-    print(type(skynet), "b")
     let child = spawn skynet(num + i * size, size)
     acc += join(child)
   end
   acc
 end
 
-
-print(type(skynet))
-let root = spawn skynet(0, 2)
+let root = spawn skynet(0, 1000000)
 print("Res:", join(root))
-print(type(skynet))
+print!("took %v", (time.now() - start)/1000)

@@ -751,13 +751,15 @@ pub inline fn currentClosure(self: *VM) !?*root.functions.Closure {
 }
 
 pub inline fn captureUpvalue(self: *VM, slot_index: usize) !root.functions.UpvalueID {
-    const open = &self.currentFiber().open_upvalues;
+    const fiber = self.currentFiber();
+    const open = &fiber.open_upvalues;
     for (open.items, 0..) |entry, idx| {
         if (entry.slot_index == slot_index) return entry.id;
         if (entry.slot_index > slot_index) {
             const upvalue_id = try self.functions.createUpvalue(.{
                 .open_index = slot_index,
                 .closed = revo.Data.new.core(.missing),
+                .owner_fiber_id = fiber.id,
             });
             try open.insert(self.runtime.alloc, idx, .{ .slot_index = slot_index, .id = upvalue_id });
             return upvalue_id;
@@ -766,6 +768,7 @@ pub inline fn captureUpvalue(self: *VM, slot_index: usize) !root.functions.Upval
     const upvalue_id = try self.functions.createUpvalue(.{
         .open_index = slot_index,
         .closed = revo.Data.new.core(.missing),
+        .owner_fiber_id = fiber.id,
     });
     try open.append(self.runtime.alloc, .{ .slot_index = slot_index, .id = upvalue_id });
     return upvalue_id;
@@ -789,7 +792,16 @@ fn closeUpvalues(self: *VM, from_index: usize) !void {
 
 pub inline fn loadUpvalueData(self: *VM, upvalue_id: root.functions.UpvalueID) !Data {
     const upvalue = try self.functions.getUpvalue(upvalue_id);
-    if (upvalue.open_index) |slot_index| return self.currentFiber().registers[slot_index];
+    if (upvalue.open_index) |slot_index| {
+        const fid = upvalue.owner_fiber_id orelse return upvalue.closed;
+        return self.sched.fibers.items[fid].registers[slot_index];
+    }
+    return upvalue.closed;
+}
+
+pub inline fn loadUpvalueDataFromFiber(self: *VM, upvalue_id: root.functions.UpvalueID, fiber: *Fiber) !Data {
+    const upvalue = try self.functions.getUpvalue(upvalue_id);
+    if (upvalue.open_index) |slot_index| return fiber.registers[slot_index];
     return upvalue.closed;
 }
 
@@ -823,6 +835,7 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
             try self.functions.createUpvalue(.{
                 .open_index = null,
                 .closed = try self.loadUpvalueData(upvalue_id),
+                .owner_fiber_id = null,
             }),
         );
     }

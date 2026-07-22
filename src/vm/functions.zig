@@ -126,6 +126,7 @@ pub const Closure = struct {
 pub const Upvalue = struct {
     open_index: ?usize,
     closed: Data,
+    owner_fiber_id: ?usize,
 };
 
 pub const Function = union(enum) {
@@ -482,8 +483,8 @@ test "function pool prototype ownership and upvalue slot reuse" {
     try std.testing.expectEqual(@as(LocalSlot, 0), stored.upvalue_specs[0].index);
     try std.testing.expectEqual(@as(LocalSlot, 1), stored.const_locals[0]);
 
-    const up_id = try pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(1) });
+    const up_id = try pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(1), .owner_fiber_id = null });
     pool.sweep();
-    const up_reused = try pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(2) });
+    const up_reused = try pool.createUpvalue(.{ .open_index = null, .closed = Data.new.num(2), .owner_fiber_id = null });
     try std.testing.expectEqual(up_id, up_reused);
 }
