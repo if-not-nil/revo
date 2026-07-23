@@ -575,6 +575,32 @@ pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {
             };
             try self.compile(key, true);
         } else {
+            // named function like `fn name(...) ...` uses the name as key
+            if (entry.value.expr == .decl and
+                entry.value.expr.decl.inner.expr == .binding and
+                entry.value.expr.decl.inner.expr.binding.target.expr == .ident)
+            {
+                const fn_name = entry.value.expr.decl.inner.expr.binding.target.expr.ident;
+                // compile fn_expr directly to avoid the declaration path
+                // which would create a module-level local binding that conflicts
+                // with the table's register
+                const b = &entry.value.expr.decl.inner.expr.binding;
+                if (b.value.expr == .fn_expr) {
+                    try self.compileFn(
+                        b.value.expr.fn_expr.params,
+                        b.value.expr.fn_expr.return_type,
+                        b.value.expr.fn_expr.body,
+                        fn_name,
+                        null,
+                        b.value.expr.fn_expr.type_params,
+                    );
+                } else {
+                    try self.compile(entry.value, true);
+                }
+                try self.emit(.table_set_atom, try self.vm.internAtom(fn_name));
+                try self.regRelease();
+                continue;
+            }
             // array index key
             try self.@"const"(Data.new.num(array_index));
             array_index += 1;
