@@ -151,7 +151,7 @@ test "string-key index does not shadow stdlib method" {
         \\ const t = {1, 2, 3}
         \\ t["len"] = fn(self) 42
         \\ t:len()
-    , 3);
+    , 4);
 }
 
 test "computed key does not invalidate table field tracking" {

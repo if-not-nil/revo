@@ -1034,7 +1034,11 @@ test "lexer reports unterminated strings comments and unexpected characters" {
     try std.testing.expectError(error.UnterminatedString, lex(std.testing.allocator, "\"unterminated"));
     try std.testing.expectError(error.UnterminatedComment, lex(std.testing.allocator, "## never closed"));
     try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "@"));
-    try std.testing.expectEqual(TokenType.bang, (try lex(std.testing.allocator, "!"))[0].type);
+    {
+        const toks = try lex(std.testing.allocator, "!");
+        defer std.testing.allocator.free(toks);
+        try std.testing.expectEqual(TokenType.bang, toks[0].type);
+    }
     try std.testing.expectError(error.UnexpectedCharacter, lex(std.testing.allocator, "$"));
 }
 

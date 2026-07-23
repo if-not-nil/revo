@@ -334,7 +334,6 @@ fn compileAssignSimple(
             } else {
                 try self.compile(index.key, true);
                 try self.compile(value, true);
-                try self.regDupe();
                 try self.emit(.table_set, 0);
             }
         },

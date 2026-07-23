@@ -189,6 +189,7 @@ pub fn wakeFiber(self: *@This(), fid: FiberID, result: ?Data) !void {
 
 current_fiber: FiberID,
 alloc: std.mem.Allocator,
+fiber_arena: *std.heap.ArenaAllocator,
 fibers: std.ArrayList(Fiber),
 ring_buf: []FiberID, // runq
 ring_head: usize,
@@ -206,6 +207,7 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
     var self = Scheduler{
         .current_fiber = 0,
         .alloc = alloc,
+        .fiber_arena = undefined,
         .fibers = undefined,
         .ring_buf = undefined,
         .ring_head = 0,
@@ -217,6 +219,12 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
         .waiting_cnt = 0,
         .free_fibers = undefined,
     };
+    self.fiber_arena = try alloc.create(std.heap.ArenaAllocator);
+    self.fiber_arena.* = std.heap.ArenaAllocator.init(alloc);
+    errdefer {
+        self.fiber_arena.deinit();
+        alloc.destroy(self.fiber_arena);
+    }
     self.fibers = try std.ArrayList(Fiber).initCapacity(alloc, 1);
     errdefer self.fibers.deinit(alloc);
     self.ring_buf = try alloc.alloc(FiberID, ring_cap);
@@ -232,7 +240,9 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
-    for (self.fibers.items) |*fiber| fiber.deinit(self.alloc);
+    for (self.fibers.items) |*fiber| {
+        fiber.deinit(self.alloc);
+    }
     self.fibers.deinit(self.alloc);
     self.alloc.free(self.ring_buf);
     self.sleepers.deinit(self.alloc);
@@ -241,6 +251,8 @@ pub fn deinit(self: *@This()) void {
     var channel_it = self.channels.valueIterator();
     while (channel_it.next()) |channel| channel.deinit(self.alloc);
     self.channels.deinit();
+    self.fiber_arena.deinit();
+    self.alloc.destroy(self.fiber_arena);
 }
 
 /// get the currently executing fiber

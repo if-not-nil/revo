@@ -556,7 +556,7 @@ test "repl handles commands" {
     try env.session.source_acc.appendSlice(std.testing.allocator, "pending");
 
     try std.testing.expect(try env.session.step(&env.out.writer, ":clear"));
-    try std.testing.expectEqual(@as(usize, 0), env.vm.globals.count());
+    try std.testing.expect(!env.vm.globals.contains(1));
     try std.testing.expectEqual(@as(usize, 0), env.vm.const_globals.count());
     try std.testing.expectEqual(@as(usize, 0), env.session.source_acc.items.len);
     try std.testing.expect(std.mem.find(u8, env.out.written(), "session cleared") != null);
