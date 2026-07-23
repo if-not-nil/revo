@@ -235,14 +235,10 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
 
             // number + number fast path
             if (lhs.asNum()) |ln| if (rhs.asNum()) |rn| {
-                var l_buf: [128]u8 = undefined;
-                var r_buf: [128]u8 = undefined;
-                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch blk: {
-                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{ln});
-                };
-                const r_str = std.fmt.bufPrint(&r_buf, "{d}", .{rn}) catch blk: {
-                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{rn});
-                };
+                const l_str = try std.fmt.allocPrint(alloc, "{d}", .{ln});
+                defer alloc.free(l_str);
+                const r_str = try std.fmt.allocPrint(alloc, "{d}", .{rn});
+                defer alloc.free(r_str);
                 self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
                 const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
                 regWrite(regs, base, instr.a, try self.adoptDataStringNoDedup(combined));
@@ -266,10 +262,8 @@ fn execFiberGeneric(self: *VM, comptime use_depth: bool, target_depth: usize) !?
 
             // number + string fast path
             if (lhs.asNum()) |ln| if (rhs.asStr()) |rs| {
-                var l_buf: [128]u8 = undefined;
-                const l_str = std.fmt.bufPrint(&l_buf, "{d}", .{ln}) catch blk: {
-                    break :blk try std.fmt.allocPrint(alloc, "{d}", .{ln});
-                };
+                const l_str = try std.fmt.allocPrint(alloc, "{d}", .{ln});
+                defer alloc.free(l_str);
                 const r_str = self.stringValue(rs);
                 self.noteGCPressure(l_str.len + r_str.len + @sizeOf(Data));
                 const combined = try std.mem.concat(alloc, u8, &.{ l_str, r_str });
