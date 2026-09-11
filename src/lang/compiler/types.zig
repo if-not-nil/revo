@@ -655,7 +655,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .{ .tag = .any },
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
         .range_literal, .slice_literal => .{ .tag = .number },
-        .assign_expr, .decl, .binding, .tuple_pattern, .table_pattern, .ascribed, .type_alias => .{ .tag = .any },
+        .assign_expr, .compound_assign, .decl, .binding, .tuple_pattern, .table_pattern, .ascribed, .type_alias => .{ .tag = .any },
     };
 }
 

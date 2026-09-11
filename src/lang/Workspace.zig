@@ -2797,6 +2797,10 @@ fn walkRoles(n: *const lang.Node, m: *std.AutoHashMap(usize, u32)) !void {
         .test_block => |v| try walkRoles(v.body, m),
         .test_suite => |v| try walkRoles(v.body, m),
         .assign_expr => |a| try walkRoles(a.value, m),
+        .compound_assign => |a| {
+            try walkRoles(a.target, m);
+            try walkRoles(a.value, m);
+        },
         .decl => |d| try walkRoles(d.inner, m),
         .fn_expr => |f| try walkRoles(f.body, m),
         else => {},

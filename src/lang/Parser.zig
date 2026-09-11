@@ -333,17 +333,16 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
             continue;
         }
 
-        // infix: comp assign `x += y`; desugars to `x = x + y`
+        // infix: comp assign `x += y`; lowered in the compiler single-eval
         const comp_binop = compound_assign_table.get(self.peek().type);
         if (BP.compound >= min_bp and comp_binop != null) {
             const binop = comp_binop.?;
             _ = self.advance();
+
             const right = try self.parseExpression(BP.compound);
-            const binary = try self.allocExpr(Span.merge(left.span, right.span), .{
-                .binary = .{ .op = binop, .left = left, .right = right },
-            });
-            left = try self.allocExpr(binary.span, .{
-                .assign_expr = .{ .target = try self.exprToPattern(left), .value = binary },
+
+            left = try self.allocExpr(Span.merge(left.span, right.span), .{
+                .compound_assign = .{ .target = try self.exprToPattern(left), .op = binop, .value = right },
             });
             continue;
         }
@@ -834,6 +833,10 @@ fn parseBinding(self: *Parser, comptime kind: ast.DeclKind, start: Token) anyerr
             const t = try self.parseTuplePattern(.rparen);
             _ = try self.expect(.rparen);
             break :blk t;
+        } else if (self.check(.lsquiggly)) {
+            // keyless tables destructure like tuple patterns;
+            // keyed tables stay values and fail later with a proper error
+            break :blk try self.exprToPattern(try self.parseTable(self.advance()));
         } else {
             const first = try self.expectIdent();
             if (self.match(.comma)) {
@@ -1808,7 +1811,7 @@ fn forcesStatementBoundary(self: *Parser, left: *const Node, next: TokenType) bo
     return switch (left.expr) {
         .number => next == .lparen and !self.tokenAdjacent(left.span.end),
         .decl => expr_start_tokens.get(next),
-        .assign_expr, .return_expr, .break_expr, .continue_expr, .labeled_block => expr_start_tokens.get(next),
+        .assign_expr, .compound_assign, .return_expr, .break_expr, .continue_expr, .labeled_block => expr_start_tokens.get(next),
         .call => call_stmt_boundary_tokens.get(next),
         else => false,
     };
@@ -1818,7 +1821,8 @@ fn canContinueExpression(self: *Parser, left: *const Node) bool {
     const t = self.peek().type;
     if (t == .dot or t == .lbracket or t == .assign or t == .dotdot or t == .pipe_forward or t == .hash) return true;
     if (t == .plus_assign or t == .minus_assign or t == .star_assign or
-        t == .slash_assign or t == .percent_assign) return true;
+        t == .slash_assign or t == .percent_assign or t == .caret_assign or
+        t == .concat_assign) return true;
 
     if (logical_binding_table.get(t) != null) return true;
     if (infix_binding_table.get(t) != null) return true;

@@ -791,6 +791,7 @@ pub const Compiler = struct {
                 return self.compile(d.inner, true);
             },
             .assign_expr => |assign| try values.compileAssign(self, assign.target, assign.value),
+            .compound_assign => |assign| try values.compileCompound(self, assign.target, assign.op, assign.value),
             .block => |exprs| try self.compileBlock(exprs),
             .tuple => |items| {
                 for (items) |item| {
@@ -1510,13 +1511,23 @@ pub const Compiler = struct {
             return;
         }
 
-        if (binding.target.expr == .tuple_pattern) {
-            try values.validateTuplePatternShape(
-                self,
-                binding.target.expr.tuple_pattern,
-                binding.value,
-                "binding",
-            );
+        if (binding.target.expr == .tuple_pattern or binding.target.expr == .table_pattern) {
+            switch (binding.target.expr) {
+                // idc about dup because theyre gonna be gone anyways
+                .tuple_pattern => |items| try values.validateTuplePatternShape(
+                    self,
+                    items,
+                    binding.value,
+                    "binding",
+                ),
+                .table_pattern => |items| try values.validateTablePatternShape(
+                    self,
+                    items,
+                    binding.value,
+                    "binding",
+                ),
+                else => {},
+            }
             if (kind == .global) {
                 try values.declareGlobalPattern(self, binding.target);
             } else {
@@ -1526,6 +1537,12 @@ pub const Compiler = struct {
                     kind != .con,
                 );
             }
+        } else if (binding.target.expr == .table) {
+            return self.fail(
+                .UnsupportedSyntax,
+                binding.target,
+                "keyed tables do not destructure yet :( use keyless `{a, b}`",
+            );
         }
 
         try self.compile(binding.value, true);
@@ -1770,7 +1787,7 @@ pub const Compiler = struct {
 /// if `node` is an int literal in 0..=u32::MAX, return its value, else null.
 /// the fold range matches what load_small_int/load_const cover, so folding
 /// into an immediate operand never changes the value the op sees
-fn immInt(node: *Node) ?u32 {
+pub fn immInt(node: *const Node) ?u32 {
     if (node.expr != .number or node.expr.number.is_float) return null;
     const n = node.expr.number.value;
     if (n < 0 or n > std.math.maxInt(u32) or @trunc(n) != n) return null;
@@ -1779,7 +1796,7 @@ fn immInt(node: *Node) ?u32 {
 
 /// the immediate-operand opcode for a binop that folds a constant int RHS.
 /// returns null for float/`div`/`pow`/`concat` (no imm form, or float math)
-fn immOpFor(op: ast.BinOp) ?Opcode {
+pub fn immOpFor(op: ast.BinOp) ?Opcode {
     return switch (op) {
         .add => .add_int_imm,
         .sub => .sub_int_imm,

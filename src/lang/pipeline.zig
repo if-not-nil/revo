@@ -158,6 +158,10 @@ fn wrapPubFunctions(alloc: std.mem.Allocator, node: *Node) !void {
             try wrapPubFunctions(alloc, a.target);
             try wrapPubFunctions(alloc, a.value);
         },
+        .compound_assign => |*a| {
+            try wrapPubFunctions(alloc, a.target);
+            try wrapPubFunctions(alloc, a.value);
+        },
         .call => |*c| {
             try wrapPubFunctions(alloc, c.callee);
             for (c.args) |arg| try wrapPubFunctions(alloc, arg);

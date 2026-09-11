@@ -341,6 +341,9 @@ pub const AstSubstituter = struct {
             .assign_expr => |a| try self.alloc(node.span, .{
                 .assign_expr = .{ .target = try self.substitute(a.target), .value = try self.substitute(a.value) },
             }),
+            .compound_assign => |a| try self.alloc(node.span, .{
+                .compound_assign = .{ .target = try self.substitute(a.target), .op = a.op, .value = try self.substitute(a.value) },
+            }),
             .binding => |b| try self.alloc(node.span, .{ .binding = .{
                 .target = try self.substitute(b.target),
                 .type_name = b.type_name,

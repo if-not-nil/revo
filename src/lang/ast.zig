@@ -267,6 +267,7 @@ pub const Expr = union(enum) {
     // ill probably ignore node's span field for now just do its expr
     // (:assign_expr, (:ident, "aaa"), (:ident, "bbb"))
     assign_expr: struct { target: *Node, value: *Node },
+    compound_assign: struct { target: *Node, op: BinOp, value: *Node },
     loop_expr: struct { body: *Node, label: ?[]const u8 = null },
     for_loop: struct { params: []FnParam, iter: *Node, body: *Node, label: ?[]const u8 = null },
     comp_block: struct { expr: *Node, is_macro: bool = false },
@@ -545,6 +546,14 @@ pub const Node = struct {
             .binding => |binding| try binding.printAt(writer, "binding", depth),
             .assign_expr => |assign| {
                 try writer.writeAll("(assign");
+                try sep(writer, depth, 1);
+                try assign.target.printAt(writer, child(depth));
+                try sep(writer, depth, 1);
+                try assign.value.printAt(writer, child(depth));
+                try close(writer, depth);
+            },
+            .compound_assign => |assign| {
+                try writer.print("(assign-{s}", .{binOpName(assign.op)});
                 try sep(writer, depth, 1);
                 try assign.target.printAt(writer, child(depth));
                 try sep(writer, depth, 1);
@@ -1254,6 +1263,11 @@ pub fn walkExpr(
         } }),
         .assign_expr => |v| allocNode(allocator, expr.span, .{ .assign_expr = .{
             .target = try ctx.walk(allocator, v.target, ctx),
+            .value = try ctx.walk(allocator, v.value, ctx),
+        } }),
+        .compound_assign => |v| allocNode(allocator, expr.span, .{ .compound_assign = .{
+            .target = try ctx.walk(allocator, v.target, ctx),
+            .op = v.op,
             .value = try ctx.walk(allocator, v.value, ctx),
         } }),
         .binding => |v| allocNode(
