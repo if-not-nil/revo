@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+the table version `┬─┬ノ( º _ ºノ)`
+
+everything is gone now, most breaking change yet
+
 ### Added
 
 - structural table types: annotate tables by shape with `{ name: string, age: num }`
@@ -14,13 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - open subtyping: extra fields are ok, missing or mistyped fields are compile errors
   - field access on a structurally typed table infers the field's type
   - tracks both array and hash entries
-  - positional array entries: `{num, num}` matches `{1, 2}`,
-    mixed with named fields as `{num, num, name: string}`
+  - positional array entries: `{num, num}` matches `{1, 2}`
+    , mixed with named fields as `{num, num, name: string}`
 
   ```ruby
   fn greet(u: { name: string }) u.name
   greet({ name = "bob", age = 40 }) # "bob"
   ```
+
   - and the related lsp feats...
     - unknown-field diagnostics: reading `t.a` where every field of `t` is known
       and lacks `a` is now a compile error
@@ -38,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       into dependency members with bogus lines
 
 - just match
-    sugar for `match :true`
+  sugar for `match :true`
+
     ```ruby
     match
     | :true => 5
@@ -72,6 +78,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   everything takes them
   tuple patterns dont do it, they are gonna be gone soon
 
+- table destructuring!
+
+  ```ruby
+  let {a, b} = {1, 2}
+  print(a, b)
+  # => 1 2
+  ```
+
+  these are the EXACT same patterns that go into matches\
+  , so you can expect binds to work just as well:
+
+  ```ruby
+  let t = { 1, { 10 } }
+  let { a: number, { b } } = t
+
+  a + b
+  # => 11
+  ```
+
 - std:
   - `hash(any) -> num`
   - `fs`:
@@ -92,14 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- compound ops (`a -= 1`, `b += 2`, `c ^= 3`) are real now and will not call the lhs twice
 - type-to-string rendering is unified
 - rendered types use spaces
 - internal
-    - `.d.rv` simplified:
-      - can now include type aliases
-      - any `__` key now lands in a metatable automatically
-      - macro prelude killed and put into `root.d.rv`
-
+  - `.d.rv` simplified:
+    - can now include type aliases
+    - any `__` key now lands in a metatable automatically
+    - macro prelude killed and put into `root.d.rv`
 
 ### Fixed
 
@@ -109,7 +134,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions with too many args
 - `const x = import "raylib.so"` named imports now get the fields from the module's
   `.d.rv` manifest just like the normal `import "raylib.so"`
-
 - lsp signatures show generics and optional params:
   `fn id[T](v: T) -> T`, `f(a: num, b?: num)` in hover and signature help
 
@@ -154,9 +178,7 @@ big release - many misc bugs are fixed but not noted
     const pi = 3.14
     ```
 
-
 <img width="1018" height="925" alt="image" src="https://github.com/user-attachments/assets/69b74a23-c98e-4f4d-9b10-25c05631921c" />
-
 
 - stdlib:
   - `exit(number)`
@@ -262,11 +284,12 @@ big release - many misc bugs are fixed but not noted
 - ...much more
 
 ## new contributors
-* [gh:hachem-wtf](https://github.com/hachem-wtf) in https://github.com/if-not-nil/revo/pull/45
-* [gh:Gingeh](https://github.com/Gingeh) in https://github.com/if-not-nil/revo/pull/47
-* [cb:cstk](https://codeberg.org/cstk) in https://codeberg.org/lung/revo/pulls/19
 
-**full changelog**: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
+- [gh:hachem-wtf](https://github.com/hachem-wtf) in <https://github.com/if-not-nil/revo/pull/45>
+- [gh:Gingeh](https://github.com/Gingeh) in <https://github.com/if-not-nil/revo/pull/47>
+- [cb:cstk](https://codeberg.org/cstk) in <https://codeberg.org/lung/revo/pulls/19>
+
+**full changelog**: <https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2>
 
 > binaries are statically linked with musl when possible (this is why their sizes can reach >4mb). compile with `zig build -Doptimize=ReleaseSafe -Ddynamic` if you need a dynamically linked binary
 
@@ -304,3 +327,7 @@ big release - many misc bugs are fixed but not noted
 [0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.0a...0.1.1
 [0.1.0a]: https://github.com/if-not-nil/revo/releases/tag/0.1.0a
+
+**planned names:**
+0.2.0 -- breakwater
+0.3.0 -- the green version

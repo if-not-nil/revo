@@ -663,6 +663,7 @@ const SemanticChecker = struct {
                 break :blk try self.analyzeBlock(exprs, node.span);
             },
             .assign_expr => |assign| try self.analyzeAssign(assign, node.span),
+            .compound_assign => |assign| try self.analyzeCompound(assign.target, assign.op, assign.value, node.span),
             .return_expr => |val| try self.analyzeReturn(val, node.span),
             .call => |call| blk: {
                 const t = try self.analyzeCall(call, node.span);
@@ -697,38 +698,7 @@ const SemanticChecker = struct {
             .binary => |b| blk: {
                 const l = try self.analyzeNode(b.left);
                 const r = try self.analyzeNode(b.right);
-                switch (b.op) {
-                    .add, .sub, .div, .int_div, .mod, .pow => {
-                        if ((l.tag == .number and r.tag == .string) or (l.tag == .string and r.tag == .number)) {
-                            try self.appendError(
-                                try std.fmt.allocPrint(self.alloc, "cannot {s} {s} and {s}", .{ @tagName(b.op), try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
-                                node.span,
-                                "invalid operands",
-                            );
-                        }
-                    },
-                    .mul => {
-                        if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
-                            try self.appendError(
-                                try std.fmt.allocPrint(self.alloc, "cannot multiply {s} and {s}", .{ try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
-                                node.span,
-                                "invalid operands",
-                            );
-                        }
-                    },
-                    .concat => {},
-                    .band, .bor, .bxor, .shl, .shr => {
-                        if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
-                            try self.appendError(
-                                try std.fmt.allocPrint(self.alloc, "cannot apply {s} to {s} and {s}", .{ @tagName(b.op), try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
-                                node.span,
-                                "invalid operands",
-                            );
-                        }
-                    },
-                    .eq, .neq, .lt, .gt, .lte, .gte => {},
-                    .@"union" => unreachable,
-                }
+                try self.checkBinaryOperands(b.op, l, r, node.span);
                 break :blk types_mod.inferExprType(self, node);
             },
             .and_expr => |v| blk: {
@@ -980,9 +950,12 @@ const SemanticChecker = struct {
 
     fn analyzeBinding(self: *SemanticChecker, binding: ast.Binding, decl_doc: ?[]const u8, _: ast.Span) !types_mod.TypeInfo {
         if (binding.target.expr != .ident) {
-            if (binding.target.expr == .tuple_pattern) {
-                _ = try self.analyzeNode(binding.value);
-                return self.declarePatternNames(binding.target);
+            if (binding.target.expr == .tuple_pattern or binding.target.expr == .table_pattern) {
+                const value_type = try self.analyzeNode(binding.value);
+                _ = try self.declarePatternNames(binding.target);
+                try self.checkPatternAscriptions(binding.target, value_type);
+
+                return .{ .tag = .any };
             }
             return .{ .tag = .any };
         }
@@ -1131,6 +1104,55 @@ const SemanticChecker = struct {
         return .{ .tag = .any };
     }
 
+    /// binding patterns juty trust `: T` ascriptions at declaration
+    /// ; this pass checks them against known element types so
+    ///   `let {x: number} = {:ok}` fails instead of binding :ok as number
+    ///
+    /// unknown positions
+    ///     (any, unions, dynamic tables)
+    /// pass like nothinh happeneg since `canCoerce` treats `any` as top on both sides
+    fn checkPatternAscriptions(self: *SemanticChecker, pattern: *const ast.Node, context: types_mod.TypeInfo) !void {
+        const items = switch (pattern.expr) {
+            .tuple_pattern, .table_pattern => |items| items,
+            else => return,
+        };
+
+        for (items, 0..) |item, i| {
+            if (item.expr != .ascribed and item.expr != .tuple_pattern and item.expr != .table_pattern) continue;
+            const elem = patternElemType(self, context, i) orelse continue;
+
+            if (item.expr == .ascribed) {
+                const a = item.expr.ascribed;
+                const expected = type_serde.evalTypeExpr(self, a.type_name) catch types_mod.TypeInfo{ .tag = .any };
+
+                if (!types_mod.canCoerce(elem, expected)) {
+                    const name = if (a.expr.expr == .ident) a.expr.expr.ident else "?";
+                    try self.appendTypeMismatch(item.span, name, expected, elem);
+                }
+
+                try self.checkPatternAscriptions(a.expr, elem);
+            } else {
+                try self.checkPatternAscriptions(item, elem);
+            }
+        }
+    }
+
+    /// positional element type of a destructured value, or null when unknown.
+    /// table patterns index tuples and tables alike (`t[0]` works on both).
+    fn patternElemType(self: *SemanticChecker, context: types_mod.TypeInfo, i: usize) ?types_mod.TypeInfo {
+        switch (context.tag) {
+            .tuple => |items| if (i < items.len) return items[i] else return null,
+            .table => |tbl| {
+                const fields = tbl.fields orelse return null;
+                const key = std.fmt.allocPrint(self.alloc, "{d}", .{i}) catch return null;
+                if (types_mod.findField(fields, key)) |f| return f.field_type;
+                return null;
+            },
+
+            else => return null,
+        }
+    }
+
     /// narrow match pattern bindings when the subject type is a tagged union
     /// `(:ok, v)` and `{:ok, v}` patterns against `(:ok, int) | (:err, string)`
     /// (or the table-union spelling) bind `v` as `.int`, not `.any`
@@ -1178,16 +1200,101 @@ const SemanticChecker = struct {
         }
     }
 
-    fn analyzeAssign(self: *SemanticChecker, assign: anytype, span: ast.Span) !types_mod.TypeInfo {
+    fn analyzeAssign(
+        self: *SemanticChecker,
+        assign: anytype,
+        span: ast.Span,
+    ) !types_mod.TypeInfo {
         _ = span;
         const value_type = try self.analyzeNode(assign.value);
-        switch (assign.target.expr) {
+        try self.trackAssignTarget(assign.target, value_type, assign.value.span);
+
+        return .{ .tag = .any };
+    }
+
+    fn analyzeCompound(
+        self: *SemanticChecker,
+        target: *const ast.Node,
+        op: ast.BinOp,
+        value: *const ast.Node,
+        span: ast.Span,
+    ) !types_mod.TypeInfo {
+        const lhs = switch (target.expr) {
+            .ident, .field, .index => try self.analyzeNode(target),
+            else => blk: {
+                _ = try self.analyzeNode(value);
+                const target_kind = @tagName(target.expr);
+                try self.appendError(
+                    try std.fmt.allocPrint(self.alloc, "cannot assign to {s}", .{target_kind}),
+                    target.span,
+                    "invalid assignment target",
+                );
+                break :blk types_mod.TypeInfo{ .tag = .any };
+            },
+        };
+
+        if (target.expr != .ident and target.expr != .field and target.expr != .index) return .{ .tag = .any };
+        const rhs = try self.analyzeNode(value);
+
+        try self.checkBinaryOperands(op, lhs, rhs, span);
+        const result = types_mod.inferBinaryOp(op, lhs, rhs);
+
+        try self.trackAssignTarget(target, result, value.span);
+        return .{ .tag = .any };
+    }
+
+    /// shared operand checks for value-level binary ops
+    /// ; `.binary` and `.compound_assign` lower to
+    ///     the same opcodes so they check the same
+    fn checkBinaryOperands(
+        self: *SemanticChecker,
+        op: ast.BinOp,
+        l: types_mod.TypeInfo,
+        r: types_mod.TypeInfo,
+        span: ast.Span,
+    ) !void {
+        switch (op) {
+            .add, .sub, .div, .int_div, .mod, .pow => {
+                if ((l.tag == .number and r.tag == .string) or (l.tag == .string and r.tag == .number)) {
+                    try self.appendError(
+                        try std.fmt.allocPrint(self.alloc, "cannot {s} {s} and {s}", .{ @tagName(op), try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
+                        span,
+                        "invalid operands",
+                    );
+                }
+            },
+            .mul => {
+                if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
+                    try self.appendError(
+                        try std.fmt.allocPrint(self.alloc, "cannot multiply {s} and {s}", .{ try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
+                        span,
+                        "invalid operands",
+                    );
+                }
+            },
+            .concat => {},
+            .band, .bor, .bxor, .shl, .shr => {
+                if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
+                    try self.appendError(
+                        try std.fmt.allocPrint(self.alloc, "cannot apply {s} to {s} and {s}", .{ @tagName(op), try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
+                        span,
+                        "invalid operands",
+                    );
+                }
+            },
+            .eq, .neq, .lt, .gt, .lte, .gte => {},
+            .@"union" => unreachable,
+        }
+    }
+
+    fn trackAssignTarget(self: *SemanticChecker, target: *const ast.Node, value_type: types_mod.TypeInfo, value_span: ast.Span) !void {
+        switch (target.expr) {
             .ident => |name| {
                 if (self.typed_names.contains(name)) {
                     if (self.lookup(name)) |expected| {
                         if (!types_mod.canCoerce(value_type, expected)) {
                             try self.appendTypeMismatch(
-                                assign.value.span,
+                                value_span,
                                 name,
                                 expected,
                                 value_type,
@@ -1256,15 +1363,14 @@ const SemanticChecker = struct {
                 }
             },
             else => {
-                const target_kind = @tagName(assign.target.expr);
+                const target_kind = @tagName(target.expr);
                 try self.appendError(
                     try std.fmt.allocPrint(self.alloc, "cannot assign to {s}", .{target_kind}),
-                    assign.target.span,
+                    target.span,
                     "invalid assignment target",
                 );
             },
         }
-        return .{ .tag = .any };
     }
 
     fn analyzeReturn(self: *SemanticChecker, val: ?*ast.Node, span: ast.Span) !types_mod.TypeInfo {

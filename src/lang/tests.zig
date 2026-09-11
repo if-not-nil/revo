@@ -612,6 +612,23 @@ test "assignment & op combinations" {
     try t.topNumber("let t = 21 t *= 2 t", 42);
 }
 
+test "compound assign evaluates object and key once" {
+    try t.topNumber(
+        \\ let n = 0
+        \\ fn key() do n += 1 0 end
+        \\ let t = {100}
+        \\ t[key()] += 5
+        \\ t[0] + n
+    , 106);
+    try t.topNumber(
+        \\ let n = 0
+        \\ let t = {v = 10}
+        \\ fn obj() do n += 1 t end
+        \\ obj().v += 5
+        \\ t.v + n
+    , 16);
+}
+
 test "comparisons" {
     try t.topFalse("1 == 2");
     try t.topTrue("assert(1 < 2)");
@@ -2344,6 +2361,89 @@ test "tuple let binding initializes locals" {
         \\ let a, b = (1, 2)
         \\ a + b
     , 3);
+}
+
+test "table binding mismatch reports item counts" {
+    try t.expectCompileFailure(
+        \\ const {a, b} = {1}
+    ,
+        .ParseError,
+        1,
+        17,
+        "table binding expects at least 2 items, got 1",
+    );
+}
+
+test "table let binding initializes locals" {
+    try t.topNumber(
+        \\ let {a, b} = {1, 2}
+        \\ a + b
+    , 3);
+    try t.topNumber(
+        \\ const {x, y} = {10, 20}
+        \\ x + y
+    , 30);
+    try t.topNumber(
+        \\ let {_, b} = {1, 2}
+        \\ b
+    , 2);
+    try t.topNumber(
+        \\ let {{x}, y} = {{5}, 6}
+        \\ x + y
+    , 11);
+    try t.topNumber(
+        \\ let {a, b} = {1, 2, x = 9}
+        \\ a + b
+    , 3);
+}
+
+test "table let binding with ascriptions binds inner" {
+    try t.topNumber(
+        \\ let {a: number} = {41}
+        \\ a + 1
+    , 42);
+    try t.topNumber(
+        \\ let {{x: number}, y} = {{5}, 6}
+        \\ x + y
+    , 11);
+}
+
+test "table binding ascription mismatch is a compile error" {
+    try t.expectCompileFailure(
+        \\ let {x: number, y} = {:ok, 2}
+    ,
+        .ParseError,
+        1,
+        7,
+        "`x` wants number, got :ok",
+    );
+    try t.expectCompileFailure(
+        \\ let {x, y: string} = {:ok, 2}
+    ,
+        .ParseError,
+        1,
+        10,
+        "`y` wants string, got number",
+    );
+    try t.expectCompileFailure(
+        \\ let {{x: number}, y} = {{:ok}, 2}
+    ,
+        .ParseError,
+        1,
+        8,
+        "`x` wants number, got :ok",
+    );
+}
+
+test "keyed tables do not destructure" {
+    try t.expectCompileFailure(
+        \\ let {a = 1} = {1}
+    ,
+        .UnsupportedSyntax,
+        1,
+        6,
+        "keyed tables do not destructure, use keyless `{a, b}`",
+    );
 }
 
 test "num alias works in range bounds" {

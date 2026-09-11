@@ -6,6 +6,8 @@ const Compiler = revo.lang.compiler.Compiler;
 
 const ast = @import("../ast.zig");
 const Node = ast.Node;
+const Opcode = revo.opcode.Opcode;
+const root = @import("root.zig");
 const state = @import("state.zig");
 const ir = @import("../ir/root.zig");
 const toRegister = state.toRegister;
@@ -104,6 +106,18 @@ pub fn bindDeclaredPattern(
                 try bindDeclaredPattern(self, item, self.active_registers - 1, kind);
             }
         },
+        .table_pattern => |items| {
+            for (items, 0..) |item, idx| {
+                const mv_dst = try state.pushRegister(self);
+                try self.spans.append(self.alloc, self.active_span);
+                _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst, 0);
+                try self.emit(.load_small_int, idx);
+                try self.emit(.table_get, 0);
+                try bindDeclaredPattern(self, item, self.active_registers - 1, kind);
+            }
+        },
+
+        .ascribed => |a| try bindDeclaredPattern(self, a.expr, source_idx, kind),
         else => {},
     }
 }
@@ -119,11 +133,12 @@ pub fn declarePatternLocals(
             _ = try state.reuseOrDeclareLocal(self, name, mutable);
             state.reserveLocalSlots(self);
         },
-        .tuple_pattern => |items| {
+        .tuple_pattern, .table_pattern => |items| {
             for (items) |item| {
                 try declarePatternLocals(self, item, mutable);
             }
         },
+        .ascribed => |a| try declarePatternLocals(self, a.expr, mutable),
         else => {},
     }
 }
@@ -137,11 +152,12 @@ pub fn declareGlobalPattern(
             if (ast.isDiscardName(name)) return;
             try self.declared_globals.put(name, {});
         },
-        .tuple_pattern => |items| {
+        .tuple_pattern, .table_pattern => |items| {
             for (items) |item| {
                 try declareGlobalPattern(self, item);
             }
         },
+        .ascribed => |a| try declareGlobalPattern(self, a.expr),
         else => {},
     }
 }
@@ -178,7 +194,7 @@ pub fn bindPattern(
                             try self.vm.internAtom(name),
                         );
                     },
-                    .tuple_pattern => {
+                    .tuple_pattern, .table_pattern => {
                         const mv_dst2 = try state.pushRegister(self);
                         try self.spans.append(self.alloc, self.active_span);
                         _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst2, 0);
@@ -189,6 +205,39 @@ pub fn bindPattern(
                 }
             }
         },
+        .table_pattern => |items| {
+            const is_mutable = kind != .con;
+            for (items, 0..) |item, idx| {
+                switch (item.expr) {
+                    .ident => |name| {
+                        if (ast.isDiscardName(name)) continue;
+                        const mv_dst2 = try state.pushRegister(self);
+                        try self.spans.append(self.alloc, self.active_span);
+                        _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst2, 0);
+
+                        try self.emit(.load_small_int, idx);
+                        try self.emit(.table_get, 0);
+
+                        try self.emit(
+                            if (is_mutable) .store_global else .store_global_const,
+                            try self.vm.internAtom(name),
+                        );
+                    },
+                    .tuple_pattern, .table_pattern => {
+                        const mv_dst2 = try state.pushRegister(self);
+                        try self.spans.append(self.alloc, self.active_span);
+                        _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst2, 0);
+
+                        try self.emit(.load_small_int, idx);
+                        try self.emit(.table_get, 0);
+
+                        try bindPattern(self, item, self.active_registers - 1, kind);
+                    },
+                    else => {},
+                }
+            }
+        },
+        .ascribed => |a| try bindPattern(self, a.expr, source_idx, kind),
         else => {},
     }
 }
@@ -198,18 +247,18 @@ pub fn compileAssign(
     target: *const Node,
     value: *const Node,
 ) !void {
-    if (target.expr == .tuple_pattern) {
-        try validateTuplePatternShape(
-            self,
-            target.expr.tuple_pattern,
-            value,
-            "assignment",
-        );
-        try self.compile(value, true);
-        const src_idx = self.active_registers - 1;
-        return bindPattern(self, target, src_idx, .let);
+    switch (target.expr) {
+        .tuple_pattern => |items| {
+            try validateTuplePatternShape(self, items, value, "assignment");
+        },
+        .table_pattern => |items| {
+            try validateTablePatternShape(self, items, value, "assignment");
+        },
+        else => return compileAssignSimple(self, target, value),
     }
-    return compileAssignSimple(self, target, value);
+    try self.compile(value, true);
+    const src_idx = self.active_registers - 1;
+    return bindPattern(self, target, src_idx, .let);
 }
 
 pub fn validateTuplePatternShape(
@@ -229,6 +278,29 @@ pub fn validateTuplePatternShape(
     return self.fail(.ParseError, value, msg);
 }
 
+pub fn validateTablePatternShape(
+    self: *Compiler,
+    pattern: []*Node,
+    value: *const Node,
+    context: []const u8,
+) !void {
+    if (value.expr != .table) return;
+    // only array part counts, hash entries dont matter
+    var got: usize = 0;
+    for (value.expr.table) |entry| {
+        if (entry.key == null and !entry.computed) got += 1;
+    }
+
+    // allow extra but not fewer
+    if (got >= pattern.len) return;
+    const msg = try std.fmt.allocPrint(
+        self.alloc,
+        "table {s} expects at least {d} items, got {d}",
+        .{ context, pattern.len, got },
+    );
+    return self.fail(.ParseError, value, msg);
+}
+
 fn compileAssignSimple(
     self: *Compiler,
     target: *const Node,
@@ -237,48 +309,14 @@ fn compileAssignSimple(
     switch (target.expr) {
         .ident => |name| {
             try self.compile(value, true);
-            try self.regDupe();
-            if (state.resolveLocal(self, name)) |slot| {
-                if (state.resolveLocalVar(self, name)) |lv| if (!lv.mutable)
-                    return self.fail(.CompileError, target, "reassignment to constant!");
-                try self.emit(.store_local, slot);
-                state.markLocalValueKind(self, slot, .unknown);
-                const inferred_type = type_check.inferExprType(self, value);
-                try state.setLocalTypeHint(self, name, inferred_type);
-            } else if (try state.resolveUpvalue(self, name)) |slot| {
-                const fn_state = state.currentFunctionState(self) orelse
-                    return self.fail(.CompileError, target, "reassignment to constant!");
-                if (!fn_state.upvalues.items[slot].mutable)
-                    return self.fail(.CompileError, target, "reassignment to constant!");
-                try self.emit(.store_upval, slot);
-            } else {
-                if (self.functions.items.len == 1) {
-                    const atom = try self.vm.internAtom(name);
-                    const known = self.declared_globals.contains(name) or
-                        self.vm.stdlib_globals.contains(atom) or
-                        self.vm.globals.contains(atom) or
-                        self.vm.const_globals.contains(atom);
-                    if (!known) {
-                        const msg = try std.fmt.allocPrint(
-                            self.alloc,
-                            "assignment target `{s}` is not declared",
-                            .{name},
-                        );
-                        return self.fail(.InvalidAssignmentTarget, target, msg);
-                    }
-                    try self.emit(.store_global, atom);
-                } else {
-                    const msg = try std.fmt.allocPrint(
-                        self.alloc,
-                        "assignment target `{s}` is not declared",
-                        .{name},
-                    );
-                    return self.fail(.InvalidAssignmentTarget, target, msg);
-                }
-            }
+            try storeIdentTop(self, name, target, value);
         },
         .field => |field| {
-            try compileFieldAssign(self, field.object, field.name, value);
+            try self.compile(field.object, true);
+            try self.regDupe();
+            try self.compile(value, true);
+
+            try finishAtomStore(self, field.object, try self.vm.internAtom(field.name), field.name, value);
         },
         .index => |index| {
             try self.compile(index.object, true);
@@ -286,9 +324,8 @@ fn compileAssignSimple(
                 const key_atom = try self.vm.internAtom(index.key.expr.hash);
                 try self.regDupe();
                 try self.compile(value, true);
-                try self.emit(.table_set_atom, key_atom);
-                try self.emit(.table_get_atom, key_atom);
-                try widenLocalTableHint(self, index.object, index.key.expr.hash, value);
+
+                try finishAtomStore(self, index.object, key_atom, index.key.expr.hash, value);
             } else {
                 // evaluate object + key once; re-materialize them after the
                 // set so the get doesn't re-evaluate either operand
@@ -296,26 +333,173 @@ fn compileAssignSimple(
                 const obj_inst = self.value_stack.items[self.value_stack.items.len - 2];
                 const key_inst = self.value_stack.items[self.value_stack.items.len - 1];
                 try self.compile(value, true);
-                try self.emit(.table_set, 0);
-                // the key still lives in its original register; move it up
-                // first so the obj dupe can claim that slot without losing it
-                const obj_dst = try state.pushRegister(self);
-                const key_dst = try state.pushRegister(self);
-                try moveInstTo(self, key_dst, key_inst);
-                try moveInstTo(self, obj_dst, obj_inst);
-                try self.emit(.table_get, 0);
 
-                // static string keys widen like hash keys
-                // computed keys leave the hint alone
-                //
-                // nulling it would misguide later method-shadowing codegen,
-                // and the missed precision fails w compile error rather than it being wrong
-                if (index.key.expr == .string) {
-                    try widenLocalTableHint(self, index.object, index.key.expr.string, value);
-                }
+                try finishIndexStore(self, index.object, index.key, obj_inst, key_inst, value);
             }
         },
         else => {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "bad assignment target: {s}",
+                .{@tagName(target.expr)},
+            );
+            return self.fail(.InvalidAssignmentTarget, target, msg);
+        },
+    }
+}
+
+/// NEW is on stack top
+/// . dup it and store to an ident with the same
+///   const and declared checks as plain assignment
+fn storeIdentTop(self: *Compiler, name: []const u8, target: *const Node, hint_node: *const Node) !void {
+    try self.regDupe();
+    if (state.resolveLocal(self, name)) |slot| {
+        if (state.resolveLocalVar(self, name)) |lv| if (!lv.mutable)
+            return self.fail(.CompileError, target, "reassignment to constant!");
+
+        try self.emit(.store_local, slot);
+        state.markLocalValueKind(self, slot, .unknown);
+        const inferred_type = type_check.inferExprType(self, hint_node);
+
+        try state.setLocalTypeHint(self, name, inferred_type);
+    } else if (try state.resolveUpvalue(self, name)) |slot| {
+        const fn_state = state.currentFunctionState(self) orelse
+            return self.fail(.CompileError, target, "reassignment to constant!");
+
+        if (!fn_state.upvalues.items[slot].mutable)
+            return self.fail(.CompileError, target, "reassignment to constant!");
+
+        try self.emit(.store_upval, slot);
+    } else {
+        if (self.functions.items.len == 1) {
+            const atom = try self.vm.internAtom(name);
+            const known = self.declared_globals.contains(name) or
+                self.vm.stdlib_globals.contains(atom) or
+                self.vm.globals.contains(atom) or
+                self.vm.const_globals.contains(atom);
+
+            if (!known) {
+                const msg = try std.fmt.allocPrint(
+                    self.alloc,
+                    "assignment target `{s}` is not declared",
+                    .{name},
+                );
+                return self.fail(.InvalidAssignmentTarget, target, msg);
+            }
+
+            try self.emit(.store_global, atom);
+        } else {
+            const msg = try std.fmt.allocPrint(
+                self.alloc,
+                "assignment target `{s}` is not declared",
+                .{name},
+            );
+
+            return self.fail(.InvalidAssignmentTarget, target, msg);
+        }
+    }
+}
+
+/// for when stack is [OBJ, NEW]
+///
+/// set the atom field and reload so the expr reads back newval.
+fn finishAtomStore(self: *Compiler, object: *const Node, key_atom: revo.AtomID, hint_name: []const u8, hint_node: *const Node) !void {
+    try self.emit(.table_set_atom, key_atom);
+    try self.emit(.table_get_atom, key_atom);
+    try widenLocalTableHint(self, object, hint_name, hint_node);
+}
+
+/// fot when stack is [OBJ, KEY, NEW]
+///
+/// set, re-get obj+key from the saved insts
+/// , and get so the expr reads back newval without re-eval
+fn finishIndexStore(self: *Compiler, object: *const Node, key: *const Node, obj_inst: *ir.IrInst, key_inst: *ir.IrInst, hint_node: *const Node) !void {
+    try self.emit(.table_set, 0);
+    try pushPairMoves(self, obj_inst, key_inst);
+    try self.emit(.table_get, 0);
+
+    // static str keys widen like hash keys
+    // ; computed keys leave the hint alone
+    //   (nulling it would misguide method shadowing codegen)
+    if (key.expr == .string) {
+        try widenLocalTableHint(self, object, key.expr.string, hint_node);
+    }
+}
+
+/// OLD is on stack top. folds int rhs into an immediate when both sides
+/// are numeric, else compiles rhs and emits the binop.
+fn computeCompoundNew(self: *Compiler, op: ast.BinOp, target: *const Node, value: *const Node) !void {
+    const left_type = type_check.inferExprType(self, target);
+    const right_type = type_check.inferExprType(self, value);
+    const both_numeric = op != .concat and left_type.tag == .number and right_type.tag == .number;
+    if (both_numeric) {
+        if (root.immOpFor(op)) |op_imm| {
+            if (root.immInt(value)) |k| {
+                try self.emit(op_imm, k);
+                return;
+            }
+        }
+    }
+    try self.compile(value, true);
+    // BinOp names match Opcode names by construction; union is rejected above
+    try self.emit(switch (op) {
+        .@"union" => unreachable,
+        inline else => |tag| @field(Opcode, @tagName(tag)),
+    }, 0);
+}
+
+/// push reg copies of two earlier stack values
+/// , key first so the obj dupe can claim its slot without losing thekey
+fn pushPairMoves(self: *Compiler, obj_inst: *ir.IrInst, key_inst: *ir.IrInst) !void {
+    const obj_dst = try state.pushRegister(self);
+    const key_dst = try state.pushRegister(self);
+
+    try moveInstTo(self, key_dst, key_inst);
+    try moveInstTo(self, obj_dst, obj_inst);
+}
+
+pub fn compileCompound(
+    self: *Compiler,
+    target: *const Node,
+    op: ast.BinOp,
+    value: *const Node,
+) !void {
+    switch (target.expr) {
+        .ident => |name| {
+            try self.compile(target, true);
+            try computeCompoundNew(self, op, target, value);
+            try storeIdentTop(self, name, target, value);
+        },
+        .field => |field| {
+            const key_atom = try self.vm.internAtom(field.name);
+            try self.compile(field.object, true);
+            try self.regDupe();
+            try self.emit(.table_get_atom, key_atom);
+            try computeCompoundNew(self, op, target, value);
+            try finishAtomStore(self, field.object, key_atom, field.name, value);
+        },
+        .index => |index| {
+            try self.compile(index.object, true);
+            if (index.key.expr == .hash) {
+                const key_atom = try self.vm.internAtom(index.key.expr.hash);
+                try self.regDupe();
+                try self.emit(.table_get_atom, key_atom);
+                try computeCompoundNew(self, op, target, value);
+                try finishAtomStore(self, index.object, key_atom, index.key.expr.hash, value);
+            } else {
+                try self.compile(index.key, true);
+                const obj_inst = self.value_stack.items[self.value_stack.items.len - 2];
+                const key_inst = self.value_stack.items[self.value_stack.items.len - 1];
+                // keep the originals alive across the load: the get
+                // consumes its operands, and the later set needs them again
+                try pushPairMoves(self, obj_inst, key_inst);
+                try self.emit(.table_get, 0);
+                try computeCompoundNew(self, op, target, value);
+                try finishIndexStore(self, index.object, index.key, obj_inst, key_inst, value);
+            }
+        },
+        else => {
+            // all bullshit like == or |
             const msg = try std.fmt.allocPrint(
                 self.alloc,
                 "bad assignment target: {s}",
@@ -355,21 +539,6 @@ fn widenLocalTableHint(self: *Compiler, object: *const Node, field_name: []const
         widened.tag.table.fields = owned;
     }
     try state.setLocalTypeHint(self, name, widened);
-}
-
-fn compileFieldAssign(
-    self: *Compiler,
-    field_obj: *const Node,
-    field_name: []const u8,
-    value: *const Node,
-) !void {
-    const key_atom = try self.vm.internAtom(field_name);
-    try self.compile(field_obj, true);
-    try self.regDupe();
-    try self.compile(value, true);
-    try self.emit(.table_set_atom, key_atom);
-    try self.emit(.table_get_atom, key_atom);
-    try widenLocalTableHint(self, field_obj, field_name, value);
 }
 
 pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {
