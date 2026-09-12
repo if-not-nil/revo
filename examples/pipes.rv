@@ -9,39 +9,39 @@
 !#
 
 fn bind(trolley, track) match trolley
-  | (:ok, ok) => track(ok)
-  | (:err, e) => (:err, e)
+  | {:ok, ok} => track(ok)
+  | {:err, e} => {:err, e}
 
 fn unwrap_or_else(trolley, track) match trolley
-  | (:err, e) => track(e)
-  | (:ok, ok) => (:ok, ok)
+  | {:err, e} => track(e)
+  | {:ok, ok} => {:ok, ok}
 
 fn or_else_msg(trolley, track) match trolley
-  | (:err, e, msg) => track(e, msg)
+  | {:err, e, msg} => track(e, msg)
   | x => x
 
 fn bind_http(trolley, track) match trolley
-  | (:ok, ok) when (ok.status >= 400) => do
+  | {:ok, ok} when (ok.status >= 400) => do
       track(ok)
     end
-  | (:ok, ok) => (:ok, ok)
-  | (:err, e) => (:err, e)
+  | {:ok, ok} => {:ok, ok}
+  | {:err, e} => {:err, e}
 
-let v = (:ok, 5)
+let v = {:ok, 5}
   |> bind(fn(c) do
-    (:ok, c * 2)
+    {:ok, c * 2}
   end)
   |> bind(fn(c) do
-    (:ok, c * 2)
+    {:ok, c * 2}
   end)
   |> bind(fn(c) do
-    (:ok, c * 2)
+    {:ok, c * 2}
   end)
   |> unwrap_or_else(fn(c) do
-    (:ok, 0)
+    {:ok, 0}
   end)
   |> bind(fn(c) do
-    (:err, 42)
+    {:err, 42}
   end)
   |> inspect
 
@@ -51,7 +51,7 @@ a |> fn(c) c:mutate()
   |> fn(c) assert_eq(c.inner, 42)
   |> fn(c) do
     print("got", c)
-    (:ok, c)
+    {:ok, c}
   end
   |> inspect
 
@@ -63,5 +63,5 @@ a |> _:mutate()
   |> inspect
   |> do
     print("got", _)
-    (:ok, _)
+    {:ok, _}
   end

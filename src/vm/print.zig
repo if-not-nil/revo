@@ -11,51 +11,52 @@ const color_accent = "\x1b[33m"; // numbers, atoms, array indices, table keys
 const color_string = "\x1b[32m"; // strings
 const color_brace = "\x1b[34m"; // table braces
 
-// backstop against unbounded recursion e.g. a __tostring/__display
-// metamethod chain that keeps producing brand=new values forever. this alone
-// doesnt catch true cycles gracefully (it just bails after printing
-// max_write_depth levels), so it's paired with the ancestor-stack cycle
-// detector below, which catches the common case (a table/tuple that
-// contains itself) immediately and cheaply
+// backstop against unbounded recursion
+//   e.g. a __tostring/__display metamethod chain that keeps producing brand=new values forever
+// . this alone doesnt catch true cycles gracefully
+//      (it just bails after printing max_write_depth levels)
+// , so it's paired with the ancestor-stack cycle detector below
+// , which catches the common case (a table that contains itself) immediately and cheaply
 threadlocal var write_depth: usize = 0;
 const max_write_depth: usize = 200;
 
-// detects genuine cycles (a container that directly or indirectly contains
-// itself) by tracking which containers are currently being printed, i.e. are
-// ancestors of the value we're about to print. if we're asked to print a
-// container that's already an active ancestor, we print "<circular>" instead
-// of recursing into it again
+// detects genuine cycles
+//   (a table that directly or indirectly contains itself)
+// by tracking which tables are currently being printed
+// , i.e. are ancestors of the value we're about to print
 //
-// identity is tracked via the resolved pointer rather than the pool's
-// internal id, so this doesn't need to know the id type, and via a kind tag
-// so a table and a tuple that happen to reuse the same pool slot number
-// can't be confused for each other. this is not a "seen anywhere" set -
-// the same table referenced from two unrelated fields is fine and will be
-// printed twice; only an actual ancestor-of-itself trips it
-const ContainerKind = enum { table, tuple };
-const VisitEntry = struct { kind: ContainerKind, addr: usize };
+// . if we're asked to print a table that's already an active ancestor
+// , we print "<circular>" instead of recursing into it again
+//
+// identity is tracked via the resolved pointer rather than the pool's internal id
+// , so this doesn't need to know the id type
+// . this is not a "seen anywhere" set
+//   - the same table referenced from two unrelated
+// fields is fine and will be printed twice
+// ; only an actual ancestor-of-itself trips it
 
-// sized off max_write_depth just to reuse one constant; pushVisiting below
-// bounds-checks against this array's actual length, so correctness doesn't
-// depend on this size matching write_depth's cap
-threadlocal var visiting: [max_write_depth]VisitEntry = undefined;
+// sized off max_write_depth just to reuse one constant
+// ; pushVisiting below bounds-checks against this array's actual length
+// , so correctness doesn't depend on this size matching write_depth's cap
+threadlocal var visiting: [max_write_depth]usize = undefined;
 threadlocal var visiting_len: usize = 0;
 
-fn isVisiting(kind: ContainerKind, addr: usize) bool {
+fn isVisiting(addr: usize) bool {
     var i: usize = 0;
     while (i < visiting_len) : (i += 1) {
-        if (visiting[i].kind == kind and visiting[i].addr == addr) return true;
+        if (visiting[i] == addr) return true;
     }
     return false;
 }
 
-// returns false if the stack full. bounds-checked independently of
-// write_depth rather than assuming the two counters stay in lockstep;
-// they don't in every path (writeTable/writeTuple can be entered
-// directly, without first passing through writeData's own depth check)
-fn pushVisiting(kind: ContainerKind, addr: usize) bool {
+// returns false if the stack full
+// . bounds-checked independently of write_depth rather than assuming the two counters stay in lockstep
+// ; they don't in every path
+//   (writeTable can be entered directly
+//   , without first passing through writeData's own depth check)
+fn pushVisiting(addr: usize) bool {
     if (visiting_len >= visiting.len) return false;
-    visiting[visiting_len] = .{ .kind = kind, .addr = addr };
+    visiting[visiting_len] = addr;
     visiting_len += 1;
     return true;
 }
@@ -151,36 +152,8 @@ pub fn writeData(self: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.Re
             };
             tbl.write(writer, vm, mode) catch try writer.writeAll("<table-unprintable>");
         },
-        .tuple => {
-            const tup = vm.tuples.get(self.asTuple().?) catch {
-                try writer.writeAll("<dead-tuple>");
-                return;
-            };
-            tup.write(writer, vm, mode) catch try writer.writeAll("<tuple-unprintable>");
-        },
         .foreign => try writer.print("<foreign {*}>", .{self.asForeign().?}),
     }
-}
-
-pub fn writeTuple(t: *revo.tuple.Tuple, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.RenderMode) anyerror!void {
-    const addr = @intFromPtr(t);
-    if (isVisiting(.tuple, addr)) {
-        try writer.writeAll("<circular>");
-        return;
-    }
-    if (!pushVisiting(.tuple, addr)) {
-        try writer.writeAll("<max-depth-exceeded>");
-        return;
-    }
-    defer popVisiting();
-
-    try writer.writeAll("(");
-    for (t.items, 0..) |item, i| {
-        if (i != 0) try writer.writeAll(", ");
-        try writeData(item, writer, vm, mode);
-    }
-    if (t.items.len == 1) try writer.writeAll(",");
-    try writer.writeAll(")");
 }
 
 fn writeTableKey(key: Data, writer: *std.Io.Writer, vm: *revo.VM, mode: Data.RenderMode) anyerror!void {
@@ -207,11 +180,11 @@ pub fn writeTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, 
     }
 
     const addr = @intFromPtr(tbl);
-    if (isVisiting(.table, addr)) {
+    if (isVisiting(addr)) {
         try writer.writeAll("<circular>");
         return;
     }
-    if (!pushVisiting(.table, addr)) {
+    if (!pushVisiting(addr)) {
         try writer.writeAll("<max-depth-exceeded>");
         return;
     }
@@ -226,32 +199,32 @@ pub fn writeTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM, 
     const hash_count = tbl.hash.count;
     const multi_line = mode == .debug and hash_count >= 2;
     var first = true;
-    for (tbl.array.items, 0..) |val, idx| {
-        _ = idx;
-        if (!first) try writer.writeAll(", ");
-        first = false;
-        try writeData(val, writer, vm, mode);
-    }
+    var array_left = tbl.array.items.len;
+    var cur = tbl.cursor();
 
-    var cur = tbl.hash.first;
-    while (cur != revo.table.NULL_ID) {
-        const key = tbl.hash.buckets[cur].key;
-        const val = tbl.hash.buckets[cur].val;
-        if (multi_line) {
+    while (cur.nextEntry()) |entry| {
+        if (array_left > 0) {
+            array_left -= 1;
+            if (!first) try writer.writeAll(", ");
+            first = false;
+
+            try writeData(entry.value, writer, vm, mode);
+        } else if (multi_line) {
             if (!first) try writer.writeAll(",");
             try writer.writeAll("\n  ");
-            try writeTableKey(key, writer, vm, mode);
+            try writeTableKey(entry.key, writer, vm, mode);
             try writer.writeAll(" = ");
-            try writeData(val, writer, vm, mode);
+
+            try writeData(entry.value, writer, vm, mode);
             first = false;
         } else {
             if (!first) try writer.writeAll(", ");
             first = false;
-            try writeTableKey(key, writer, vm, mode);
+            try writeTableKey(entry.key, writer, vm, mode);
             try writer.writeAll(" = ");
-            try writeData(val, writer, vm, mode);
+
+            try writeData(entry.value, writer, vm, mode);
         }
-        cur = tbl.hash.buckets[cur].next;
     }
 
     if (multi_line) {
@@ -270,11 +243,11 @@ fn writePrettyTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM
     defer write_depth -= 1;
 
     const addr = @intFromPtr(tbl);
-    if (isVisiting(.table, addr)) {
+    if (isVisiting(addr)) {
         try writer.writeAll("<circular>");
         return;
     }
-    if (!pushVisiting(.table, addr)) {
+    if (!pushVisiting(addr)) {
         try writer.writeAll("<max-depth-exceeded>");
         return;
     }
@@ -310,23 +283,21 @@ fn writePrettyTable(tbl: *revo.table.Table, writer: *std.Io.Writer, vm: *revo.VM
         try writer.writeAll(",\n");
     }
 
-    var cur = tbl.hash.first;
-    while (cur != revo.table.NULL_ID) {
-        const key = tbl.hash.buckets[cur].key;
-        const val = tbl.hash.buckets[cur].val;
-        const next = tbl.hash.buckets[cur].next;
+    var hi: usize = 0;
+    var hit = tbl.hash.orderedIterator();
+    while (hit.next()) |entry| {
         var i: usize = 0;
         while (i < indent_level + 1) : (i += 1) {
             try writer.writeAll(indent);
         }
-        try writeTableKey(key, writer, vm, .pretty);
+        try writeTableKey(entry.key, writer, vm, .pretty);
         try writer.writeAll(" = ");
-        try writePrettyDataValue(val, writer, vm, indent_level + 1);
-        if (next != revo.table.NULL_ID) {
+        try writePrettyDataValue(entry.value, writer, vm, indent_level + 1);
+        if (hi + 1 < tbl.hash.count) {
             try writer.writeAll(",");
         }
         try writer.writeAll("\n");
-        cur = next;
+        hi += 1;
     }
 
     var j: usize = 0;

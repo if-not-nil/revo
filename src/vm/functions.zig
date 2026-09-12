@@ -434,9 +434,9 @@ test "functions return exactly one value" {
         \\ f()
     );
     try t.topType(
-        \\ const f = fn() (1, 2)
+        \\ const f = fn() {1, 2}
         \\ f()
-    , .tuple);
+    , .table);
     try t.topNumber(
         \\ const f = fn() do
         \\ return 1 2 end

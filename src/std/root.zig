@@ -24,8 +24,7 @@ pub const Impl = struct {
         return switch (val.tag()) {
             .string => .data(Data.new.num(vm.stringValue(val.asString().?).len)),
             .table => .data(Data.new.num((try vm.tables.get(val.asTable().?)).count())),
-            .tuple => .data(Data.new.num((try vm.tuples.get(val.asTuple().?)).items.len)),
-            else => .errType(1, "string, table, or tuple", @import("root.zig").typeof(val, vm)),
+            else => .errType(1, "string or table", @import("root.zig").typeof(val, vm)),
         };
     }
 
@@ -80,10 +79,10 @@ pub const root_impls: []const api.Impl = impls(Impl).val ++ &[_]api.Impl{
     .{ .name = "set_meta", .f = define(&[_]TypeSpec{ .any, .any }, meta.set_meta) },
     .{ .name = "set_debug", .f = define(&[_]TypeSpec{.table}, meta.set_debug) },
     .{ .name = "debug", .f = define(&[_]TypeSpec{}, debug_) },
-    .{ .name = "unwrap", .f = define(&[_]TypeSpec{.tuple}, try_) },
+    .{ .name = "unwrap", .f = define(&[_]TypeSpec{.any}, try_) },
     .{ .name = "chan", .f = defineVariadic(&[_]TypeSpec{}, chan_new) },
-    .{ .name = "send", .f = define(&[_]TypeSpec{ .tuple, .any }, chan_send) },
-    .{ .name = "recv", .f = define(&[_]TypeSpec{.tuple}, chan_recv) },
+    .{ .name = "send", .f = define(&[_]TypeSpec{ .table, .any }, chan_send) },
+    .{ .name = "recv", .f = define(&[_]TypeSpec{.table}, chan_recv) },
     .{ .name = "assert", .f = define(&[_]TypeSpec{.any}, assert_) },
     .{ .name = "assert_eq", .f = define(&[_]TypeSpec{ .any, .any }, assert_eq) },
     .{ .name = "panic", .f = defineVariadic(&[_]TypeSpec{}, panic_) },
@@ -132,8 +131,7 @@ pub fn populateArgv(vm: *revo.VM) !void {
 fn attachMathPi(vm: *revo.VM) !void {
     if (vm.globals.get(try vm.internAtom("math"))) |t| {
         if (t.asTable()) |table_id| {
-            const table = try vm.tables.get(table_id);
-            try table.putRawAtom(try vm.internAtom("pi"), Data.new.num(std.math.pi), vm);
+            try vm.putField(table_id, "pi", Data.new.num(std.math.pi));
         }
     }
 }
@@ -142,7 +140,6 @@ fn mtPrototype(target: TypeSpec, vm: *revo.VM) !Data {
     return switch (target) {
         .number => Data.new.num(0),
         .string => try vm.ownDataString(""),
-        .tuple => Data.new.tuple(std.math.maxInt(usize)),
         .table => Data.new.table(std.math.maxInt(usize)),
         else => return error.UnsupportedTarget,
     };
@@ -182,7 +179,7 @@ pub fn defineVariadic(
     };
 }
 
-pub fn ArgsTuple(comptime specs: []const TypeSpec) type {
+pub fn Args(comptime specs: []const TypeSpec) type {
     const types: [specs.len]type = comptime blk: {
         var result: [specs.len]type = undefined;
         for (specs, 0..) |spec, i| {
@@ -200,14 +197,13 @@ pub fn specToType(comptime spec: TypeSpec) type {
         .atom => T.atom,
         .function => T.function,
         .table => T.table,
-        .tuple => T.tuple,
         .bool => bool,
         .any => Data,
     };
 }
 
-pub fn unwrapArgs(comptime specs: []const TypeSpec, args: []const Data) ArgsTuple(specs) {
-    var result: ArgsTuple(specs) = undefined;
+pub fn unwrapArgs(comptime specs: []const TypeSpec, args: []const Data) Args(specs) {
+    var result: Args(specs) = undefined;
     inline for (specs, 0..) |spec, i| {
         result[i] = switch (spec) {
             .number => args[i].asNum().?,
@@ -215,7 +211,6 @@ pub fn unwrapArgs(comptime specs: []const TypeSpec, args: []const Data) ArgsTupl
             .atom => args[i].asAtom().?,
             .function => args[i].asFunction().?,
             .table => args[i].asTable().?,
-            .tuple => args[i].asTuple().?,
             .bool => args[i].asAtom().?,
             .any => args[i],
         };
@@ -231,7 +226,6 @@ pub const TypeSpec = union(enum) {
     atom,
     function,
     table,
-    tuple,
     bool,
     any,
 
@@ -244,7 +238,6 @@ pub const TypeSpec = union(enum) {
             .atom => data.isAtom(),
             .function => data.isFunction(),
             .table => data.isTable(),
-            .tuple => data.isTuple(),
         };
     }
 
@@ -254,24 +247,20 @@ pub const TypeSpec = union(enum) {
         return switch (self) {
             .number => "number",
             .string => "string",
-            .tuple => "tuple",
             .table => "table",
             else => null,
         };
     }
 };
 
-/// type name -> TypeSpec, for parsing sig heads (`tuple:len` -> .tuple)
 pub fn typeFromName(name: []const u8) ?TypeSpec {
     const tbl = std.StaticStringMap(TypeSpec).initComptime(.{
-        .{ "number", .number },
         .{ "number", .number },
         .{ "int", .number },
         .{ "string", .string },
         .{ "atom", .atom },
         .{ "function", .function },
         .{ "table", .table },
-        .{ "tuple", .tuple },
         .{ "bool", .bool },
         .{ "any", .any },
     });
@@ -291,21 +280,12 @@ fn isBoolAtom(atom: mem.AtomID) bool {
 /// finite integral num representable in T
 pub const numToInt = revo.vm.memory.numToInt;
 
-fn makeResultTuple(vm: *VM, comptime tag: ResultTag, value: Data) !HostResult {
-    const tag_atom = try resultTag(vm, tag);
-    const items = [_]Data{
-        Data.new.atom(tag_atom),
-        value,
+fn makeResult(vm: *VM, comptime tag: ResultTag, value: Data) !HostResult {
+    const atom: revo.core_atoms = switch (tag) {
+        .ok => .ok,
+        .err => .err,
     };
-    return .data(Data.new.tuple(try vm.tuples.create(&items)));
-}
-
-fn resultTag(vm: *VM, comptime tag: ResultTag) !mem.AtomID {
-    _ = vm;
-    return switch (tag) {
-        .ok => revo.core_atoms.atomId(.ok),
-        .err => revo.core_atoms.atomId(.err),
-    };
+    return .data(try vm.resultTable(atom, value));
 }
 
 pub inline fn boolData(value: bool) Data {
@@ -427,19 +407,18 @@ pub fn dotest(args: []const Data, vm: *VM) !HostResult {
         };
         return .data(Data.new.nil());
     };
-    // only react to err tuple
+    // only react to err results
     // everything else is pass
-    if (res.asTuple()) |tid| {
-        const tpl = try vm.tuples.get(tid);
-        if (tpl.items.len != 2)
+    if (vm.resultParts(res)) |parts| {
+        if (parts.len != 2)
             return .data(Data.new.nil());
-        const tag = tpl.items[0].asAtom() orelse return .data(Data.new.nil());
+        const tag = parts.tag.asAtom() orelse return .data(Data.new.nil());
         if (tag != revo.core_atoms.atomId(.err))
             return .data(Data.new.nil());
 
         var obuf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
         defer obuf.deinit();
-        try append_data(&obuf.writer, tpl.items[1], vm, .debug);
+        try append_data(&obuf.writer, parts.payload.?, vm, .debug);
 
         try revo.pretty.printError(&w.interface, "fail - {s}", .{obuf.written()});
     }
@@ -469,74 +448,48 @@ pub fn dosuite(args: []const Data, vm: *VM) !HostResult {
 pub fn debug_(args: []const Data, vm: *VM) !HostResult {
     _ = args;
 
-    // build the flags table first: every vm.tables.create() can reallocate the
-    // pool backing store, so the `out` pointer must be taken *after* the last
-    // table creation. otherwise the writes through `out` below hit freed memory.
+    // putField re-fetches the table per write, so no pointer goes stale
+    // across the creates below
     const flags_id = try vm.tables.create();
-    const flags = try vm.tables.get(flags_id);
-    try flags.putRawAtom(try vm.internAtom("dump"), Data.new.boolean(vm.debug.dump), vm);
-    try flags.putRawAtom(try vm.internAtom("trace"), Data.new.boolean(vm.debug.trace), vm);
-    try flags.putRawAtom(try vm.internAtom("instr"), Data.new.boolean(vm.debug.each_instr), vm);
-    try flags.putRawAtom(try vm.internAtom("stack"), Data.new.boolean(vm.debug.each_stack), vm);
+    try vm.putField(flags_id, "dump", Data.new.boolean(vm.debug.dump));
+    try vm.putField(flags_id, "trace", Data.new.boolean(vm.debug.trace));
+    try vm.putField(flags_id, "instr", Data.new.boolean(vm.debug.each_instr));
+    try vm.putField(flags_id, "stack", Data.new.boolean(vm.debug.each_stack));
 
     const out_id = try vm.tables.create();
-    const out = try vm.tables.get(out_id);
-    try out.putRawAtom(try vm.internAtom("flags"), Data.new.table(flags_id), vm);
+    try vm.putField(out_id, "flags", Data.new.table(flags_id));
 
     const fiber = vm.currentFiber();
-    try out.putRawAtom(try vm.internAtom("fiber_id"), Data.new.num(fiber.id), vm);
-    try out.putRawAtom(try vm.internAtom("pc"), Data.new.num(fiber.pc), vm);
-    try out.putRawAtom(try vm.internAtom("stack_depth"), Data.new.num(fiber.registers_len), vm);
-    try out.putRawAtom(try vm.internAtom("frame_depth"), Data.new.num(fiber.frames.items.len), vm);
-    try out.putRawAtom(try vm.internAtom("program_len"), Data.new.num(fiber.program.len), vm);
+    try vm.putField(out_id, "fiber_id", Data.new.num(fiber.id));
+    try vm.putField(out_id, "pc", Data.new.num(fiber.pc));
+    try vm.putField(out_id, "stack_depth", Data.new.num(fiber.registers_len));
+    try vm.putField(out_id, "frame_depth", Data.new.num(fiber.frames.items.len));
+    try vm.putField(out_id, "program_len", Data.new.num(fiber.program.len));
 
     if (vm.currentDebugInfo()) |info| {
-        try out.putRawAtom(try vm.internAtom("has_debug_info"), Data.new.boolean(true), vm);
-        try out.putRawAtom(try vm.internAtom("source_name"), try vm.ownDataString(info.source_name), vm);
-        try out.putRawAtom(try vm.internAtom("source"), try vm.ownDataString(info.source), vm);
-        try out.putRawAtom(try vm.internAtom("span_count"), Data.new.num(info.spans.len), vm);
+        try vm.putField(out_id, "has_debug_info", Data.new.boolean(true));
+        try vm.putField(out_id, "source_name", try vm.ownDataString(info.source_name));
+        try vm.putField(out_id, "source", try vm.ownDataString(info.source));
+        try vm.putField(out_id, "span_count", Data.new.num(info.spans.len));
     } else {
-        try out.putRawAtom(try vm.internAtom("has_debug_info"), Data.new.boolean(false), vm);
-        try out.putRawAtom(try vm.internAtom("source_name"), Data.new.nil(), vm);
-        try out.putRawAtom(try vm.internAtom("source"), Data.new.nil(), vm);
-        try out.putRawAtom(try vm.internAtom("span_count"), Data.new.num(0), vm);
+        try vm.putField(out_id, "has_debug_info", Data.new.boolean(false));
+        try vm.putField(out_id, "source_name", Data.new.nil());
+        try vm.putField(out_id, "source", Data.new.nil());
+        try vm.putField(out_id, "span_count", Data.new.num(0));
     }
 
-    try out.putRaw(
-        Data.new.atom(try vm.internAtom("panic_message")),
+    try vm.putField(
+        out_id,
+        "panic_message",
         if (vm.panic_message) |msg| try vm.ownDataString(msg) else Data.new.nil(),
-        vm,
     );
-    try out.putRaw(
-        Data.new.atom(try vm.internAtom("runtime_message")),
+    try vm.putField(
+        out_id,
+        "runtime_message",
         if (vm.runtime_message) |msg| try vm.ownDataString(msg) else Data.new.nil(),
-        vm,
     );
 
     return .data(Data.new.table(out_id));
-}
-
-/// > len(arg0: any) -> num|nil
-/// returns length of string or table
-/// for strings: byte length, for tables: array + map parts
-/// uses __len metamethod if available
-pub fn len_(args: []const Data, vm: *VM) !HostResult {
-    const mm = try vm.getMetamethodByAtom(args[0], revo.core_atoms.atomId(.__len));
-    if (mm) |m| return callUnaryMetamethod(m, args[0], vm);
-    return switch (args[0].tag()) {
-        .string => .data(Data.new.num(vm.stringValue(args[0].asString().?).len)),
-        .table => .data(Data.new.num((try vm.tables.get(args[0].asTable().?)).count())),
-        .tuple => .data(Data.new.num((try vm.tuples.get(args[0].asTuple().?)).items.len)),
-        else => .errType(1, "string, table, or tuple", typeof(args[0], vm)),
-    };
-}
-
-/// > inspect(any) -> any
-/// prints one value and returns it back
-pub fn inspect(args: []const Data, vm: *VM) !HostResult {
-    if (comptime !revo.is_freestanding)
-        _ = try print(args, vm);
-    return .data(args[0]);
 }
 
 pub fn typeof(d: Data, vm: *VM) []const u8 {
@@ -545,14 +498,6 @@ pub fn typeof(d: Data, vm: *VM) []const u8 {
         .atom => if (d.asAtom().? == revo.core_atoms.atomId(.nil)) "nil" else "atom",
         else => |e| @tagName(e),
     };
-}
-
-/// > typeof(arg0: any) -> atom
-/// returns type of arg0 as atom
-/// possible values: nil, num, string, atom, function, table, tuple,
-/// foreign
-pub fn typeof_(args: []const Data, vm: *VM) !HostResult {
-    return .data(Data.new.atom(try vm.internAtom(typeof(args[0], vm))));
 }
 
 /// > string(arg0: any) -> string
@@ -568,33 +513,24 @@ pub fn string_(args: []const Data, vm: *VM) !HostResult {
     return .data(try vm.adoptDataString(str));
 }
 
-/// > unwrap(result: tuple) -> any
-/// unwraps result tuple, panics if not :ok
 pub fn try_(args: []const Data, vm: *VM) !HostResult {
-    const t_id = args[0].asTuple() orelse return .errType(0, "tuple", typeof(args[0], vm));
-    const tuple = try vm.tuples.get(t_id);
-    if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "tuple with less than 2 elements");
-    const tag = tuple.items[0];
-    const atom = tag.asAtom() orelse return .errType(0, "tuple starting with atom", "tuple starting with non-atom");
+    const parts = vm.resultParts(args[0]) orelse return .errType(0, "result", typeof(args[0], vm));
+    const atom = parts.tag.asAtom() orelse return .errType(0, "result starting with atom", "result starting with non-atom");
     const ok_id = revo.core_atoms.atomId(.ok);
-    if (atom != ok_id) return panic_(&[1]Data{tuple.items[1]}, vm);
-    return .data(tuple.items[1]);
+    if (atom != ok_id) return panic_(&[1]Data{parts.payload orelse Data.new.nil()}, vm);
+    return .data(parts.payload orelse Data.new.nil());
 }
 
-/// > tuple:unwrap_err() -> any
-/// extracts error from result tuple, panics if not :err
 pub fn unwrap_err_(args: []const Data, vm: *VM) !HostResult {
     const result = args[0];
-    const result_tid = result.asTuple() orelse return .errType(0, "tuple", typeof(result, vm));
-    const tuple = try vm.tuples.get(result_tid);
-    if (tuple.items.len < 2) return .errType(0, "tuple with at least 2 elements", "empty tuple");
+    const parts = vm.resultParts(result) orelse return .errType(0, "result", typeof(result, vm));
 
-    const tag = tuple.items[0];
-    if (tag.asAtom() == null) return .errType(0, "tuple starting with atom", "tuple starting with non-atom");
+    const tag = parts.tag;
+    if (tag.asAtom() == null) return .errType(0, "result starting with atom", "result starting with non-atom");
 
     const err_tag = revo.core_atoms.atomId(.err);
     if (tag.asAtom().? == err_tag) {
-        return .data(tuple.items[1]);
+        return .data(parts.payload orelse Data.new.nil());
     }
 
     return panic_(&[1]Data{revo.Data.new.core(.err)}, vm);
@@ -606,7 +542,7 @@ fn as_stack_index(value: Data) ?usize {
     return revo.asIndex(num) catch null;
 }
 
-/// > chan(capacity?: num) -> tuple
+/// > chan(capacity?: num) -> table
 /// creates a new channel with optional buffer size
 ///     chan()        # unbuffered
 ///     chan(5)       # buffer of 5
@@ -619,26 +555,25 @@ pub fn chan_new(args: []const Data, vm: *VM) !HostResult {
         return .errArity(args.len, 0);
 
     const channel_id = try vm.sched.channelCreate(&vm.tables, cap);
-    const res = try vm.tuples.create(&[2]Data{
+    return .data(try vm.tableOfSlice(&[2]Data{
         Data.new.atom(revo.core_atoms.chan.atomId()),
         Data.new.num(channel_id),
-    });
-    return .data(Data.new.tuple(res));
+    }));
 }
 
-/// validate `args[0]` as a `:chan, id` tuple and extract the channel id
+/// validate `args[0]` as a `:chan, id` table and extract the channel id
 fn chanIdOf(args: []const Data, vm: *VM) HostResult {
-    const tuple_id = args[0].asTuple() orelse return .errType(0, "tuple", typeof(args[0], vm));
-    const t = vm.tuples.get(tuple_id) catch return .errType(0, "chan tuple", "tuple");
-    if (t.items.len < 2) return .errType(0, "chan tuple", "tuple");
+    const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
+    const t = vm.tables.get(table_id) catch return .errType(0, "chan table", "table");
+    if (t.array.items.len < 2) return .errType(0, "chan table", "table");
     const chan_atom = revo.core_atoms.chan.atomId();
-    if (t.items[0].asAtom() != chan_atom)
-        return .errType(0, "chan tuple", "tuple");
-    const chan_id = t.items[1].asNum() orelse return .errType(0, "chan tuple", "tuple");
+    if (t.array.items[0].asAtom() != chan_atom)
+        return .errType(0, "chan table", "table");
+    const chan_id = t.array.items[1].asNum() orelse return .errType(0, "chan table", "table");
     return .data(Data.new.num(@as(revo.vm.ChannelID, @intFromFloat(chan_id))));
 }
 
-/// > send(chan: tuple, value: any) -> atom
+/// > send(chan: table, value: any) -> atom
 /// sends value to channel
 pub fn chan_send(args: []const Data, vm: *VM) !HostResult {
     const cid = switch (chanIdOf(args, vm)) {
@@ -649,7 +584,7 @@ pub fn chan_send(args: []const Data, vm: *VM) !HostResult {
     return HostResult.coreAtom(.ok);
 }
 
-/// > recv(chan: tuple) -> any
+/// > recv(chan: table) -> any
 /// receives value from channel, parks if empty
 pub fn chan_recv(args: []const Data, vm: *VM) !HostResult {
     const cid = switch (chanIdOf(args, vm)) {
@@ -671,24 +606,6 @@ pub fn number_(args: []const Data, vm: *VM) !HostResult {
         return HostResult.Ok(vm, Data.new.num(parsed));
     }
     return .errType(0, "num, string", typeof(args[0], vm));
-}
-
-/// > expect(what: any) -> !what
-/// used in tests
-///
-/// return the value back if truthy, otherwise (:err, :AssertionFailed)
-pub fn expect(args: []const Data, vm: *VM) !HostResult {
-    if (revo.isFalse(args[0])) return HostResult.Err(vm, "ExpectFailed");
-    return HostResult.Ok(vm, args[0]);
-}
-
-/// > expect_eq(what: any) -> !:ok
-/// panics if the value is falsy
-pub fn expect_eq(args: []const Data, vm: *VM) !HostResult {
-    if (vm.compare(args[0], args[1]) != .eq) {
-        return HostResult.Err(vm, "NotEqual");
-    }
-    return HostResult.Ok(vm, args[0]);
 }
 
 /// > assert(what: any) -> what
@@ -766,10 +683,15 @@ pub fn system_(tbl: []const Data, vm: *VM) !HostResult {
 
     var argv = try vm.runtime.alloc.alloc([]const u8, table.array.items.len);
     defer vm.runtime.alloc.free(argv);
-    defer for (argv) |arg| vm.runtime.alloc.free(arg);
 
-    for (table.array.items, 0..) |arg, i|
-        argv[i] = try vm.runtime.alloc.dupe(u8, vm.stringValue(arg.asString().?));
+    var n: usize = 0;
+    defer for (argv[0..n]) |arg| vm.runtime.alloc.free(arg);
+
+    for (table.array.items, 0..) |arg, i| {
+        const sid = arg.asString() orelse return .errType(0, "table of strings", typeof(arg, vm));
+        argv[i] = try vm.runtime.alloc.dupe(u8, vm.stringValue(sid));
+        n += 1;
+    }
 
     var proc = try std.process.spawn(vm.runtime.io, .{
         .argv = argv,
@@ -791,7 +713,8 @@ pub fn system_(tbl: []const Data, vm: *VM) !HostResult {
 
     const so = try vm.adoptDataString(try multi_reader.toOwnedSlice(0));
     const se = try vm.adoptDataString(try multi_reader.toOwnedSlice(1));
-    return HostResult.Ok(vm, Data.new.tuple(try vm.tuples.create(&[2]Data{ so, se })));
+    const res = try vm.tableOfSlice(&[_]Data{ so, se });
+    return .Ok(vm, res);
 }
 
 // for some reason leftover buffer persists between input() calls so multiline os reads
@@ -872,15 +795,6 @@ pub fn input(args: []const Data, vm: *VM) !HostResult {
 }
 
 var gensym_counter: u64 = 0;
-
-pub fn gensym(args: []const Data, vm: *VM) !HostResult {
-    _ = args;
-    const n = gensym_counter;
-    gensym_counter += 1;
-    const name = try std.fmt.allocPrint(vm.runtime.alloc, "__gensym_{d}", .{n});
-    defer vm.runtime.alloc.free(name);
-    return .data(try vm.ownDataStringNoDedup(name));
-}
 
 test "gensym produces different values on each call" {
     try revo.lang.testing.topAtom(
@@ -971,14 +885,9 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         if (revo.ffi.loadNative(vm, resolved_path)) |native_mods| {
             defer vm.runtime.alloc.free(native_mods);
             const t_id = try vm.tables.create();
-            const tbl = try vm.tables.get(t_id);
             for (native_mods) |host_fn| {
                 const fn_id = try vm.functions.create(.{ .host = host_fn });
-                try tbl.putRaw(
-                    Data.new.atom(try vm.internAtom(host_fn.name)),
-                    Data.new.function(fn_id),
-                    vm,
-                );
+                try vm.putField(t_id, host_fn.name, Data.new.function(fn_id));
             }
             return .data(Data.new.table(t_id));
         } else |err| switch (err) {
@@ -992,15 +901,10 @@ pub fn import(args: []const Data, vm: *VM) !HostResult {
         };
         defer vm.runtime.alloc.free(mods);
         const t_id = try vm.tables.create();
-        const tbl = try vm.tables.get(t_id);
 
         for (mods) |c_fn| {
             const fn_id = try vm.functions.create(.{ .c_function = c_fn });
-            try tbl.putRaw(
-                Data.new.atom(try vm.internAtom(c_fn.name)),
-                Data.new.function(fn_id),
-                vm,
-            );
+            try vm.putField(t_id, c_fn.name, Data.new.function(fn_id));
         }
         return .data(Data.new.table(t_id));
     }
@@ -1054,16 +958,6 @@ pub fn callUnaryMetamethod(mm: Data, val: Data, vm: *VM) HostResult {
     return .data(result);
 }
 
-/// > sleep(ms: num) -> parked
-/// sleeps current fiber for given milliseconds
-/// parks fiber instead of blocking
-pub fn sleep(args: []const Data, vm: *VM) !HostResult {
-    const n = args[0].asNum() orelse return .errType(0, "number", typeof(args[0], vm));
-    const ms: u64 = numToInt(u64, n) orelse return .errType(0, "non-negative integer", typeof(args[0], vm));
-    try vm.schedParkCurrentForSleepMS(ms);
-    return .parked();
-}
-
 pub const HostErrPayload = union(enum) {
     wrong_arity: struct { got: usize, expected: usize },
     type_error: struct { arg: ?usize, expected: []const u8, got: []const u8 },
@@ -1094,16 +988,16 @@ pub const HostResult = union(enum) {
     }
 
     pub fn Ok(vm: *VM, value: Data) !HostResult {
-        return makeResultTuple(vm, .ok, value);
+        return makeResult(vm, .ok, value);
     }
 
     pub fn Err(vm: *VM, err_name: []const u8) !HostResult {
         const tag = try vm.internAtom(err_name);
-        return makeResultTuple(vm, .err, Data.new.atom(tag));
+        return makeResult(vm, .err, Data.new.atom(tag));
     }
 
     pub fn errData(vm: *VM, value: Data) !HostResult {
-        return makeResultTuple(vm, .err, value);
+        return makeResult(vm, .err, value);
     }
     // -- [errors] ------------------------------------------------------------
     pub fn errArity(got: usize, expected: usize) HostResult {
@@ -1213,9 +1107,6 @@ test "type predicates" {
     try testing.topTrue("table?({})");
     try testing.topTrue("atom?(:ok)");
     try testing.topTrue("function?(fn() 42)");
-
-    try testing.topTrue("tuple?((1, 2))");
-    try testing.topFalse("tuple?(42)");
 }
 
 test "debug() links its nested flags table without a stale pointer" {
@@ -1226,15 +1117,6 @@ test "debug() links its nested flags table without a stale pointer" {
     try testing.topTrue("table?(debug().flags)");
     try testing.topFalse("debug().flags.dump");
     try testing.topTrue("num?(debug().stack_depth)");
-}
-
-test "array methods" {
-    try testing.topNumber("{1, 2, 3}:first()", 1);
-    try testing.topNumber("{1, 2, 3}:last()", 3);
-    try testing.topTrue("{1, 2, 3}:contains?(2)");
-    try testing.topFalse("{1, 2, 3}:contains?(5)");
-    try testing.topNumber("{1, 2, 3}:index_of(2)", 1);
-    try testing.topNumber("iter.sum({1, 2, 3})", 6);
 }
 
 test "array sort" {
@@ -1261,7 +1143,7 @@ test "array flatten" {
 }
 
 test "stdlib json time and string modules are exposed" {
-    try testing.topString("json.encode((\"a\", \"b\", \"c\")):unwrap()", "[\"a\",\"b\",\"c\"]");
+    try testing.topString("json.encode({\"a\", \"b\", \"c\"}):unwrap()", "[\"a\",\"b\",\"c\"]");
     try testing.topNumber("json.decode(\"{{ \\\"a\\\" : 1}}\"):unwrap().a", 1);
     try testing.topTrue("time.now() > 0");
     try testing.topNumber("len(string.split(\"a,b\", \",\"))", 2);
@@ -1271,8 +1153,8 @@ test "len" {
     try testing.topNumber("len(\"hi\")", 2);
     try testing.topNumber("len(\"\")", 0);
     try testing.topNumber("len(\"abcde\")", 5);
-    try testing.topNumber("len((1, 2, 3))", 3);
-    try testing.topNumber("len((1,))", 1);
+    try testing.topNumber("len({1, 2, 3})", 3);
+    try testing.topNumber("len({1})", 1);
     try testing.topNumber("len({})", 0);
 }
 
@@ -1337,7 +1219,6 @@ pub const T = struct {
     pub const atom = enum(mem.AtomID) { _ };
     pub const function = enum(mem.FunctionID) { _ };
     pub const table = enum(mem.TableID) { _ };
-    pub const tuple = enum(mem.TupleID) { _ };
     pub const any = Data;
 
     /// usage: `T.Optional(.bool, false)`, `T.Optional(.number, 10.0)`
@@ -1363,7 +1244,6 @@ pub fn typeToSpec(comptime P: type) TypeSpec {
     if (P == T.atom) return .atom;
     if (P == T.function) return .function;
     if (P == T.table) return .table;
-    if (P == T.tuple) return .tuple;
     if (P == bool) return .bool;
     if (P == Data) return .any;
     @compileError("unsupported type in def: " ++ @typeName(P));
@@ -1377,7 +1257,6 @@ pub fn unwrapArg(comptime spec: TypeSpec, data: Data) specToType(spec) {
         .atom => @enumFromInt(data.asAtom().?),
         .function => @enumFromInt(data.asFunction().?),
         .table => @enumFromInt(data.asTable().?),
-        .tuple => @enumFromInt(data.asTuple().?),
         .bool => data.asAtom().? == revo.core_atoms.atomId(.true),
         .any => data,
     };

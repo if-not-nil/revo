@@ -99,7 +99,6 @@ pub fn lowerExprArtifactReport(
 }
 
 pub const Compiler = struct {
-    const LocalValueKind = state_mod.LocalValueKind;
     const LocalVar = state_mod.LocalVar;
     const FunctionState = state_mod.FunctionState;
 
@@ -412,7 +411,7 @@ pub const Compiler = struct {
                 result_reg = 0;
                 try self.recordStackOp(op, 0, 0, result_reg, op_arg);
             },
-            .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
+            .jump_if_false, .jump_if_true, .jump_err => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);
                 d -= 1;
@@ -429,19 +428,6 @@ pub const Compiler = struct {
                 result_reg = try toRegister(d - 1);
                 d -= 1;
                 try self.recordStackOp(op, 1, 0, result_reg, op_arg);
-            },
-            .tuple_new => {
-                std.debug.assert(d >= op_arg);
-                result_reg = try toRegister(d - op_arg);
-                const first = d - op_arg;
-                d = first + 1;
-                try self.recordStackOp(op, op_arg, 1, result_reg, op_arg);
-            },
-            .tuple_get => {
-                std.debug.assert(d >= 2);
-                result_reg = try toRegister(d - 2);
-                d -= 1;
-                try self.recordStackOp(op, 2, 1, result_reg, 0);
             },
             .table_set => {
                 std.debug.assert(d >= 3);
@@ -467,7 +453,7 @@ pub const Compiler = struct {
                 d -= 1;
                 try self.recordStackOp(op, 2, 0, result_reg, op_arg);
             },
-            .table_get_atom, .tuple_get_const => {
+            .table_get_atom => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);
                 try self.recordStackOp(op, 1, 1, result_reg, op_arg);
@@ -741,9 +727,6 @@ pub const Compiler = struct {
                 } else if (index.key.expr == .hash) try self.emit(
                     .table_get_atom,
                     try self.vm.internAtom(index.key.expr.hash),
-                ) else if (state_mod.constTupleIndex(self, index)) |idx| try self.emit(
-                    .tuple_get_const,
-                    idx,
                 ) else {
                     try self.compile(index.key, true);
                     try self.emit(.table_get, 0);
@@ -793,13 +776,6 @@ pub const Compiler = struct {
             .assign_expr => |assign| try values.compileAssign(self, assign.target, assign.value),
             .compound_assign => |assign| try values.compileCompound(self, assign.target, assign.op, assign.value),
             .block => |exprs| try self.compileBlock(exprs),
-            .tuple => |items| {
-                for (items) |item| {
-                    const isolated = try values.isolateEntryDecls(self, item);
-                    try self.compile(isolated, true);
-                }
-                try self.emit(.tuple_new, @intCast(items.len));
-            },
             .table => |entries| try values.compileTable(self, entries),
             .return_expr => |val| {
                 if (val) |v| {
@@ -850,11 +826,6 @@ pub const Compiler = struct {
             .labeled_block => |lb| try flow.compileLabeledBlock(self, lb.label, lb.body),
             .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params),
             .match_expr => |v| try flow.compileMatch(self, v.subject, v.arms),
-            .tuple_pattern => return self.fail(
-                .UnsupportedSyntax,
-                expr,
-                "tuple patterns do not compile as values",
-            ),
             .table_pattern => return self.fail(
                 .UnsupportedSyntax,
                 expr,
@@ -881,7 +852,7 @@ pub const Compiler = struct {
             },
             .orelse_expr => |v| {
                 try self.compile(v.left, true);
-                const fail_jump = try self.jump(.jump_if_not_nil_and_not_err);
+                const fail_jump = try self.jump(.jump_err);
                 try self.compile(v.right, true);
                 self.patchJump(fail_jump);
                 try self.emit(.unwrap_result, 1);
@@ -1060,7 +1031,6 @@ pub const Compiler = struct {
         const object_type = type_check.inferExprType(self, field.object);
         const module_name = switch (object_type.tag) {
             .string => "string",
-            .tuple => "tuple",
             .table => "table",
             else => return false,
         };
@@ -1511,15 +1481,8 @@ pub const Compiler = struct {
             return;
         }
 
-        if (binding.target.expr == .tuple_pattern or binding.target.expr == .table_pattern) {
+        if (binding.target.expr == .table_pattern) {
             switch (binding.target.expr) {
-                // idc about dup because theyre gonna be gone anyways
-                .tuple_pattern => |items| try values.validateTuplePatternShape(
-                    self,
-                    items,
-                    binding.value,
-                    "binding",
-                ),
                 .table_pattern => |items| try values.validateTablePatternShape(
                     self,
                     items,

@@ -20,7 +20,6 @@ pub const HostError = error{
     FrameUnderflow,
     PickedFromVoid,
     FunctionDNE,
-    InvalidTuple,
     ProgramEnd,
     Panic,
     AssertionFailed,
@@ -51,7 +50,6 @@ pub const EvalErrorKind = enum {
     PickedFromVoid,
     FunctionDNE,
     KeyDNE,
-    InvalidTuple,
     Panic,
     OutOfMemory,
     ConstantReassignment,
@@ -83,7 +81,6 @@ pub const EvalErrorKind = enum {
             .FrameUnderflow => "frame underflow!",
             .PickedFromVoid => "picked from void!",
             .FunctionDNE => "function dne!",
-            .InvalidTuple => "invalid tuple!",
             .Panic => "panic!!",
             .KeyDNE => "key does not exist!",
             .OutOfMemory => "out of memory!",
@@ -158,7 +155,7 @@ pub fn printDisassembly(vm: *revo.VM, artifact: revo.lang.Artifact, source: []co
 
     for (insts, 0..) |inst, pc| {
         switch (inst.op) {
-            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
+            .jump, .jump_if_false, .jump_if_true, .jump_err => {
                 if (inst.bx < n) {
                     is_target[inst.bx] = true;
                     if (!jumpers.contains(inst.bx)) try jumpers.put(inst.bx, pc);
@@ -313,8 +310,7 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
             return fmt(buf, "r{d}, proto#{d}", .{ a, bx });
         },
         .negate, .negate_int, .not => return fmt(buf, "r{d}, r{d}", .{ a, b }),
-        .tuple_new => return fmt(buf, "r{d}, r{d}, n={d}", .{ a, b, bx }),
-        .tuple_get, .table_set, .table_get => return fmt(buf, "r{d}, r{d}, r{d}", .{ a, b, c }),
+        .table_set, .table_get => return fmt(buf, "r{d}, r{d}, r{d}", .{ a, b, c }),
         .table_new => return fmt(buf, "r{d}", .{a}),
         .table_set_atom => {
             const name = vm.stringValue(bx);
@@ -327,10 +323,9 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
             return fmt(buf, "r{d}, r{d}, :{s}", .{ a, b, name });
         },
         .slice => return fmt(buf, "r{d}, r{d}, r{d}, r{d}, r{d}", .{ a, b, b + 1, b + 2, b + 3 }),
-        .tuple_get_const => return fmt(buf, "r{d}, r{d}, #{d}", .{ a, b, bx }),
         .halt, .join, .ret => return fmt(buf, "r{d}", .{a}),
         .jump => return fmt(buf, "-> L{d}", .{bx}),
-        .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
+        .jump_if_false, .jump_if_true, .jump_err => {
             return fmt(buf, "r{d} -> L{d}", .{ a, bx });
         },
         .call, .spawn => return fmt(buf, "r{d}, args={d}, -> r{d}", .{ a, b, c }),

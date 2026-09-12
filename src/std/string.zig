@@ -70,12 +70,7 @@ pub const Impl = struct {
             try parts.append(vm.runtime.alloc, try vm.ownDataStringNoDedup(final_part));
         }
 
-        const table_id = try vm.tables.create();
-        const t = try vm.tables.get(table_id);
-        for (parts.items, 0..) |part, idx| {
-            try t.putRaw(Data.new.num(idx), part, vm);
-        }
-        return .data(Data.new.table(table_id));
+        return .data(try vm.tableOfSlice(parts.items));
     }
 
     pub fn trim(vm: *VM, self: Ts.string) !HostResult {
@@ -92,13 +87,13 @@ pub const Impl = struct {
 
     pub fn table(vm: *VM, self: Ts.string) !HostResult {
         const str = vm.stringValue(@intFromEnum(self));
-        const table_id = try vm.tables.create();
-        const tbl = try vm.tables.get(table_id);
+        var chars = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, str.len);
+        defer chars.deinit(vm.runtime.alloc);
         for (str) |byte| {
             const char_str = try vm.adoptDataStringNoDedup(try vm.runtime.alloc.dupe(u8, &[_]u8{byte}));
-            try tbl.array.append(vm.runtime.alloc, char_str);
+            try chars.append(vm.runtime.alloc, char_str);
         }
-        return .data(Data.new.table(table_id));
+        return .data(try vm.tableOfSlice(chars.items));
     }
 
     pub fn ascii(vm: *VM, self: Ts.string) !HostResult {

@@ -10,7 +10,7 @@ pub declare cwd = fn() -> string
 pub declare exit = fn(status: num) -> never
 
 #* runs a subprocess and returns (stdout, stderr) *#
-pub declare system = fn(args: table) -> !(string, string)
+pub declare system = fn(args: table<string>) -> !{string, string}
 
 #* imports a revo module by path *#
 pub declare import = fn(path: string) -> any

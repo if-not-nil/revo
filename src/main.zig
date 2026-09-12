@@ -204,8 +204,11 @@ fn runMain(init: std.process.Init) !void {
         if (!config.interactive) return;
     } else {
         // no script path: check for piped stdin
-        try runFromStdin(init, init.gpa, arena, config);
-        if (!config.interactive and config.inline_code == null) return;
+        // -e owns the program, piped stdin stays available for input()
+        if (config.inline_code == null) {
+            try runFromStdin(init, init.gpa, arena, config);
+            if (!config.interactive) return;
+        }
     }
 
     if (config.inline_code) |code| {

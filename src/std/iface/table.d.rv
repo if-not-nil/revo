@@ -17,8 +17,11 @@ pub declare table.set_meta = fn(self: table, meta: :nil|table) -> table
 #* returns metatable of value or :undef *#
 pub declare table.get_meta = fn(self: table) -> table | :undef
 
-#* unwraps result tuple, panics if not :ok *#
+#* unwraps result, panics if not :ok *#
 pub declare table.unwrap = fn(self: table) -> any
+
+#* extracts error from result, panics if not :err *#
+pub declare table.unwrap_err = fn(self: table) -> any
 
 #* inserts value at position, shifting elements right *#
 pub declare table.insert = fn(self: table, pos: num, value: any) -> :ok
@@ -71,16 +74,10 @@ pub declare table.reverse = fn(self: table) -> table
 #* flattens nested tables into single array *#
 pub declare table.flatten = fn(self: table) -> table
 
-#*
-	ret 0-based index of value or nil if not found
-	TODO: same for hash part
-*#
+#* returns 0-based index of value in the array part, or nil if not found *#
 pub declare table.index_of = fn(self: {}, value: any) -> num|:nil
 
-#*
-	returns the number of times a specified value appears in a table's array part
-	TODO: same for hash part
-*#
+#* returns the number of times a specified value appears in a table's array part *#
 pub declare table.count_of = fn(self: {}, search_val: any) -> num
 
 #* checks if table contains value *#
@@ -89,14 +86,26 @@ pub declare table.contains? = fn(self: table, value: any) -> bool
 #* removes duplicate elements *#
 pub declare table.unique = fn(self: table) -> table
 
-#* returns length of table array part *#
+#* returns total length of table (array part + keyed entries) *#
 pub declare table.len = fn(self: table) -> num
 
-#* returns length of table array part *#
+#* returns length of table array part only *#
 pub declare table.alen = fn(self: table) -> num
 
-#* returns the array parts of the two tables *#
-pub declare table.add = fn(self: table, other: table) -> table
+#* metatable-aware read with optional fallback (`:undef` when absent) *#
+pub declare table.get = fn(self: table, key: any, fallback: any...) -> any
+
+#* reports whether the table holds no entries at all *#
+pub declare table.empty? = fn(self: table) -> bool
+
+#* creates a deep copy of the table, duplicating nested tables (cycles map to their in-progress copy) *#
+pub declare table.deep_copy = fn(self: table) -> table
+
+#* applies fn to the value at key (missing reads as :nil) and stores the result back, returns self *#
+pub declare table.update = fn(self: table, key: any, fn: function) -> table
+
+#* returns a new table with array items [start, end), end defaults to the array length, bounds clamp *#
+pub declare table.slice = fn(self: table, start: num, end: num...) -> table
 
 #* repeats table array part n times *#
 pub declare table.repeat = fn(self: table, n: num) -> table

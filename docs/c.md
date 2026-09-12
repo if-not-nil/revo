@@ -136,7 +136,6 @@ typedef enum {
     revo_atom = 9,
     revo_function = 10,
     revo_table = 11,
-    revo_tuple = 12,
     revo_foreign = 15,
 } RevoType;
 ```
@@ -150,7 +149,6 @@ RevoData v = revo_string(string_id);  // from interned id
 RevoData v = revo_num(3.14);          // number
 RevoData v = revo_atom_val(atom_id);  // atom by raw id
 RevoData v = revo_table(table_id);    // from table id
-RevoData v = revo_tuple(tuple_id);    // from tuple id
 RevoData v = revo_function(func_id);  // from function id
 ```
 
@@ -161,7 +159,6 @@ double   revo_num_value(RevoData);
 uint64_t revo_string_id(RevoData);
 uint64_t revo_atom_id(RevoData);
 uint64_t revo_table_id(RevoData);
-uint64_t revo_tuple_id(RevoData);
 int      revo_bool_val(RevoData);   // 0 or 1, 0 if not bool
 int      revo_type(RevoData);       // the RevoType of the value
 ```
@@ -175,7 +172,6 @@ int revo_is_string(RevoData);
 int revo_is_atom(RevoData);
 int revo_is_function(RevoData);
 int revo_is_table(RevoData);
-int revo_is_tuple(RevoData);
 int revo_is_bool(RevoData);
 ```
 
@@ -256,35 +252,53 @@ missing keys return `:nil`
 
 ## tables
 
+functions take the table value itself, lookups report presence
+through the return value so missing keys are distinct from nil values:
+
 ```c
 RevoData t = revo_table_create(vm);
-uint64_t tid = revo_table_id(t);
 
+// named fields
+revo_table_set_name(vm, t, (uint64_t)"x", 1, revo_num(42.0));
+RevoData v;
+bool found = revo_table_get_name(vm, t, (uint64_t)"x", 1, &v);  // true
+
+// generic keys (metatable-aware, like t[k])
 RevoData key = revo_atom_val(revo_intern_atom(vm, ...));
-revo_table_set(vm, tid, key, revo_num(42.0));
-RevoData v = revo_table_get(vm, tid, key);  // nil if missing
+revo_table_set(vm, t, key, revo_num(42.0));
 
-uint64_t n = revo_table_len(vm, tid);
+// array part
+RevoData arr = revo_table_from_items(vm, 2, (RevoData[]){ revo_num(1.0), revo_num(2.0) });
+revo_table_push(vm, arr, revo_num(3.0));
+revo_table_get_idx(vm, arr, 1, &v);   // 2.0, false when out of range
+
+uint64_t n = revo_table_len(vm, t);    // total entries
+uint64_t a = revo_table_alen(vm, arr); // array part only
 ```
 
 {{< ref "pub fn revo_table_create(" >}}
 {{< ref "pub fn revo_table_set(" >}}
 {{< ref "pub fn revo_table_get(" >}}
 
-## tuples
+## results
+
+host functions answer with `{:ok, v}` / `{:err, e}` tables:
 
 ```c
-RevoData items[3] = { revo_num(1.0), revo_num(2.0), revo_num(3.0) };
-RevoData t = revo_tuple_create(vm, 3, items);
-uint64_t tid = revo_tuple_id(t);
-
-RevoData v = revo_tuple_get(vm, tid, 1);   // 2.0
-uint64_t n = revo_tuple_len(vm, tid);      // 3
+if (bad) {
+    *out_result = revo_err(vm, revo_atom_val(
+        revo_intern_atom(vm, (uint64_t)"BadInput", 8)));
+    return;
+}
+// ... later, on the receiving side:
+if (revo_is_ok(vm, val)) {
+    RevoData payload;
+    revo_ok_value(vm, val, &payload);
+}
 ```
 
-out-of-bounds index returns nil
-{{< ref "pub fn revo_tuple_create(" >}}
-{{< ref "pub fn revo_tuple_get(" >}}
+{{< ref "pub fn revo_ok(" >}}
+{{< ref "pub fn revo_is_ok(" >}}
 
 ## writing c extensions
 
@@ -333,7 +347,7 @@ the type helpers read a c value out of the same word:
 :atom          - revo_is_atom     - revo_atom_id
 fn()           - revo_is_function - revo_function_id
 {} (table)     - revo_is_table    - revo_table_id
-(1, 2) (tuple) - revo_is_tuple    - revo_tuple_id
+{1, 2} (table) - revo_is_table    - revo_table_id
 foreign ptr    - revo_type(v) == revo_foreign - revo_foreign_ptr
 ```
 
@@ -356,13 +370,13 @@ and the calls are checked:
 ```revo
 # extension.d.rv: the interface, plain revo
 pub declare add = fn(a: number, b: number) -> number
-pub declare concat = fn(parts: tuple, sep: string) -> string
+pub declare concat = fn(parts: table, sep: string) -> string
 ```
 
 ```revo
 import "extension.so"
 extension.add 3, 4
-extension.concat (("a", "b", "c"), "-")   # typed from the manifest
+extension.concat ({"a", "b", "c"}, "-")   # typed from the manifest
 ```
 
 `import "extension.so"` finds `extension.d.rv` next to it by stem, types every

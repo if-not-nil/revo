@@ -1,12 +1,12 @@
 const safe_div = fn(a, b)
-	if b == 0 (:err, :DivByZero)
-	else (:ok, a / b)
+	if b == 0 {:err, :DivByZero}
+	else {:ok, a / b}
 
 print(safe_div(10, 2):unwrap()) # 5
 
 match safe_div(10, 0)
-	| (:ok, v)  => print(v)
-	| (:err, e) => print(fmt("error: %v", e))
+	| {:ok, v}  => print(v)
+	| {:err, e} => print(fmt("error: %v", e))
 
-print(ok?!((:ok, 42)))    # :true
-print(err?!((:err, :Boom))) # :true
+print(ok?!({:ok, 42}))    # :true
+print(err?!({:err, :Boom})) # :true

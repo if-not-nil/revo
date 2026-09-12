@@ -8,7 +8,7 @@ CSVs can have options determining the delimiter (default ","), terminator (defau
 ```repl
 rεvo > global dialect = { delimiter = ";", terminator = "~", quote = "*", bom = :false }
 rεvo > csv.encode({{"hi", "wow"}, {'yay; so cool!', "aaa"}}, dialect)
-(:ok, "hi;wow~*yay; so cool!*;aaa~")
+{:ok, "hi;wow~*yay; so cool!*;aaa~"}
 rεvo > "hi;wow~*yay; so cool!*;aaa~" |> csv.decode(dialect)
 { { "hi", "wow" }, { "yay; so cool!", "aaa" } }
 ```
@@ -17,7 +17,7 @@ an empty table (and later on, an optional arg) uses default csv options.
 
 ```repl
 rεvo > csv.encode({{"hi", "wow"}, {'yay; so cool!', "aaa"}}, {})
-(:ok, "hi,wow\r\nyay; so cool!,aaa\r\n")
+{:ok, "hi,wow\r\nyay; so cool!,aaa\r\n"}
 ```
 *#
 pub declare csv.encode = fn(value: any, opts: table) -> !string
@@ -30,7 +30,7 @@ CSVs can have options determining the delimiter (default ","), terminator (defau
 ```repl
 rεvo > global dialect = { delimiter = ";", terminator = "~", quote = "*", bom = :false }
 rεvo > csv.encode({{"hi", "wow"}, {'yay; so cool!', "aaa"}}, dialect)
-(:ok, "hi;wow~*yay; so cool!*;aaa~")
+{:ok, "hi;wow~*yay; so cool!*;aaa~"}
 rεvo > "hi;wow~*yay; so cool!*;aaa~" |> csv.decode(dialect)
 { { "hi", "wow" }, { "yay; so cool!", "aaa" } }
 ```
@@ -39,8 +39,7 @@ an empty table (and later on, an optional arg) uses default csv options.
 
 ```repl
 rεvo > csv.encode({{"hi", "wow"}, {'yay; so cool!', "aaa"}}, {})
-(:ok, "hi,wow\r\nyay; so cool!,aaa\r\n")
+{:ok, "hi,wow\r\nyay; so cool!,aaa\r\n"}
 ```
 *#
 pub declare csv.decode = fn(source: string, opts: table) -> !any/string
-

@@ -17,4 +17,4 @@ pub declare zecho = fn(s: string) -> string
 pub declare zsetglobal = fn(name: string, value) -> number
 
 #* get a string of parts separated by separator *#
-pub declare zconcat = fn(parts: tuple, sep: string) -> string
+pub declare zconcat = fn(parts: table, sep: string) -> string

@@ -22,7 +22,7 @@ const colors = {
 }
 
 fn indices(table) do
-	iter.map(table, fn(elem, i) (i, elem))
+	iter.map(table, fn(elem, i) {i, elem})
 end
 
 fn append(table, value) do
@@ -42,7 +42,7 @@ end
 let line = :nil
 let data = {}
 while do # i like the `while do` trick
-	let (st_, line_) = input()
+	let {st_, line_} = input()
 	line = line_
 	st_ == :ok
 end do
@@ -54,17 +54,17 @@ end do
 			|> append(data, _)
 end
 
-const (min, max) = iter.reduce(
+const {min, max} = iter.reduce(
 	data,
 	fn(acc, row) iter.reduce(
 		row,
-		fn(rowacc, num) (
+		fn(rowacc, num) {
 			math.min(rowacc[0], num),
 			math.max(rowacc[1], num)
-		),
+		},
 		acc
 	),
-	(1000000, -1000000)
+	{1000000, -1000000}
 )
 
 const padding = 5
@@ -81,14 +81,14 @@ print({
 }:join(""))
 
 for series in indices(transpose(data)) do
-	const (color, linedata) = series
+	const {color, linedata} = series
 	let output = {
 		"	<polyline stroke='",
 		colors[color],
 		"' stroke-width='2.5' fill='none' points='"
 	}:join("")
 	for entry in indices(linedata) do
-		const (index, point) = entry
+		const {index, point} = entry
 		if (index != 0) (output = output ~ " ")
 		output = {
 			output,

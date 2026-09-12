@@ -19,7 +19,6 @@ pub const ErevoType = enum(u64) {
     atom = 9,
     function = 10,
     table = 11,
-    tuple = 12,
 };
 
 /// a revo value passed across the c boundary, nanboxed in a single u64

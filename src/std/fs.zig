@@ -299,19 +299,12 @@ fn listDir(vm: *VM, path: []const u8) !Data {
 
     while (try iter.next(vm.runtime.io)) |ent| {
         const entry_table = try vm.tables.create();
-        var t = try vm.tables.get(entry_table);
-        try t.putRaw(try vm.dataAtom("name"), try vm.ownDataString(ent.name), vm);
-        try t.putRaw(try vm.dataAtom("kind"), try vm.dataAtom(kindName(ent.kind)), vm);
+        try vm.putField(entry_table, "name", try vm.ownDataString(ent.name));
+        try vm.putField(entry_table, "kind", try vm.dataAtom(kindName(ent.kind)));
         try entries.append(vm.runtime.alloc, Data.new.table(entry_table));
     }
 
-    const result_table = try vm.tables.create();
-    var t = try vm.tables.get(result_table);
-    for (entries.items, 0..) |entry, i| {
-        try t.putRaw(Data.new.num(i), entry, vm);
-    }
-
-    return Data.new.table(result_table);
+    return try vm.tableOfSlice(entries.items);
 }
 
 fn statPath(vm: *VM, path: []const u8, follow: bool) !Data {
@@ -329,13 +322,11 @@ const FileHandle = struct {
 
 fn wrapFile(vm: *VM, path: []const u8) !Data {
     const file_table = try vm.tables.create();
-    var table = try vm.tables.get(file_table);
-    try table.putRaw(try vm.dataAtom(path_key), try vm.ownDataString(path), vm);
+    try vm.putField(file_table, path_key, try vm.ownDataString(path));
 
     const metatable = try vm.tables.create();
-    var mt = try vm.tables.get(metatable);
     const file_module = vm.globals.get(revo.core_atoms.file.atomId()) orelse return error.FileModuleNotFound;
-    try mt.putRaw(try vm.dataAtom("__index"), file_module, vm);
+    try vm.putField(metatable, "__index", file_module);
 
     const set_result = try meta.set_meta(&.{ Data.new.table(file_table), Data.new.table(metatable) }, vm);
     if (set_result != .ok) return error.SetMetatableFailed;
@@ -344,9 +335,8 @@ fn wrapFile(vm: *VM, path: []const u8) !Data {
 
 fn parseFileHandle(value: Data, vm: *VM) !FileHandle {
     if (!value.isTable()) return error.InvalidFile;
-    const table = try vm.tables.get(value.asTable().?);
 
-    const path_data = table.getRaw(try vm.dataAtom(path_key), vm) orelse return error.InvalidFile;
+    const path_data = vm.getField(value, path_key) orelse return error.InvalidFile;
 
     return .{
         .path = if (path_data.asString()) |id| vm.stringValue(id) else return error.InvalidFile,
@@ -362,14 +352,13 @@ fn kindName(kind: File.Kind) []const u8 {
 
 fn makeStatTable(vm: *VM, stat: File.Stat) !Data {
     const table = try vm.tables.create();
-    var t = try vm.tables.get(table);
 
-    try t.putRaw(try vm.dataAtom("size"), Data.new.num(stat.size), vm);
-    try t.putRaw(try vm.dataAtom("kind"), try vm.dataAtom(@tagName(stat.kind)), vm);
-    try t.putRaw(try vm.dataAtom("permissions"), Data.new.num(@intFromEnum(stat.permissions)), vm);
-    try t.putRaw(try vm.dataAtom("mtime"), Data.new.num(stat.mtime.toSeconds()), vm);
-    try t.putRaw(try vm.dataAtom("atime"), Data.new.num((stat.atime orelse stat.mtime).toSeconds()), vm);
-    try t.putRaw(try vm.dataAtom("ctime"), Data.new.num(stat.ctime.toSeconds()), vm);
+    try vm.putField(table, "size", Data.new.num(stat.size));
+    try vm.putField(table, "kind", try vm.dataAtom(@tagName(stat.kind)));
+    try vm.putField(table, "permissions", Data.new.num(@intFromEnum(stat.permissions)));
+    try vm.putField(table, "mtime", Data.new.num(stat.mtime.toSeconds()));
+    try vm.putField(table, "atime", Data.new.num((stat.atime orelse stat.mtime).toSeconds()));
+    try vm.putField(table, "ctime", Data.new.num(stat.ctime.toSeconds()));
 
     return Data.new.table(table);
 }
@@ -565,7 +554,7 @@ test "fs.open a creates missing file and keeps existing content" {
 
 test "fs.open missing file in r mode is FileNotFound" {
     const source = try sourceForPath(
-        \\ match fs.open('{s}/nope.txt') | (:err, e) => e | _ => :ok
+        \\ match fs.open('{s}/nope.txt') | {{:err, e}} => e | _ => :ok
     , "/tmp/revo-fs-test-missing-12345");
     defer alloc.free(source);
 
@@ -677,7 +666,7 @@ test "fs.remove non-recursive on non-empty dir is DirNotEmpty" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ match fs.remove('{s}/full') | (:err, e) => e | _ => :ok
+        \\ match fs.remove('{s}/full') | {{:err, e}} => e | _ => :ok
     , dir_path);
     defer alloc.free(source);
 
@@ -694,7 +683,7 @@ test "fs.remove explicit false is not recursive" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ match fs.remove('{s}/full', :false) | (:err, e) => e | _ => :ok
+        \\ match fs.remove('{s}/full', :false) | {{:err, e}} => e | _ => :ok
     , dir_path);
     defer alloc.free(source);
 
@@ -756,11 +745,11 @@ test "fs.stat follow flag sees through symlinks" {
     defer alloc.free(link_path);
 
     const source = try std.fmt.allocPrint(alloc,
-        \\ string((fs.stat('{s}')?.kind, fs.stat('{s}', :false)?.kind))
+        \\ string({{fs.stat('{s}')?.kind, fs.stat('{s}', :false)?.kind}})
     , .{ link_path, link_path });
     defer alloc.free(source);
 
-    try testing.topString(source, "(:file, :sym_link)");
+    try testing.topString(source, "{ :file, :sym_link }");
 }
 
 test "file.stat follow flag reads metadata from handle" {
@@ -775,11 +764,11 @@ test "file.stat follow flag reads metadata from handle" {
 
     const source = try std.fmt.allocPrint(alloc,
         \\ const f = fs.open('{s}')?
-        \\ string((f:stat()?.size, f:stat(:false)?.size))
+        \\ string({{f:stat()?.size, f:stat(:false)?.size}})
     , .{file_path});
     defer alloc.free(source);
 
-    try testing.topString(source, "(5, 5)");
+    try testing.topString(source, "{ 5, 5 }");
 }
 
 const std = @import("std");

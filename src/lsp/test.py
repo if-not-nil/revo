@@ -394,9 +394,9 @@ async def test_manifest_hover(client: LanguageClient):
             pass
         with open(os.path.join(tmp.name, "extension.d.rv"), "w") as f:
             f.write("pub declare add = fn(a: number, b: number) -> number\n")
-            f.write("pub declare concat = fn(parts: tuple, sep: string) -> string\n")
+            f.write("pub declare concat = fn(parts: table, sep: string) -> string\n")
         uri = f"file://{tmp.name}/app.rv"
-        script = 'import "extension.so"\nprint(extension.concat(("a", "b"), "-"))\n'
+        script = 'import "extension.so"\nprint(extension.concat({"a", "b"}, "-"))\n'
         client.text_document_did_open(
             params=DidOpenTextDocumentParams(
                 text_document=TextDocumentItem(
@@ -444,7 +444,7 @@ async def test_manifest_hover(client: LanguageClient):
         assert result is not None, "hover over member is None"
         value = result.contents.value
         print("  member hover:", repr(value))
-        assert "fn concat(parts: tuple, sep: string) -> string" in value, f"expected manifest sig, got: {
+        assert "fn concat(parts: table, sep: string) -> string" in value, f"expected manifest sig, got: {
             value}"
         assert result.range is not None
         r = result.range
@@ -464,7 +464,7 @@ async def test_manifest_hover(client: LanguageClient):
         assert sig is not None, "signature help over member call is None"
         label = sig.signatures[sig.active_signature].label
         assert label.startswith(
-            "concat(") and "tuple" in label and "string" in label, f"expected manifest sig, got: {label}"
+            "concat(") and "table" in label and "string" in label, f"expected manifest sig, got: {label}"
 
         # hover over the declared name inside the manifest file itself:
         # the range must cover just `zadd`, not the whole decl
@@ -848,10 +848,10 @@ async def test_completion_kinds(client: LanguageClient):
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_tuple_destructuring_no_diag(client: LanguageClient):
-    """`let w1, w2 = (1, 2)` doesnt die"""
-    uri = "file:///test/tuple_destructure.rv"
-    text = "let w1, w2 = (1, 2)\nprint(w1, w2)\n"
+async def test_table_destructuring_no_diag(client: LanguageClient):
+    """`let {w1, w2} = {1, 2}` doesnt die"""
+    uri = "file:///test/table_destructure.rv"
+    text = "let {w1, w2} = {1, 2}\nprint(w1, w2)\n"
     client.text_document_did_open(
         params=DidOpenTextDocumentParams(
             text_document=TextDocumentItem(

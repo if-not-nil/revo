@@ -68,7 +68,7 @@ fn genericSubstReturnType(
     if (type_params.len <= 4) {
         var subst: TypeParamSubst = .{ .count = type_params.len };
         // explicit type args win; the shape walk binds vars found inside
-        // compound params (e.g. `unwrap(x: (:err, T)) -> T`)
+        // compound params (e.g. `unwrap(x: {:err, T}) -> T`)
         for (type_params, 0..) |tp, i| {
             if (i < type_args.len)
                 subst.entries[i] = .{

@@ -621,61 +621,6 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        .tuple_new => {
-            const start = base + instr.b;
-            const count: usize = instr.bx;
-            self.noteGCPressure(@sizeOf(revo.tuple.Tuple) + @sizeOf(Data) * count);
-            regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(regs[start .. start + count])));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        .tuple_get => {
-            const tuple_val = regRead(regs, base, instr.b);
-            const tuple_id = tuple_val.asTuple() orelse
-                return self.typeError("tuple", tuple_val);
-
-            const idx_val = regRead(regs, base, instr.c);
-            const idx_num = idx_val.asNum() orelse
-                return self.typeError("number for tuple index", idx_val);
-
-            if (idx_num < 0 or @floor(idx_num) != idx_num)
-                return self.fail(error.TypeError, "tuple index must be a non-negative integer", .{});
-
-            if (idx_num > @as(f64, @floatFromInt(std.math.maxInt(usize))))
-                return self.fail(error.TypeError, "tuple index too large", .{});
-
-            const idx: usize = @intFromFloat(idx_num);
-            const t = try self.tuples.get(tuple_id);
-            if (idx >= t.items.len)
-                return self.fail(
-                    error.InvalidTuple,
-                    "tuple index {d} out of range for tuple of length {d}",
-                    .{ idx, t.items.len },
-                );
-
-            regWrite(regs, base, instr.a, t.items[idx]);
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        .tuple_get_const => {
-            const tuple_val = regRead(regs, base, instr.b);
-            const tuple_id = tuple_val.asTuple() orelse
-                return self.typeError("tuple", tuple_val);
-            const t = try self.tuples.get(tuple_id);
-            if (instr.bx >= t.items.len)
-                return self.fail(
-                    error.InvalidTuple,
-                    "tuple index {d} out of range for tuple of length {d}",
-                    .{ instr.bx, t.items.len },
-                );
-
-            regWrite(regs, base, instr.a, t.items[instr.bx]);
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
         .jump => {
             fiber.pc = instr.bx;
 
@@ -914,34 +859,15 @@ inline fn execFiberDispatch(
             const val = regRead(regs, base, instr.a);
             const propagate_errors = instr.bx == 0;
 
-            // result tag & payload for tuple and table shapes alike
-            //   ; anything else passes through untouched
-            var tag: ?Data = null;
-            var payload: ?Data = null;
-            if (val.asTuple()) |tid| {
-                const tuple = try self.tuples.get(tid);
-                if (tuple.items.len == 0) {
-                    if (!fetchNext(fiber, &instr)) break :dispatch;
-                    continue :dispatch instr.op;
-                }
-                tag = tuple.items[0];
-                payload = if (tuple.items.len > 1) tuple.items[1] else null;
-            } else if (val.asTable()) |tid| {
-                const table = try self.tables.get(tid);
-                if (table.array.items.len == 0) {
-                    if (!fetchNext(fiber, &instr)) break :dispatch;
-                    continue :dispatch instr.op;
-                }
-                tag = table.array.items[0];
-                payload = if (table.array.items.len > 1) table.array.items[1] else null;
-            }
-
-            const t = tag orelse {
+            const parts = self.resultParts(val);
+            if (parts == null) {
                 if (!fetchNext(fiber, &instr)) break :dispatch;
                 continue :dispatch instr.op;
-            };
+            }
+            const tag = parts.?.tag;
+            const payload = parts.?.payload;
 
-            if (t.asAtom() == revo.core_atoms.atomId(.err)) {
+            if (tag.asAtom() == revo.core_atoms.atomId(.err)) {
                 if (propagate_errors) {
                     if (fiber.frames.items.len == 2) {
                         self.panicFromErrPayload(payload, fiber.pc) catch |e| return self.evalFailure(e);
@@ -961,7 +887,7 @@ inline fn execFiberDispatch(
                 continue :dispatch instr.op;
             }
 
-            if (t.asAtom() == revo.core_atoms.atomId(.ok)) {
+            if (tag.asAtom() == revo.core_atoms.atomId(.ok)) {
                 if (payload) |p| {
                     regWrite(regs, base, instr.a, p);
                 }
@@ -970,35 +896,15 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        inline .jump_if_not_nil_and_not_err, .jump_if_err => |op| {
+        .jump_err => {
             const val = regRead(regs, base, instr.a);
-            const is_err = if (val.asTuple()) |tid| blk: {
-                const tuple2 = try self.tuples.get(tid);
-                if (tuple2.items.len > 0) {
-                    const tag2 = tuple2.items[0];
-                    break :blk tag2.asAtom() == revo.core_atoms.atomId(.err);
-                }
-                break :blk false;
-            } else if (val.asTable()) |tid| blk: {
-                const table = try self.tables.get(tid);
-                if (table.array.items.len > 0) {
-                    break :blk table.array.items[0].asAtom() == revo.core_atoms.atomId(.err);
-                }
-                break :blk false;
-            } else false;
-
-            const take = switch (op) {
-                .jump_if_not_nil_and_not_err => blk: {
-                    const absent = if (val.asAtom()) |a|
-                        a == revo.core_atoms.atomId(.nil) or
-                            a == revo.core_atoms.atomId(.undef)
-                    else
-                        false;
-                    break :blk !absent and !is_err;
-                },
-                else => is_err,
-            };
-            if (take) fiber.pc = instr.bx;
+            const is_err = self.isErrTable(val);
+            const absent = if (val.asAtom()) |a|
+                a == revo.core_atoms.atomId(.nil) or
+                    a == revo.core_atoms.atomId(.undef)
+            else
+                false;
+            if (!absent and !is_err) fiber.pc = instr.bx;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -1280,8 +1186,7 @@ noinline fn execSlice(self: *VM, regs: []Data, base: usize, instr: Instruction) 
 
     const source_len: isize = switch (object.tag()) {
         .string => @intCast(self.stringValue(object.asString().?).len),
-        .tuple => @intCast((try self.tuples.get(object.asTuple().?)).items.len),
-        else => return self.typeError("string or tuple for slice", object),
+        else => return self.typeError("string for slice", object),
     };
 
     const start_num = if (start_value.asAtom() == nil_atom)
@@ -1316,25 +1221,7 @@ noinline fn execSlice(self: *VM, regs: []Data, base: usize, instr: Instruction) 
             const data = try self.adoptDataString(try out.toOwnedSlice(self.runtime.alloc));
             regWrite(regs, base, instr.a, data);
         },
-        .tuple => {
-            const tuple = try self.tuples.get(object.asTuple().?);
-            const start: isize = @intFromFloat(start_num);
-            const step: isize = @intFromFloat(step_num);
-            const end: isize = @intFromFloat(end_num);
-            var out = std.ArrayList(revo.Data).initCapacity(self.runtime.alloc, 8) catch |err| return self.evalFailure(
-                err,
-            );
-
-            defer out.deinit(self.runtime.alloc);
-            var i = start;
-            while ((step > 0 and i < end) or (step < 0 and i > end)) : (i += step) {
-                if (i < 0 or @as(usize, @intCast(i)) >= tuple.items.len)
-                    return self.fail(error.TypeError, "tuple slice index out of range", .{});
-                try out.append(self.runtime.alloc, tuple.items[@intCast(i)]);
-            }
-            regWrite(regs, base, instr.a, Data.new.tuple(try self.tuples.create(out.items)));
-        },
-        else => return self.typeError("string or tuple for slice", object),
+        else => return self.typeError("string for slice", object),
     }
     return null;
 }

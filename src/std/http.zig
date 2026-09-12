@@ -87,15 +87,16 @@ pub const Impl = struct {
             .client_error => "client_error",
             .server_error => "server_error",
         });
-        const status = try vm.tuples.create(&[_]Data{
+
+        const status = try vm.tableOfSlice(&[_]Data{
             Data.new.atom(result_atom),
             Data.new.num(@as(usize, @intFromEnum(response.status))),
         });
+
         const id = try vm.tables.create();
-        var table = try vm.tables.get(id);
-        try table.putRawAtom(try vm.internAtom("status"), Data.new.tuple(status), vm);
+        try vm.putField(id, "status", status);
         if (response_has_body) {
-            try table.putRawAtom(try vm.internAtom("body"), try vm.ownDataString(try response_writer.toOwnedSlice()), vm);
+            try vm.putField(id, "body", try vm.ownDataString(try response_writer.toOwnedSlice()));
         }
 
         return HostResult.Ok(vm, Data.new.table(id));
@@ -125,13 +126,10 @@ fn urlToString(url: Data, vm: *VM) !HostErrOr([]const u8) {
 }
 
 fn buildMaxRedirects(options: Data, vm: *VM) !HostErrOr(?u16) {
-    if (options.asTable()) |options_id| {
-        var options_table = try vm.tables.get(options_id);
-        if (options_table.getRawAtom(try vm.internAtom("max_redirects"), vm)) |id| {
-            if (id.asNum()) |num| {
-                const max_redirects: u16 = @trunc(num);
-                return .{ .value = max_redirects };
-            }
+    if (vm.getField(options, "max_redirects")) |id| {
+        if (id.asNum()) |num| {
+            const max_redirects: u16 = @trunc(num);
+            return .{ .value = max_redirects };
         }
     }
     return .{ .value = null };
@@ -140,18 +138,16 @@ fn buildMaxRedirects(options: Data, vm: *VM) !HostErrOr(?u16) {
 fn buildHeaders(options: Data, extra_headers: *std.ArrayList(std.http.Header), vm: *VM) !HostErrOr(std.http.Client.Request.Headers) {
     var headers = std.http.Client.Request.Headers{};
 
-    if (options.asTable()) |options_id| {
-        var options_table = try vm.tables.get(options_id);
-        if (options_table.getRawAtom(try vm.internAtom("headers"), vm)) |id| {
-            if (id.asTable()) |table_id| {
-                var table: *Table = try vm.tables.get(table_id);
-                var it = table.hash.orderedIterator();
-                while (it.next()) |header| {
-                    const key = try headerToString(header.key, vm);
-                    const val = try headerToString(header.val, vm);
-                    if (!setKnownHeader(&headers, key, val))
-                        try extra_headers.append(vm.runtime.alloc, Header{ .name = key, .value = val });
-                }
+    if (vm.getField(options, "headers")) |id| {
+        if (id.asTable()) |table_id| {
+            var table: *Table = try vm.tables.get(table_id);
+            // hash part only: array entries are not headers
+            var it = table.hash.orderedIterator();
+            while (it.next()) |header| {
+                const key = try headerToString(header.key, vm);
+                const val = try headerToString(header.value, vm);
+                if (!setKnownHeader(&headers, key, val))
+                    try extra_headers.append(vm.runtime.alloc, Header{ .name = key, .value = val });
             }
         }
     }
@@ -182,9 +178,8 @@ fn buildBody(method: Method, opts: Data, vm: *VM) !?Body {
     if (!method.requestHasBody()) {
         return null;
     }
-    if (opts.asTable()) |o| {
-        var options_table = try vm.tables.get(o);
-        if (options_table.getRawAtom(try vm.internAtom("body"), vm)) |id| {
+    if (opts.asTable() != null) {
+        if (vm.getField(opts, "body")) |id| {
             if (id.asStr()) |s| {
                 return .{ .slice = vm.stringValue(s) };
             }

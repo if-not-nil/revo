@@ -12,7 +12,7 @@
 !#
 
 #* the entrypoint *#
-fn parse_json(s: string) -> !(num, table)
+fn parse_json(s: string) -> !{num, table}
 	parse(s, 0)
 
 fn parse(s, i) do
@@ -44,18 +44,18 @@ fn parse_string(s, i) do
 		count += 1
 	end
 	count += tag(s, i + count, '"')?
-	(:ok, (count, output:join("")))
+	{:ok, {count, output:join("")}}
 end
 
 fn parse_map_entry(s, i) do
-	let (count, key) = parse_string(s, i)?
+	let {count, key} = parse_string(s, i)?
 	count += ws(s, i + count)
 	count += tag(s, i + count, ":")?
 	count += ws(s, i + count)
-	let (val_len, val) = parse(s, i + count)?
+	let {val_len, val} = parse(s, i + count)?
 	count += val_len
 	count += ws(s, i + count)
-	(:ok, (count, key, val))
+	{:ok, {count, key, val}}
 end
 
 fn parse_map(s, i) do
@@ -63,20 +63,20 @@ fn parse_map(s, i) do
 	count += ws(s, i + count)
 	let output = {}
 	match parse_map_entry(s, i + count)
-		| (:ok, (len, first_key, first_val)) => do
+		| {:ok, {len, first_key, first_val}} => do
 			output[first_key] = first_val
 			count += len
 			while tag(s, i + count, ",").0 == :ok do
 				count += 1
 				count += ws(s, i + count)
-				let (l, key, val) = parse_map_entry(s, i + count)?
+				let {l, key, val} = parse_map_entry(s, i + count)?
 				count += l
 				output[key] = val
 			end
 		end
 		| _ => ()
 	count += tag(s, i + count, "}")?
-	(:ok, (count, output))
+	{:ok, {count, output}}
 end
 
 fn parse_list(s, i) do
@@ -84,14 +84,14 @@ fn parse_list(s, i) do
 	count += ws(s, i + count)
 	let output = {}
 	match parse(s, i + count)
-		| (:ok, (len, val)) => do
+		| {:ok, {len, val}} => do
 			output:push(val)
 			count += len
 			count += ws(s, i + count)
 			while tag(s, i + count, ",").0 == :ok do
 				count += 1
 				count += ws(s, i + count)
-				let (l, elem) = parse(s, i + count)?
+				let {l, elem} = parse(s, i + count)?
 				count += l
 				count += ws(s, i + count)
 				output:push(elem)
@@ -99,13 +99,13 @@ fn parse_list(s, i) do
 		end
 		| _ => ()
 	count += tag(s, i + count, "]")?
-	(:ok, (count, output))
+	{:ok, {count, output}}
 end
 
 fn tag(s, i, symbol) do
 	if (s:sub(i, symbol:len()) == symbol)
-    (:ok, symbol:len())
-  else (:err, 'expected ':add(symbol))
+    {:ok, symbol:len()}
+  else {:err, 'expected ':add(symbol)}
 end
 
 fn parse_num(s, i) do
@@ -113,18 +113,18 @@ fn parse_num(s, i) do
 	while (i + count < s:len() and is_numeric(s[i + count]))
 		count += 1
 	let num = number(s:sub(i, count))?
-	(:ok, (count, num))
+	{:ok, {count, num}}
 end
 
 fn parse_null(s, i)
-	if s:sub(i, 4) == "null" (:ok, (4, ())) else (:err, "expected 'null'")
+	if s:sub(i, 4) == "null" {:ok, {4, :nil}} else {:err, "expected 'null'"}
 
 fn parse_bool(s, i) do
 	if s:sub(i, 4) == "true"
-		(:ok, (4, :true))
+		{:ok, {4, :true}}
 	else if s:sub(i, 5) == "false"
-		(:ok, (5, :false))
-	else (:err, "expected boolean")
+		{:ok, {5, :false}}
+	else {:err, "expected boolean"}
 end
 
 fn ws(s, i) do
@@ -135,9 +135,9 @@ fn ws(s, i) do
 end
 
 parse_json('{ "a": 1 }')?
-|> expect_eq((10, { "a" = 1 }))
+|> expect_eq({10, { "a" = 1 }})
 parse_json('[ 1, 2 ]')?
-|> expect_eq((7, { 1, 2 }))
+|> expect_eq({7, { 1, 2 }})
 
 loop parse_json(input()?)
      |> print("#{_:p}")

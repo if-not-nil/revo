@@ -2540,7 +2540,7 @@ const SymbolVisitor = struct {
                     }
                 }
             },
-            .tuple_pattern, .table_pattern => |items| {
+            .table_pattern => |items| {
                 for (items) |item| {
                     if (item.expr == .ident and !lang.ast.isDiscardName(item.expr.ident))
                         self.addName(item.expr.ident, .binding, item.span);
@@ -2791,9 +2791,6 @@ fn walkRoles(n: *const lang.Node, m: *std.AutoHashMap(usize, u32)) !void {
             for (exprs) |e| try walkRoles(e, m);
         },
         .try_expr => |inner| try walkRoles(inner, m),
-        .tuple => |items| {
-            for (items) |item| try walkRoles(item, m);
-        },
         .test_block => |v| try walkRoles(v.body, m),
         .test_suite => |v| try walkRoles(v.body, m),
         .assign_expr => |a| try walkRoles(a.value, m),
@@ -3437,7 +3434,7 @@ test "workspace hover over lib import manifest" {
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "extension.so", .data = "" });
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "extension.d.rv", .data =
         \\pub declare add = fn(a: number, b: number) -> number
-        \\pub declare concat = fn(parts: tuple, sep: string) -> string
+        \\pub declare concat = fn(parts: table, sep: string) -> string
     });
     var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir_n = try tmp.dir.realPath(std.testing.io, &dir_buf);
@@ -3452,7 +3449,7 @@ test "workspace hover over lib import manifest" {
     defer alloc.free(script);
     const id = try ws.open(script,
         \\import "extension.so"
-        \\print(extension.concat (("a", "b"), "-"))
+        \\print(extension.concat ({"a", "b"}, "-"))
     , .{});
 
     var hov = try ws.hover(alloc, id, .{ .line = 1, .character = 11 }, query_opts);
@@ -3468,7 +3465,7 @@ test "workspace hover over lib import manifest" {
     var hov2 = try ws.hover(alloc, id, .{ .line = 2, .character = 22 }, query_opts);
     defer if (hov2) |*h| h.deinit(alloc);
     try std.testing.expect(hov2 != null);
-    try std.testing.expect(std.mem.find(u8, hov2.?.text, "fn concat(parts: tuple, sep: string) -> string") != null);
+    try std.testing.expect(std.mem.find(u8, hov2.?.text, "fn concat(parts: table, sep: string) -> string") != null);
     // member def lives in the manifest; the range must be the call-site word
     try std.testing.expectEqual(@as(u32, 2), hov2.?.range.start.line);
     try std.testing.expectEqual(@as(u32, 17), hov2.?.range.start.character);
@@ -3542,7 +3539,7 @@ test "workspace diagnostics merge semantic and lower failures" {
     defer ws.deinit();
 
     const source =
-        \\ type Result = (:ok, any) | (:err, atom)
+        \\ type Result = {:ok, any} | {:err, atom}
         \\ fn bind(what: any, where: num) -> Result do
         \\   "ok"
         \\ end

@@ -51,7 +51,7 @@ pub const impls: []const api.Impl = root.impls(Impl).val ++ &[_]api.Impl{
 
 test "native eval works" {
     try testing.topNumber(
-        \\ const (_, res) = revo.eval("21*2")
+        \\ const {_, res} = revo.eval("21*2")
         \\ res
     , 42);
 }
@@ -122,7 +122,7 @@ test "revo.dofile returns the file's value" {
     defer std.testing.allocator.free(file_path);
 
     const source = try std.fmt.allocPrint(std.testing.allocator,
-        \\ const (_, res) = revo.dofile('{s}')
+        \\ const {{_, res}} = revo.dofile('{s}')
         \\ res.x
     , .{file_path});
     defer std.testing.allocator.free(source);

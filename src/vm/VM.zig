@@ -136,7 +136,6 @@ stdlib_globals: Globals,
 /// iface specs loaded at init; released by `deinit` through `api.freeLoadedSpecs`
 loaded_specs: []const []const revo.std_lib.api.FnSpec = &.{},
 tables: TablePool,
-tuples: TuplePool,
 functions: FunctionPool,
 strings: Interner,
 atoms: std.StringHashMap(mem.AtomID),
@@ -183,7 +182,6 @@ gc_in_finalizer: bool = false,
 const MarkItem = union(enum) {
     data: Data,
     table: mem.TableID,
-    tuple: mem.TupleID,
     function: mem.FunctionID,
     upvalue: root.functions.UpvalueID,
 };
@@ -199,8 +197,6 @@ pub fn init(runtime: revo.Runtime) !VM {
     errdefer constants.deinit(rt.alloc);
     var tables = try TablePool.init(rt.alloc);
     errdefer tables.deinit();
-    var tuples = try TuplePool.init(rt.alloc);
-    errdefer tuples.deinit();
     var functions = try FunctionPool.init(rt.alloc);
     errdefer functions.deinit();
     var strings = try Interner.init(rt.alloc);
@@ -219,7 +215,6 @@ pub fn init(runtime: revo.Runtime) !VM {
         .constants = constants,
         .stdlib_globals = Globals.init(rt.alloc),
         .tables = tables,
-        .tuples = tuples,
         .functions = functions,
         .strings = strings,
         .atoms = std.StringHashMap(mem.AtomID).init(rt.alloc),
@@ -272,7 +267,6 @@ pub fn init(runtime: revo.Runtime) !VM {
 pub const maybeCollectGarbage = vm_gc.maybeCollectGarbage;
 pub const noteGCPressure = vm_gc.noteGCPressure;
 pub const pushMarkTable = vm_gc.pushMarkTable;
-pub const pushMarkTuple = vm_gc.pushMarkTuple;
 pub const pushMarkFunction = vm_gc.pushMarkFunction;
 pub const pushMarkUpvalue = vm_gc.pushMarkUpvalue;
 
@@ -307,7 +301,6 @@ pub fn deinit(self: *VM) void {
     self.gc_finalizers.deinit();
     self.sched.deinit();
     self.tables.deinit();
-    self.tuples.deinit();
     self.functions.deinit();
     self.strings.deinit();
     self.atoms.deinit();
@@ -368,6 +361,10 @@ pub fn addConstant(self: *VM, val: Data) !ConstantID {
     return idx;
 }
 
+//
+// data creation helpers
+//
+
 // TODO: make a pools field, move all pools there
 /// dupes yours
 pub fn ownDataString(self: *VM, value: []const u8) !Data {
@@ -388,7 +385,99 @@ pub fn ownDataStringNoDedup(self: *VM, value: []const u8) !Data {
 }
 
 pub fn stringValue(self: *VM, id: mem.StringID) []const u8 {
-    return self.strings.get(id) catch "<dead>";
+    return self.strings.get(id) catch {
+        std.debug.print("id: {any};\n", .{id});
+        @panic("tried to get dead string value");
+    };
+}
+
+/// single-shot array table from items
+/// ; no calls happen between create and fill
+/// so callers must pass a side buffer, never pool-borrowed memory
+pub fn tableOfSlice(self: *VM, val: []const Data) !Data {
+    const id = try self.tables.create();
+    const ptr = try self.tables.get(id);
+    try ptr.array.appendSlice(ptr.alloc, val);
+    return Data.new.table(id);
+}
+
+/// `{:tag, payload}` result table, the `{:ok, v}` / `{:err, e}` shape
+pub fn resultTable(self: *VM, tag: revo.core_atoms, payload: Data) !Data {
+    return self.tableOfSlice(&[_]Data{
+        Data.new.atom(tag.atomId()),
+        payload,
+    });
+}
+
+/// split of a `{:tag, ...}` table: tag in [0], payload in [1] when present
+pub const ResultParts = struct { tag: Data, payload: ?Data, len: usize };
+pub fn resultParts(self: *VM, val: Data) ?ResultParts {
+    const tid = val.asTable() orelse return null;
+    const t = self.tables.get(tid) catch return null;
+    if (t.array.items.len == 0) return null;
+    return .{
+        .tag = t.array.items[0],
+        .payload = if (t.array.items.len > 1) t.array.items[1] else null,
+        .len = t.array.items.len,
+    };
+}
+
+/// `:err` table check, for `?`, `orelse`, jumps, `try`
+pub fn isErrTable(self: *VM, val: Data) bool {
+    const parts = self.resultParts(val) orelse return false;
+    const atom = parts.tag.asAtom() orelse return false;
+    return atom == revo.core_atoms.atomId(.err);
+}
+
+/// `:ok` table check, pairs `isErrTable`
+pub fn isOkTable(self: *VM, val: Data) bool {
+    const parts = self.resultParts(val) orelse return false;
+    const atom = parts.tag.asAtom() orelse return false;
+    return atom == revo.core_atoms.atomId(.ok);
+}
+
+/// named-field write without the intern dance
+pub fn putField(self: *VM, tid: mem.TableID, name: []const u8, val: Data) !void {
+    const t = try self.tables.get(tid);
+    try t.putRawAtom(try self.internAtom(name), val, self);
+}
+
+/// named-field raw read, null when missing or not a table
+/// never interns, so core names resolve even if nothing interned them yet
+pub fn getField(self: *VM, val: Data, name: []const u8) ?Data {
+    const tid = val.asTable() orelse return null;
+    const t = self.tables.get(tid) catch return null;
+    const id = self.atoms.get(name) orelse self.strings.lookup(name) orelse return null;
+    return t.getRawAtom(id, self);
+}
+
+/// remove a named field, false when missing or not a table
+pub fn removeField(self: *VM, val: Data, name: []const u8) bool {
+    const tid = val.asTable() orelse return false;
+    const t = self.tables.get(tid) catch return false;
+    const id = self.atoms.get(name) orelse self.strings.lookup(name) orelse return false;
+    return t.remove(Data.new.atom(id), self);
+}
+
+/// array-part read with bounds check, null when out of range
+pub fn arrayGet(self: *VM, tid: mem.TableID, idx: usize) ?Data {
+    const t = self.tables.get(tid) catch return null;
+    if (idx >= t.array.items.len) return null;
+    return t.array.items[idx];
+}
+
+/// deep copy of a table: array part in order, then keyed entries
+pub fn copyTable(self: *VM, src: mem.TableID) !Data {
+    const s = try self.tables.get(src);
+    const id = try self.tables.create();
+    const d = try self.tables.get(id);
+
+    try d.array.appendSlice(d.alloc, s.array.items);
+    var it = s.hash.orderedIterator();
+
+    while (it.next()) |entry|
+        try d.putRaw(entry.key, entry.value, self);
+    return Data.new.table(id);
 }
 
 pub fn push(self: *VM, val: Data) !void {
@@ -548,20 +637,8 @@ pub fn ensureModule(self: *VM, name: []const u8) !mem.TableID {
     return tid;
 }
 
-/// put a function into a table under an interned name
+/// put a function into a table under an already-resolved core atom
 pub fn putInTable(
-    self: *VM,
-    table_id: mem.TableID,
-    name: []const u8,
-    fn_id: mem.FunctionID,
-) !void {
-    const atom = try self.internAtom(name);
-    const t = try self.tables.get(table_id);
-    try t.putRawAtom(atom, Data.new.function(fn_id), self);
-}
-
-/// same as putInTable but the key is an already-resolved core atom
-pub fn putInTableAtom(
     self: *VM,
     table_id: mem.TableID,
     atom: mem.AtomID,
@@ -1065,18 +1142,6 @@ pub fn getMetatableId(
                 )
             ];
         },
-        .tuple => blk: {
-            const id = val.asTuple().?;
-            if (self.tuples.get(id)) |value| {
-                if (value.metatable) |mt_id|
-                    break :blk mt_id;
-            } else |_| {}
-            break :blk self.metatables[
-                @intFromEnum(
-                    mem.Type.tuple,
-                )
-            ];
-        },
         else => |e| self.metatables[@intFromEnum(e)],
     };
 }
@@ -1096,7 +1161,6 @@ pub const EvalError = error{
     FrameUnderflow,
     InvalidBytecode,
     FunctionDNE,
-    InvalidTuple,
     OutOfMemory,
     ConstantReassignment,
 } || root.functions.HostError;
@@ -1255,13 +1319,9 @@ fn callNonClosureFunction(
                 },
                 else => {
                     const tag = try self.internAtom(@errorName(err));
-                    const items = [_]Data{
-                        Data.new.atom(revo.core_atoms.atomId(.err)),
-                        Data.new.atom(tag),
-                    };
-                    const data = Data.new.tuple(try self.tuples.create(&items));
+                    const res = try self.resultTable(.err, Data.new.atom(tag));
                     try self.ensureAbsoluteSlot(base + instr.c);
-                    try self.writeRegisterFast(base, instr.c, data);
+                    try self.writeRegisterFast(base, instr.c, res);
                     return;
                 },
             };
@@ -1571,37 +1631,13 @@ pub fn returnRegister(
         self.sched.current_fiber == 0 and
         fiber.frames.items.len <= 1;
 
-    if (returning_to_exit) {
-        if (result.asTuple()) |result_tid| {
-            const tuple = try self.tuples.get(result_tid);
-            if (tuple.items.len >= 1) {
-                const tag = tuple.items[0];
-                if (tag.asAtom() ==
-                    revo.core_atoms.atomId(.err))
-                {
-                    try self.panicFromErrPayload(
-                        if (tuple.items.len > 1) tuple.items[1] else null,
-                        fiber.pc,
-                    );
-                    return error.Panic;
-                }
-            }
-        } else if (result.asTable()) |result_tid| {
-            const table = try self.tables.get(result_tid);
-            if (table.array.items.len >= 1) {
-                const tag = table.array.items[0];
-                if (tag.asAtom() ==
-                    revo.core_atoms.atomId(.err))
-                {
-                    try self.panicFromErrPayload(
-                        if (table.array.items.len > 1) table.array.items[1] else null,
-                        fiber.pc,
-                    );
-                    return error.Panic;
-                }
-            }
+    if (returning_to_exit) if (self.resultParts(result)) |parts| {
+        const tag = parts.tag.asAtom() orelse null;
+        if (tag != null and tag.? == revo.core_atoms.atomId(.err)) {
+            try self.panicFromErrPayload(parts.payload, fiber.pc);
+            return error.Panic;
         }
-    }
+    };
 
     if (fiber.frames.items.len == 0 or
         fiber.pc >= fiber.program.len)
@@ -1759,7 +1795,6 @@ test {
     _ = @import("opcode.zig");
     _ = @import("table.zig");
     _ = @import("tests.zig");
-    _ = @import("tuple.zig");
     _ = @import("exec.zig");
     _ = @import("gc.zig");
 }
@@ -1788,7 +1823,6 @@ pub const opcode = root.opcode;
 const Instruction = opcode.Instruction;
 pub const Interner = root.interner.Interner;
 const TablePool = root.table.TablePool;
-const TuplePool = root.tuple.TuplePool;
 pub const GlobalID = mem.StringID;
 pub const ChannelID = mem.TableID;
 pub const resolveField = lookup.resolveField;

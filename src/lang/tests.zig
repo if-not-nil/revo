@@ -373,10 +373,6 @@ test "concat operator" {
     try t.topString("'x ' ~ 2", "x 2");
     try t.topString("1.5 ~ 2", "1.52");
 
-    // tuple concat
-    try t.topString("(1, 2) ~ (3, 4)", "(1, 2)(3, 4)");
-    try t.topTrue("'(1, 2)' ~ '(3, 4)' == '(1, 2)(3, 4)'");
-
     // table with __tostring metamethod
     try t.topString(
         \\const mt = {__tostring = fn(self) "custom"}
@@ -401,7 +397,6 @@ test "concat operator" {
     , "ab");
 
     // mixed types fall through to display
-    try t.topString("(:a, 1) ~ 2", "(:a, 1)2");
     try t.topString(":hello ~ ' world'", ":hello world");
 }
 
@@ -462,7 +457,7 @@ test "channels coordinate spawned workers" {
     , 42);
 }
 
-test "sleep with multiple spawned joins returns numeric sums" {
+test "sleep join values are preserved per handle" {
     try t.topNumber(
         \\ const f = fn(v) do
         \\   sleep(10)
@@ -473,9 +468,6 @@ test "sleep with multiple spawned joins returns numeric sums" {
         \\ const c = spawn f(30)
         \\ join(a) + join(b) + join(c)
     , 72);
-}
-
-test "sleep join values are preserved per handle" {
     try t.topNumber(
         \\ const f = fn(v) do
         \\   sleep(10)
@@ -727,7 +719,7 @@ test "metamethod failures are runtime errors not host panics" {
 test "errs returned at toplevel report proper span" {
     try t.expectRuntimeFailure(
         \\ do
-        \\ (:err, "boom")?
+        \\ {:err, "boom"}?
         \\ end
     , .Panic, 2, 2, "\x1b[32m\"boom\"\x1b[0m");
 }
@@ -819,46 +811,31 @@ test "non-table values can use plain metatable fields as methods" {
 // error vals
 //
 
-test "result predicates work" {
-    try t.topString("string((:ok, 42))", "(:ok, 42)");
-    try t.topString("string((:err, :Bad))", "(:err, :Bad)");
-}
-
 test "error helpers build and classify tagged errors" {
-    try t.topString("string((:err, :FileNotFound))", "(:err, :FileNotFound)");
-    try t.topTrue("err?!((:err, :Bad))");
-    try t.topTrue("err?!((:err, :FileNotFound))");
-    try t.topFalse("err?!((:ok, :Bad))");
+    try t.topString("string({:ok, 42})", "{ :ok, 42 }");
+    try t.topString("string({:err, :FileNotFound})", "{ :err, :FileNotFound }");
+    try t.topTrue("err?!({:err, :Bad})");
+    try t.topTrue("err?!({:err, :FileNotFound})");
+    try t.topFalse("err?!({:ok, :Bad})");
 }
 
 test "result predicates replace native functions" {
-    try t.topTrue("ok?!((:ok, 42))");
-    try t.topTrue("ok?!((:ok, :nil))");
-    try t.topFalse("ok?!((:err, :Bad))");
-    try t.topTrue("err?!((:err, :Bad))");
-    try t.topFalse("err?!((:ok, 42))");
-}
-
-test "result and error conventions work with match" {
-    try t.topTrue(":true");
+    try t.topTrue("ok?!({:ok, 42})");
+    try t.topTrue("ok?!({:ok, :nil})");
+    try t.topFalse("ok?!({:err, :Bad})");
+    try t.topTrue("err?!({:err, :Bad})");
+    try t.topFalse("err?!({:ok, 42})");
 }
 
 test "unwrap panics on err result" {
     try t.expectRuntimeFailureWithMessage(
-        \\ unwrap((:err, :Unlucky))
+        \\ unwrap({:err, :Unlucky})
     , .Panic, ":Unlucky");
 }
-
-test "unwrap works on tuples immediately" {
-    try t.expectRuntimeFailureWithMessage(
-        \\ (:err, :Unlucky):unwrap()
-    , .Panic, ":Unlucky");
-}
-
-test "unwrap panics on bullshit" {
-    try t.expectCompileError(
+test "unwrap rejects non-results at runtime" {
+    try t.expectRuntimeError(
         \\ unwrap "yo"
-    , .ParseError);
+    , .TypeError);
 }
 
 //
@@ -953,8 +930,8 @@ test "optional group - zero or one occurrence" {
 
 test "comma-separated repetition - literal separators" {
     try t.topNumber(
-        \\ macro tuple_fst! `(%first:expr %REST(%item:expr)*)` `%first`
-        \\ tuple_fst!(10, 15, 17)
+        \\ macro list_fst! `(%first:expr %REST(%item:expr)*)` `%first`
+        \\ list_fst!(10, 15, 17)
     , 10);
 }
 
@@ -1000,50 +977,35 @@ test "custom keyword structure - keywords at multiple positions" {
 test "quasiquote atom" {
     try t.topTrue(
         \\let r = `:hello`
-        \\r == (:hash, "hello")
+        \\r == {:hash, "hello"}
     );
 }
 
 test "quasiquote number" {
     try t.topTrue(
         \\let r = `42`
-        \\r == (:number, 42)
+        \\r == {:number, 42}
     );
 }
 
 test "quasiquote string" {
     try t.topTrue(
         \\let r = `"hello"`
-        \\r == (:string, "hello")
+        \\r == {:string, "hello"}
     );
 }
-
-test "quasiquote nil tuple" {
-    try t.topTrue(
-        \\let r = `()`
-        \\r == (:nil,)
-    );
-}
-
-test "quasiquote produces tuple" {
-    try t.topTrue(
-        \\let r = `(:a, :b)`
-        \\r == (:tuple, ((:hash, "a"), (:hash, "b")))
-    );
-}
-
 test "quasiquote produces table" {
     try t.topTrue(
         \\let r = `{:a, :b}`
-        \\r == (:table, ((:nil, :false, (:hash, "a")), (:nil, :false, (:hash, "b"))))
+        \\r == {:table, {{:nil, :false, {:hash, "a"}}, {:nil, :false, {:hash, "b"}}}}
     );
 }
 
 test "quasiquote splice inserts value" {
     try t.topTrue(
         \\let x = 10
-        \\let r = `(:num, %x)`
-        \\r == (:tuple, ((:hash, "num"), 10))
+        \\let r = `(%x + 1)`
+        \\r == {:binary, :add, 10, {:number, 1}}
     );
 }
 
@@ -1051,15 +1013,15 @@ test "quasiquote table named key" {
     try t.topTrue(
         \\let v = 42
         \\let r = `{key = %v}`
-        \\r == (:table, (((:ident, "key"), :false, 42),))
+        \\r == {:table, {{{:ident, "key"}, :false, 42}}}
     );
 }
 
 test "quasiquote nested splice in table" {
     try t.topTrue(
         \\let x = 42
-        \\let r = `{(:a, %x)}`
-        \\r == (:table, ((:nil, :false, (:tuple, ((:hash, "a"), 42))),))
+        \\let r = `{{:a, %x}}`
+        \\r == {:table, {{:nil, :false, {:table, {{:nil, :false, {:hash, "a"}}, {:nil, :false, 42}}}}}}
     );
 }
 
@@ -1067,15 +1029,15 @@ test "quasiquote multiple splices" {
     try t.topTrue(
         \\let a = 20
         \\let b = 22
-        \\let r = `(:add, %a, %b)`
-        \\r == (:tuple, ((:hash, "add"), 20, 22))
+        \\let r = `(f(%a, %b))`
+        \\r == {:call, {:ident, "f"}, {20, 22}, :false, {}}
     );
 }
 
 test "quasiquote bare ident" {
     try t.topTrue(
         \\let r = `hello`
-        \\r == (:ident, "hello")
+        \\r == {:ident, "hello"}
     );
 }
 
@@ -1084,7 +1046,7 @@ test "quasiquote table computed key with splice" {
         \\let k = 99
         \\let v = 42
         \\let r = `{[%k] = %v}`
-        \\r == (:table, ((99, :true, 42),))
+        \\r == {:table, {{99, :true, 42}}}
     );
 }
 
@@ -1196,9 +1158,22 @@ test "loops thread state and break with a single value" {
     , 16);
 }
 
-test "foreach loop" {
+test "loop breaks with explicit value" {
     try t.topNumber(
-        \\ const tbl = {"foo", "bar", "baz"}
+        \\ loop do
+        \\     break(42)
+        \\ end
+    , 42);
+    try t.topNumber(
+        \\ let i = 1
+        \\ loop do
+        \\     if i == 1
+        \\         break(99)
+        \\     else
+        \\         break(i)
+        \\ end
+    , 99);
+    try t.topNumber(
         \\ let i = 0
         \\ loop do
         \\   if i < 2
@@ -1207,24 +1182,6 @@ test "foreach loop" {
         \\     break(i)
         \\ end
     , 2);
-}
-
-test "for loop iterates table values" {
-    try t.topNumber(
-        \\ let seen = 0
-        \\ for val, i in {10, 20, 30} do
-        \\     if i == 0 do
-        \\         seen = seen + val
-        \\     end else do
-        \\         if i == 1 do
-        \\             seen = seen + val
-        \\         end else do
-        \\             seen = seen + val
-        \\         end
-        \\     end
-        \\ end
-        \\ seen
-    , 60);
 }
 
 test "indexed table iteration gets value and index" {
@@ -1551,15 +1508,6 @@ test "semantic catches undefined variable" {
 test "semantic catches undefined function call" {
     try t.expectCompileError("pritn(\"hi\")", .ParseError);
 }
-
-test "semantic catches trying to mutate a tuple variable" {
-    try t.expectCompileError("let tup = (0,0) tup[0] = 1", .ParseError);
-}
-
-test "semantic catches trying to mutate a tuple literal" {
-    try t.expectCompileError("(0,0)[0] = 1", .ParseError);
-}
-
 test "runtime report includes not-a-function detail" {
     try t.expectRuntimeFailure(
         "1(2)",
@@ -1586,20 +1534,6 @@ test "runtime report includes wrong arity detail" {
         \\ id()
     , .ParseError);
 }
-
-test "runtime report includes tuple index detail" {
-    try t.expectRuntimeFailure(
-        \\ const f = fn() (1,)
-        \\ const a, b = f()
-        \\ a
-    ,
-        .InvalidTuple,
-        2,
-        2,
-        "tuple index 1 out of range for tuple of length 1",
-    );
-}
-
 test "runtime renderer includes source path" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
@@ -1667,9 +1601,9 @@ test "runtime renderer includes stack trace call chain" {
 test "function return value destructuring" {
     try t.topNumber(
         \\ const vector_mul = fn(a, b, factor)
-        \\    (a * factor, b * factor)
+        \\    {a * factor, b * factor}
         \\
-        \\ const (x, y) = vector_mul(4, 6, 2)
+        \\ const {x, y} = vector_mul(4, 6, 2)
         \\ x + y
     , 20);
 }
@@ -1887,7 +1821,7 @@ test "imported proc macros expand, unknown ones error" {
         .sub_path = "macs.rv",
         .data =
         \\ pub proc answer!(iter) do
-        \\   {(:number, 42)}
+        \\   {{:number, 42}}
         \\ end
         ,
     });
@@ -1920,7 +1854,7 @@ test "imported qualified types check values" {
     try tmp.dir.writeFile(io, .{
         .sub_path = "shapes.rv",
         .data =
-        \\ pub type T = (:ok, string)
+        \\ pub type T = {:ok, string}
         \\ pub fn f() 10
         \\ pub let v = 5
         ,
@@ -1931,29 +1865,29 @@ test "imported qualified types check values" {
 
     try t.topNumberInDir(module_dir,
         \\ import "shapes"
-        \\ let x: shapes.T = (:ok, "hi")
+        \\ let x: shapes.T = {:ok, "hi"}
         \\ 1
     , 1);
 
     try t.expectCompileErrorInDir(module_dir,
         \\ import "shapes"
-        \\ let x: shapes.T = (:err, 5)
+        \\ let x: shapes.T = {:err, 5}
     );
 
     try t.expectCompileErrorInDir(module_dir,
         \\ import "shapes"
-        \\ let x: shapes.U = (:ok, "hi")
+        \\ let x: shapes.U = {:ok, "hi"}
     );
 
     try t.expectCompileErrorInDir(module_dir,
         \\ import "shapes"
         \\ type B = shapes.T
-        \\ let y: B = (:err, 5)
+        \\ let y: B = {:err, 5}
     );
 
     try t.topNumberInDir(module_dir,
         \\ import "shapes"
-        \\ fn get() -> shapes.T (:ok, "hi")
+        \\ fn get() -> shapes.T {:ok, "hi"}
         \\ 1
     , 1);
 }
@@ -2033,26 +1967,6 @@ test "multiple closures share same upvalue cell" {
 //
 // loop & control flow
 //
-test "loop breaks with explicit value" {
-    try t.topNumber(
-        \\ loop do
-        \\     break(42)
-        \\ end
-    , 42);
-}
-
-test "break with value returns that value" {
-    try t.topNumber(
-        \\ let i = 1
-        \\ loop do
-        \\     if i == 1
-        \\         break(99)
-        \\     else
-        \\         break(i)
-        \\ end
-    , 99);
-}
-
 test "loop threading with guards" {
     try t.topNumber(
         \\ let x = 0
@@ -2166,26 +2080,6 @@ test "match guards" {
         \\ n
     , 1);
 }
-
-test "match tuple patterns" {
-    try t.topNumber(
-        \\ const x = (:ok, 42)
-        \\ match x
-        \\ | (:asdf, v) => 1
-        \\ | (:ok, v) => v
-        \\ | (:err, e) => 2
-    , 42);
-    try t.topNumber(
-        \\ const x = (:ok, 42)
-        \\ match x
-        \\ | (:asdf, v) => 1
-        \\ | (:ok, v) when v < 20 => 2
-        \\ | (:ok, v) when v > 40 => v
-        \\ | (:ok, v) when number?(v) => 3
-        \\ | (:err, e) => 2
-    , 42);
-}
-
 test "match table array patterns" {
     try t.topNumber(
         \\ const x = {:ok, 42}
@@ -2235,15 +2129,22 @@ test "match table nested patterns" {
         \\ | _ => 0
     , 7);
     try t.topNumber(
-        \\ match {(:ok, 1), 2}
-        \\ | {(:ok, v), _} => v
+        \\ match {{:ok, 1}, 2}
+        \\ | {{:ok, v}, _} => v
         \\ | _ => 0
     , 1);
     try t.topNumber(
-        \\ match (:ok, {:x, 5})
-        \\ | (:ok, {_, v}) => v
+        \\ match {:ok, {:x, 5}}
+        \\ | {:ok, {_, v}} => v
         \\ | _ => 0
     , 5);
+    try t.topNumber(
+        \\ const data = {:ok, {:inner, 10}}
+        \\ match data
+        \\ | {:ok, {:inner, v}} when v < 5 => 1
+        \\ | {:ok, {:inner, v}} when v > 5 => 2
+        \\ | _ => 0
+    , 2);
 }
 
 test "match ascriptions" {
@@ -2344,25 +2245,6 @@ test "assignment to undefined name is rejected" {
         \\ f()
     , .InvalidAssignmentTarget, 2, 6, "assignment target `y` is not declared");
 }
-
-test "tuple binding mismatch reports item counts" {
-    try t.expectCompileFailure(
-        \\ const a, b = (1,)
-    ,
-        .ParseError,
-        1,
-        15,
-        "tuple binding expects at least 2 items, got 1",
-    );
-}
-
-test "tuple let binding initializes locals" {
-    try t.topNumber(
-        \\ let a, b = (1, 2)
-        \\ a + b
-    , 3);
-}
-
 test "table binding mismatch reports item counts" {
     try t.expectCompileFailure(
         \\ const {a, b} = {1}
@@ -2370,7 +2252,15 @@ test "table binding mismatch reports item counts" {
         .ParseError,
         1,
         17,
-        "table binding expects at least 2 items, got 1",
+        "table binding expects 2 items, got 1",
+    );
+    try t.expectCompileFailure(
+        \\ const {a, b} = {1, 2, 3}
+    ,
+        .ParseError,
+        1,
+        17,
+        "table binding expects 2 items, got 3",
     );
 }
 
@@ -2442,7 +2332,7 @@ test "keyed tables do not destructure" {
         .UnsupportedSyntax,
         1,
         6,
-        "keyed tables do not destructure, use keyless `{a, b}`",
+        "keyed tables do not destructure yet :( use keyless `{a, b}`",
     );
 }
 
@@ -2632,19 +2522,13 @@ test "comparison with guard in match" {
     , 2);
 }
 
-test "and operator works" {
+test "and/or operators" {
     try t.topAtom(
         \\ 1 and 1 and :true
     , "true");
-}
-
-test "or operator works" {
     try t.topAtom(
         \\ 0 or 0 or :true
     , "true");
-}
-
-test "and operator short-circuit" {
     try t.topNumber(
         \\ 0 and 999
     , 0);
@@ -2652,11 +2536,7 @@ test "and operator short-circuit" {
 
 test "string escaping works" {
     try t.topString("\"hello\\nworld\"", "hello\nworld");
-}
-
-test "single and double quotes are distinct" {
     try t.topString("'hello\\nworld'", "hello\\nworld");
-    try t.topString("\"hello\\nworld\"", "hello\nworld");
 }
 
 test "spawned fiber with sleep completes" {
@@ -2779,7 +2659,7 @@ test "comp errors" {
     , .ParseError, 1, 8, "division by zero!");
     try t.expectCompileFailure(
         \\ proc bad_comp!(iter) do
-        \\   {(:comp_block, (:binary, :div, (:number, 1), (:number, 0)), :false)}
+        \\   {{:comp_block, {:binary, :div, {:number, 1}, {:number, 0}}, :false}}
         \\ end
         \\ bad_comp!()
     , .ParseError, 4, 2, "division by zero!");
@@ -2799,22 +2679,6 @@ test "fn name(params) multiple named functions" {
         \\ mul(add(2, 3), 4)
     , 20);
 }
-test "match nested patterns" {
-    try t.topNumber(
-        \\ const data = (:ok, (:inner, 42))
-        \\ match data
-        \\ | (:ok, (:inner, v)) => v
-        \\ | _ => 0
-    , 42);
-    try t.topNumber(
-        \\ const data = (:ok, (:inner, 10))
-        \\ match data
-        \\ | (:ok, (:inner, v)) when v < 5 => 1
-        \\ | (:ok, (:inner, v)) when v > 5 => 2
-        \\ | _ => 0
-    , 2);
-}
-
 test "channel receives from multiple producers preserve ordering" {
     try t.topNumber(
         \\ const ch = chan(0)
@@ -2853,7 +2717,7 @@ test "proc macro call arguments are not semantically analyzed" {
     try t.topNumber(
         \\ proc echo!(iter) do
         \\   let node = iter:next()
-        \\   node
+        \\   {node}
         \\ end
         \\ echo!(42)
     , 42);
@@ -2865,7 +2729,8 @@ test "proc macro call with multiple args does not analyze arguments" {
     try t.topNumber(
         \\ proc pick!(iter) do
         \\   let _first = iter:next()
-        \\   iter:next()
+        \\   let second = iter:next()
+        \\   {second}
         \\ end
         \\ pick!(ignored, 45)
     , 45);
@@ -2883,90 +2748,6 @@ test "numeric and string keys are distinct" {
 //
 // error propagation: ? and orelse
 //
-
-test "try ? unwraps ok tuple" {
-    try t.topNumber(
-        \\ (:ok, 42)?
-    , 42);
-    try t.topNumber(
-        \\ const f = fn() (:ok, 10)
-        \\ f()?
-    , 10);
-    try t.topNumber(
-        \\ fn ok() -> (:ok, num) do
-        \\   (:ok, 1)
-        \\ end
-        \\ ok()?
-    , 1);
-}
-
-test "try ? error propagation" {
-    try t.expectRuntimeFailureWithMessage(
-        \\ (:err, :not_found)?
-    , .Panic, "\x1b[33m:not_found\x1b[0m");
-    try t.expectRuntimeFailureWithMessage(
-        \\ const f = fn() (:err, :not_found)
-        \\ f()?
-        \\ 99
-    , .Panic, "\x1b[33m:not_found\x1b[0m");
-    try t.expectRuntimeFailureWithMessage(
-        \\ const f = fn() (:err, :fail)
-        \\ f()?
-    , .Panic, "\x1b[33m:fail\x1b[0m");
-}
-
-test "try ? chains with pipe" {
-    try t.topNumber(
-        \\ (:ok, 5)? |> fn(x) x * 2
-    , 10);
-}
-
-test "try ? in pattern matching" {
-    try t.topNumber(
-        \\ const f = fn() (:ok, 7)
-        \\ match f()?
-        \\ | 7 => 100
-        \\ | _ => 0
-    , 100);
-}
-
-test "nested ok tuples extracts inner" {
-    try t.topType(
-        \\ (:ok, (:inner, 42))?
-    , .tuple);
-}
-
-test "orelse type dispatch" {
-    try t.topNumber(
-        \\ (:err, :fail) orelse 42
-    , 42);
-    try t.topNumber(
-        \\ (:ok, 100) orelse 42
-    , 100);
-    try t.topNumber(
-        \\ :nil orelse 50
-    , 50);
-    try t.topNumber(
-        \\ 10 orelse 20
-    , 10);
-    try t.topNumber(
-        \\ (:err, :a) orelse (:err, :b) orelse 99
-    , 99);
-    try t.topNumber(
-        \\ (:ok, 15)? orelse 33
-    , 15);
-}
-
-test "orelse right side" {
-    try t.topNumber(
-        \\ const f = fn() (:err, :no)
-        \\ f() orelse 77
-    , 77);
-    try t.topNumber(
-        \\ (:err, :fail) orelse (:ok, 88)
-    , 88);
-}
-
 test "table try/?/orelse/prop" {
     try t.topNumber(
         \\ {:ok, 42}?
@@ -3178,13 +2959,6 @@ test "named parameters with generics" {
     , "hi");
 }
 
-test "double assignment" {
-    try t.topNumber(
-        \\ let a = {}
-        \\ let c = (a.b = 5)
-    , 5);
-}
-
 test "assignment expression returns assigned value" {
     try t.topNumber(
         \\ let a = {}
@@ -3388,7 +3162,7 @@ test "cross-module proc macro injection works" {
         .data =
         \\ pub proc add_one!(iter) do
         \\   let n = iter:next()
-        \\   {(:binary, :add, n, (:number, 1))}
+        \\   {{:binary, :add, n, {:number, 1}}}
         \\ end
         ,
     });

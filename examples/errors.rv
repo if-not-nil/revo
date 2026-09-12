@@ -4,19 +4,18 @@
  ✖
 !#
 
-let (good, bad) = ((:ok, "asdf"), (:err, :Boom))
+let {good, bad} = {{:ok, "asdf"}, {:err, :Boom}}
 
-(:err, :Boom)?
+{:err, :Boom}?
 # they all panic
 fn boom() do
-	const res = fn() (:err, :Boom)
+	const res = fn() {:err, :Boom}
 	res()?
 	res():unwrap()
-	res() |> try
 	res() orelse "<not found>"
 
 	unwrap(res())
-	(:err, :Unlucky) |> unwrap
+	{:err, :Unlucky} |> unwrap
 
 	number("a")?
 end
@@ -25,8 +24,8 @@ boom():unwrap()
 
 # there are all equal to 42
 # TODO: add good and_then patterns
-(:err, "e") orelse 42
-(:ok, 42) orelse 67
+{:err, "e"} orelse 42
+{:ok, 42} orelse 67
 :nil orelse 42
 
 const x = 123 |> inspect

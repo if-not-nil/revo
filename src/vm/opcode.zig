@@ -68,15 +68,12 @@ pub const Opcode = enum(u8) {
     @"and", // "R[a] <- bool(R[b] and R[c])"
     @"or", // "R[a] <- bool(R[b] or R[c])"
     not, // "R[a] <- not R[b]"
-    tuple_new, // "R[a] <- tuple(R[b .. b+bx))"
-    tuple_get, // "R[a] <- tuple_get(R[b], R[c])"
     table_new, // "R[a] <- table_new()"
     table_set, // "R[a][R[b]] <- R[c]"
     table_get, // "R[a] <- table_get(R[b], R[c])"
     table_set_atom, // "R[a][:atom(bx)] <- R[c]"
     table_get_atom, // "R[a] <- table_get(R[b], :atom(bx))"
     slice, // "R[a] <- slice(R[b], R[b+1], R[b+2], R[b+3])"
-    tuple_get_const, // "R[a] <- tuple_get(R[b], bx)"
     halt, // "halt with R[a]"
     jump, // "pc <- bx"
     jump_if_false, // "if falsey(R[a]) pc <- bx"
@@ -123,12 +120,11 @@ pub const Opcode = enum(u8) {
     /// - else: falls through (loop done)
     range_loop,
 
-    /// R[a] is (:ok, x)? extract x into R[a]; or (:err, e)? ret; otherwise pass through
+    /// R[a] is {:ok, x}? extract x into R[a]; or {:err, e}? ret; otherwise pass through
     /// bx = 0: propagate errors
     /// bx = 1: dont propagate
     unwrap_result,
-    jump_if_not_nil_and_not_err, // if not nil/undef and not (:err, ...), jump to bx
-    jump_if_err, // if (:err, ...), jump to bx
+    jump_err, // if not nil/undef and not {:err, ...}, jump to bx
 };
 
 pub const Instruction = packed struct {

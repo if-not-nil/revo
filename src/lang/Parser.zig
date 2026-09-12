@@ -229,7 +229,7 @@ fn parseExpression(self: *Parser, min_bp: u8) anyerror!*Node {
         if (self.stop_token) |stop| if (self.check(stop)) break;
         if (self.stop_on_stmt_start and self.isStatementBoundary(left)) break;
 
-        // postfix `obj.field` or `obj.1` (tuple numeric field access)
+        // postfix `obj.field` or `obj.0` (numeric index sugar)
         if (self.match(.dot)) {
             if (self.peek().type == .number) {
                 const num = self.advance();
@@ -792,8 +792,7 @@ fn parseMatchArm(self: *Parser) anyerror!ast.MatchArm {
             try matchers.append(self.alloc, .wildcard);
         } else {
             var m = try self.parseScoped(null, false, 25);
-            // not for tuple patterns
-            if (m.expr != .tuple and self.check(.colon)) m = try self.parseAscribed(m);
+            if (self.check(.colon)) m = try self.parseAscribed(m);
 
             try matchers.append(self.alloc, .{
                 .expr = try self.exprToPattern(m),
@@ -817,8 +816,7 @@ fn parseTypeExpr(self: *Parser) anyerror!*ast.TypeExpr {
     return try type_serde.parse(self.tokens, &self.pos, self.alloc);
 }
 
-/// const x = expr or let x = expr, with const (a, b) = <expr> tuple destructuring
-/// with tuples and type annotations
+/// const x = expr or let x = expr, with const {a, b} = <expr> destructuring
 fn parseBinding(self: *Parser, comptime kind: ast.DeclKind, start: Token) anyerror!*Node {
     const mutable: bool = switch (kind) {
         ast.DeclKind.con => false,
@@ -828,30 +826,19 @@ fn parseBinding(self: *Parser, comptime kind: ast.DeclKind, start: Token) anyerr
     };
 
     const target: *Node = blk: {
-        if (self.check(.lparen)) {
-            _ = self.advance();
-            const t = try self.parseTuplePattern(.rparen);
-            _ = try self.expect(.rparen);
-            break :blk t;
-        } else if (self.check(.lsquiggly)) {
-            // keyless tables destructure like tuple patterns;
+        if (self.check(.lsquiggly)) {
+            // keyless tables destructure;
             // keyed tables stay values and fail later with a proper error
             break :blk try self.exprToPattern(try self.parseTable(self.advance()));
         } else {
             const first = try self.expectIdent();
             if (self.match(.comma)) {
-                var items = try std.ArrayList(*Node).initCapacity(self.alloc, 2);
-                errdefer items.deinit(self.alloc);
-                try items.append(self.alloc, try self.allocExpr(first.span(), .{ .ident = first.text }));
-
-                while (true) {
-                    const item = try self.expectIdent();
-                    try items.append(self.alloc, try self.allocExpr(item.span(), .{ .ident = item.text }));
-                    if (!self.match(.comma)) break;
-                }
-                break :blk try self.allocExpr(ast.spanFromNodes(items.items, first.span()), .{
-                    .tuple_pattern = try items.toOwnedSlice(self.alloc),
-                });
+                try self.recordError(
+                    .UnexpectedToken,
+                    "use `{...}` for destructuring",
+                    self.peek().span(),
+                );
+                return error.UnexpectedToken;
             } else {
                 break :blk try self.allocExpr(first.span(), .{ .ident = first.text });
             }
@@ -1453,7 +1440,7 @@ test "parser test block parses" {
     , "(test smoke (fn () (block ok!)))");
 }
 
-/// (expr, expr, ...) or ()
+/// (expr) or (). `()` is nil
 fn parseParenExpr(self: *Parser, start: Token) anyerror!*Node {
     if (self.match(.rparen)) return self.allocExpr(Span.merge(start.span(), self.tokens[self.pos - 1].span()), .nil);
 
@@ -1463,17 +1450,12 @@ fn parseParenExpr(self: *Parser, start: Token) anyerror!*Node {
         return first;
     }
 
-    var items = try std.ArrayList(*Node).initCapacity(self.alloc, 2);
-    errdefer items.deinit(self.alloc);
-    try items.append(self.alloc, first);
-
-    while (!self.check(.rparen)) {
-        try items.append(self.alloc, try self.parseExpression(0));
-        if (!self.match(.comma)) break;
-    }
-
-    const close = try self.expect(.rparen);
-    return self.allocExpr(Span.merge(start.span(), close.span()), .{ .tuple = try items.toOwnedSlice(self.alloc) });
+    try self.recordError(
+        .UnexpectedToken,
+        "unexpected `,` in parens, use `{...}` for tables",
+        self.peek().span(),
+    );
+    return error.UnexpectedToken;
 }
 
 /// `expr: Type` ascription, only legal in match patterns
@@ -1488,46 +1470,10 @@ fn parseAscribed(self: *Parser, first: *Node) anyerror!*Node {
     );
 }
 
-/// (a, b, c) in pattern position, does nested parens n wildcards
-fn parseTuplePattern(self: *Parser, terminator: TokenType) anyerror!*Node {
-    var items = try std.ArrayList(*Node).initCapacity(self.alloc, 2);
-    errdefer items.deinit(self.alloc);
-
-    while (!self.check(terminator)) {
-        if (self.checkIdentText("_")) {
-            const token = self.advance();
-            // wildcard is represented as ident and is the pattern matcher's job
-            try items.append(self.alloc, try self.allocExpr(token.span(), .{ .ident = "_" }));
-        } else if (self.check(.lparen)) {
-            _ = self.advance();
-            const nested = try self.parseTuplePattern(.rparen);
-            _ = try self.expect(.rparen);
-            try items.append(self.alloc, nested);
-        } else {
-            try items.append(self.alloc, try self.parseExpression(0));
-        }
-
-        if (!self.match(.comma)) break;
-    }
-
-    const end_span = if (items.items.len == 0) self.peek().span() else items.items[items.items.len - 1].span;
-    return self.allocExpr(
-        ast.spanFromNodes(items.items, end_span),
-        .{ .tuple_pattern = try items.toOwnedSlice(self.alloc) },
-    );
-}
-
-/// turn expression into pattern: expr -> (expr, expr, ...)
-/// keyless `{...}` tables become array patterns, keyed tables stay values
+/// turn expression into pattern: keyless `{...}` tables become array
+/// patterns, keyed tables stay values and fail later with a proper error
 fn exprToPattern(self: *Parser, expr: *Node) anyerror!*Node {
     return switch (expr.expr) {
-        .tuple => |items| blk: {
-            var out = try std.ArrayList(*Node).initCapacity(self.alloc, items.len);
-            errdefer out.deinit(self.alloc);
-
-            for (items) |item| try out.append(self.alloc, try self.exprToPattern(item));
-            break :blk try self.allocExpr(expr.span, .{ .tuple_pattern = try out.toOwnedSlice(self.alloc) });
-        },
         .table => |entries| blk: {
             for (entries) |entry| if (entry.key != null or entry.computed) break :blk expr;
             var out = try std.ArrayList(*Node).initCapacity(self.alloc, entries.len);
@@ -1710,7 +1656,7 @@ fn allocSliceExpr(self: *Parser, start: ?*Node, step: ?*Node, end: ?*Node) anyer
     });
 }
 
-/// 0.. and 0..10 :== (:range, 0, 1, limit(int)) and (:range, 0, 1, 10)
+/// 0.. and 0..10 :== {:range, 0, 1, limit(int)} and {:range, 0, 1, 10}
 fn buildRangeExpr(self: *Parser, start: *Node, end: *Node, step: *Node) anyerror!*Node {
     const span = Span.merge(start.span, end.span); // covers start..[step..]end
     return self.allocExpr(span, .{
@@ -1801,7 +1747,7 @@ fn checkIdentText(self: *Parser, text: []const u8) bool {
 }
 
 fn isStatementBoundary(self: *Parser, left: *const Node) bool {
-    if (self.looksLikeTupleAssignStart()) return true;
+    if (self.looksLikeParenAssignStart()) return true;
     if (self.forcesStatementBoundary(left, self.peek().type)) return true;
     if (!expr_start_tokens.get(self.peek().type)) return false;
     return !self.canContinueExpression(left);
@@ -1832,7 +1778,7 @@ fn canContinueExpression(self: *Parser, left: *const Node) bool {
     return false;
 }
 
-fn looksLikeTupleAssignStart(self: *Parser) bool {
+fn looksLikeParenAssignStart(self: *Parser) bool {
     if (!self.stop_on_stmt_start or !self.check(.lparen)) return false;
 
     var i: usize = self.pos;

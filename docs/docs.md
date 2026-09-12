@@ -96,15 +96,15 @@ const bumped = user |> fn(u) u:bump()
 const n = number("42")?
 const fallback = number("nope") orelse 0
 
-# tuples + destructuring
-const tagged = (:ok, (user.points + n + fallback, user.name))
-const (tag, payload) = tagged
-const (total, name) = payload
+# tables + destructuring
+const tagged = {:ok, {user.points + n + fallback, user.name}}
+const {tag, payload} = tagged
+const {total, name} = payload
 
 # destructuring
-const (five, ten) = (5, 10)
+const {five, ten} = {5, 10}
 
-let six, seven = (6, 7)
+let {six, seven} = {6, 7}
 
 # match
 const state = match total
@@ -114,7 +114,7 @@ const state = match total
 # fibers
 const h = spawn add(20, 22)
 
-print((tag, total, name, state, join(h)))
+print({tag, total, name, state, join(h)})
 
 # labeled do-blocks act as one-shot loops you can break from
 let v = do/b
@@ -169,7 +169,7 @@ the fundamental types are:
     a:push(4, 5, 6)       # variadic append
     a:rawget("inner")     # bypasses __index metamethod
     a:rawset("inner", 99) # bypasses __newindex metamethod
-    set_meta(a, {})  # replace the metatable
+    set_meta(a, {{}})  # replace the metatable
 
     type User = { name: string, age: number, get_age: function }
     fn get_age(self: User) self.age
@@ -183,21 +183,21 @@ the fundamental types are:
 
     are the way to express nil, true, and false
 
-    they are not to be created at runtime. very useful to express tagged unions with tuples
+    they are not to be created at runtime. very useful to express tagged unions with tables
 
-    only `:false`, `0`, and `:nil` are falsey - everything else (including `""` and `{}`) is truthy
+    only `:false`, `0`, and `:nil` are falsey - everything else (including `""` and `{{}}`) is truthy
 
     for this reason, the language does not have exceptions/errors and uses
-    (:err, :ErrorName) and (:ok, value) together with pattern matching, `?`, `orelse`, `:unwrap()`,
+    {:err, :ErrorName} and {:ok, value} together with pattern matching, `?`, `orelse`, `:unwrap()`,
     and `ok?!`/`err?!` to handle errors. toplevel `?` panics instead of returning silently. there are
     helpers to check these:
 
     ```revo
-    ok?!((:ok, 42))      # :true
-    err?!((:err, :Bad))  # :true
-    (:ok, 42):unwrap() # 42  (panics on :err)
-    (:err, :bad)?      # panics at toplevel
-    (:err, :bad) orelse 0
+    ok?!({:ok, 42})      # :true
+    err?!({:err, :Bad})  # :true
+    {:ok, 42}:unwrap() # 42  (panics on :err)
+    {:err, :bad}?      # panics at toplevel
+    {:err, :bad} orelse 0
     ```
 - functions
     a function is very simple. it (technically) is just one expression, to which you can give parameters
@@ -220,8 +220,8 @@ the fundamental types are:
     end
     fn hi(a, b) do let x = a + b return x end # works too
     fn hi(a, b) match a # ocaml influence
-        | (:some, v) => v + b
-        | (:none)    => :none
+        | {:some, v} => v + b
+        | {:none}    => :none
     ```
     
     parameters can be marked optional with `?`. when omitted, they default to `:no`:
@@ -304,22 +304,21 @@ the fundamental types are:
     "ha" * 3                  # "hahaha"
     ```
     found in the [std docs](./std.md#string)
-- tuples
-    arrays which you can't change the length or contents of. super useful for error handling and
-    storing data you know a lot about the shape of. safer and more performant than tables, but do
-    not allow for as much flexibility.
+- tables (array part)
+    sequences with 0-based indexing, useful for error handling and
+    storing data you know the shape of.
     ```revo
-    const t = (1, 2, 3)
+    const t = {1, 2, 3}
     t[0] # 1
 
     # destructuring
-    const (x, y) = (10, 20)
+    const {x, y} = {10, 20}
 
     # functions can return multiple values cleanly
     const vector_mul = fn(a, b, factor)
-        (a * factor, b * factor)
+        {a * factor, b * factor}
 
-    const (vx, vy) = vector_mul(4, 6, 2)
+    const {vx, vy} = vector_mul(4, 6, 2)
     print(vx + vy) # 20
     ```
 
@@ -381,10 +380,10 @@ let bad: {number, number, name: string} = {1, 2}
 `type` creates a local name for a type expression:
 
 ```revo
-type Result = (:ok, any) | (:err, atom)
+type Result = {:ok, any} | {:err, atom}
 
 fn safe_div(a, b) -> Result
-    if b == 0 (:err, :DivByZero) else (:ok, a / b)
+    if b == 0 {:err, :DivByZero} else {:ok, a / b}
 ```
 
 type expression syntax:
@@ -394,7 +393,7 @@ type expression syntax:
 | `int` | built-in name or alias |
 | `int?` | `int \| :nil` (optional sugar) |
 | `int \| string` | union type |
-| `(int, string)` | tuple type |
+| `{int, string}` | table with two array entries |
 | `fn(int) -> bool` | function signature |
 | `fn(?a: int) -> bool` | function signature with optional param |
 | `table<int>` | table with value type `int` |
@@ -482,15 +481,15 @@ unions model tagged values. each variant is either an atom alone or an atom with
 
 ```revo
 type Shape =
-      (:circle, number)
-    | (:rect, number, number)
-    | (:point)
+      {:circle, number}
+    | {:rect, number, number}
+    | {:point}
 
 fn area(s: Shape) -> number
     match s
-      | (:circle, r)       => 3.14 * r * r
-      | (:rect, w, h)      => w * h
-      | (:point)           => 0
+      | {:circle, r}       => 3.14 * r * r
+      | {:rect, w, h}      => w * h
+      | {:point}           => 0
 ```
 
 ## coercion
@@ -521,7 +520,7 @@ else
     x
 ```
 
-supported predicates: `number?`, `string?`, `table?`, `atom?`, `function?`, `tuple?`, `foreign?`
+supported predicates: `number?`, `string?`, `table?`, `atom?`, `function?`, `foreign?`
 
 ## runtime type predicates
 
@@ -531,9 +530,9 @@ built-in checks that narrow types at runtime:
 number?(42)       # :true
 string?("hi")     # :true
 atom?(:true)      # :true
-table?({})        # :true
+table?({{}})        # :true
 function?(fn() 42) # :true
-tuple?((1, 2))    # :true
+table?({1, 2})    # :true
 ```
 
 `type(x)` returns the runtime type as an atom:
@@ -543,8 +542,8 @@ type(42)       # :number
 type("hi")     # :string
 type(:ok)      # :atom
 type(fn() :nil) # :function
-type({})       # :table
-type((1, 2))   # :tuple
+type({{}})       # :table
+type({1, 2})   # :table
 ```
 
 ## structural types
@@ -683,11 +682,11 @@ let x = 42
 let y = (x = 0) # y is 0 (x was reassigned)
 ```
 
-`~` concatenates values into strings!!! polymorphic with fast paths for strings, numbers, and tuples:
+`~` concatenates values into strings!!! polymorphic with fast paths for strings and numbers:
 ```revo
 "hello" ~ " world"   # "hello world"
 42 ~ " is the " ~ "answer" # "42 is the answer"
-(1, 2) ~ " items"    # "(1, 2) items"
+{1, 2} ~ " items"    # "{ 1, 2 } items"
 :hello ~ " there"    # ":hello there" (via display writer)
 "" ~ "hi"            # "hi" (empty shortcut, no alloc)
 ```
@@ -829,12 +828,12 @@ const tier = match score
     | v when v >= 70 => "B"
     | v              => "C"
 
-# really useful for result tuples
-fn safe_div(a, b) if b == 0 (:err, :DivByZero) else (:ok, a / b)
+# really useful for result tables
+fn safe_div(a, b) if b == 0 {:err, :DivByZero} else {:ok, a / b}
 
 match safe_div(10, 0)
-    | (:ok, v)  => print(v)
-    | (:err, e) => print(fmt("error: %v", e))
+    | {:ok, v}  => print(v)
+    | {:err, e} => print(fmt("error: %v", e))
 ```
 
 # pipe operator
@@ -888,29 +887,29 @@ const n = number("41") orelse 0
 n |> fn(x) x + 1 |> assert_eq(42)
 
 match number("nope")
-  | (:ok, v)  => v |> fn(x) x + 1
-  | (:err, _) => 0
+  | {:ok, v}  => v |> fn(x) x + 1
+  | {:err, _} => 0
 ```
 
 # iteration
 
 all collection functions live under the `iter` module. transforms (`iter.map`, `iter.filter`,
-`iter.take`, ...) return lazy iterators; call `iter.collect` (or `iter.collect_tuple`,
+`iter.take`, ...) return lazy iterators; call `iter.collect` (or `iter.collect_string`,
 `iter.collect_string`) to materialize them into a value. terminal ops (`iter.reduce`,
 `iter.each`, `iter.find`, `iter.all?`, `iter.any?`, `iter.count`, `iter.sum`) run eagerly:
 ```revo
-iter.collect(iter.map((1, 2, 3), fn(x) x * 2))   # {2, 4, 6}
+iter.collect(iter.map({1, 2, 3}, fn(x) x * 2))   # {2, 4, 6}
 iter.collect_string(iter.filter("hello", fn(c) c != "l")) # "heo"
-iter.reduce((1,2,3,4), fn(acc, x) acc + x, 0)   # 10
+iter.reduce({1,2,3,4}, fn(acc, x) acc + x, 0)   # 10
 iter.each({a=1, b=2}, fn(v) print(v))            # side effects, returns :ok
-iter.find((1,2,3,4), fn(x) x > 2)               # 3
-iter.all?((1,2,3), fn(x) x > 0)                 # :true
-iter.any?((1,2,3), fn(x) x > 2)                 # :true
+iter.find({1,2,3,4}, fn(x) x > 2)               # 3
+iter.all?({1,2,3}, fn(x) x > 0)                 # :true
+iter.any?({1,2,3}, fn(x) x > 2)                 # :true
 ```
 
 # slicing
 
-`[start..end]` extracts a contiguous portion of a string, tuple, or table.
+`[start..end]` extracts a contiguous portion of a string or table.
 `[start..step..end]` adds a step to skip elements. any bound can be omitted.
 
 ```revo
@@ -921,12 +920,12 @@ s[3..]           # "lo"   (open end)
 s[..]            # "hello" (full copy)
 s[0..2..5]       # "hlo"  (step: every 2nd char)
 
-let t = (1, 2, 3, 4, 5)
-t[..3]           # (1, 2, 3)
-t[3..]           # (4, 5)
+let t = {1, 2, 3, 4, 5}
+t[..3]           # {1, 2, 3}
+t[3..]           # {4, 5}
 t[1..4][0]       # 2
-t[4..-2..0]      # (5, 3, 1)  (negative step)
-t[2..2]          # ()  (empty)
+t[4..-2..0]      # {5, 3, 1}  (negative step)
+t[2..2]          # {{}}  (empty)
 ```
 
 # errors
@@ -935,8 +934,8 @@ revo does not have exceptions and tries to crash only in extreme scenarios
 
 this means, errors are treated as values
 if a function may error, it's likely to return either
-`(:ok, value)`
-... or `(:err, :ErrorName)`
+`{:ok, value}`
+... or `{:err, :ErrorName}`
 
 see examples/errors.rv for full examples
 
@@ -952,13 +951,13 @@ end
 
 ## the ? operator
 
-`?` propagates errors up the call stack. if an expression is an error (`(:err, ...)`), the function returns immediately with that error. otherwise, the value is unwrapped. at toplevel, the error panics instead of returning silently.
+`?` propagates errors up the call stack. if an expression is an error (`{:err, ...}`), the function returns immediately with that error. otherwise, the value is unwrapped. at toplevel, the error panics instead of returning silently.
 
 ```revo
 fn parse_int(s) do
   let r = match number(s)
-    | (:ok, n) => n
-    | (:err, e) => return (:err, e)
+    | {:ok, n} => n
+    | {:err, e} => return {:err, e}
   r
 end
 
@@ -971,7 +970,7 @@ fn parse_version(str) do
   const parts = str:split(".")
   const major = number(parts[0])?
   const minor = number(parts[1])?
-  (:ok, (major, minor))
+  {:ok, {major, minor}}
 end
 ```
 
@@ -1024,9 +1023,9 @@ if a test body hits `?` on an error, it behaves like the rest of the language an
 ```revo
 # fallback to default
 const name = fs.open("./name.txt") orelse "unknown"
-const x = (:err, :not_found) orelse 0  # x = 0
+const x = {:err, :not_found} orelse 0  # x = 0
 const y = :nil orelse 0                # y = 0
-const z = (:ok, 42) orelse 0           # z = 42
+const z = {:ok, 42} orelse 0           # z = 42
 const t = {a = 1}
 const w = t.b orelse 0                 # w = 0, missing keys are :undef
 ```
@@ -1035,11 +1034,11 @@ const w = t.b orelse 0                 # w = 0, missing keys are :undef
 
 revo ships a small set of helpful globals without imports:
 
-`len(x)` - length of strings, tuples, tables:
+`len(x)` - length of strings, tables:
 
 ```revo
 len("hello")   # 5
-len((1, 2, 3)) # 3
+len({1, 2, 3}) # 3
 len({a=1, b=2}) # 2
 ```
 
@@ -1049,7 +1048,7 @@ len({a=1, b=2}) # 2
 panic("something went wrong")
 ```
 
-`number(s)` - parse a string into a number, returns `(:ok, n)` or `(:err, :ParseError)`
+`number(s)` - parse a string into a number, returns `{:ok, n}` or `{:err, :ParseError}`
 
 ```revo
 number("42")?
@@ -1094,7 +1093,7 @@ assert_eq(1 + 1, 2)
 expect(1 + 1 == 2)?
 ```
 
-`input()` - reads a line from stdin (os-only), returns `(:ok, line)` or `(:err, :EndOfStream)` on EOF. use `input({delimiter = :eof})` to read all of stdin:
+`input()` - reads a line from stdin (os-only), returns `{:ok, line}` or `{:err, :EndOfStream}` on EOF. use `input({delimiter = :eof})` to read all of stdin:
 
 ```revo
 const line = input():unwrap()
@@ -1238,7 +1237,7 @@ other fibers while the kernel finishes the handshake.
 system({"echo", "hello"}) # ("hello\n", "")
 ```
 
-strings interpolate expressions with `#{}`. normal interpolation uses display formatting;
+strings interpolate expressions with `#{{}}`. normal interpolation uses display formatting;
 use `:?` for debug formatting or `:p` for pretty formatting:
 ```revo
 const name = "world"
@@ -1317,7 +1316,7 @@ macros.repeat!(print("hi")) # macro extracted at preload time
 
 ```
 |# source                  |# after wrapModule
-|1 pub const x = 1         |1 const @exports = {}
+|1 pub const x = 1         |1 const @exports = {{}}
 |1 pub fn add(a, b) a + b  |2 const x = 1
 |3                         |3 @exports[:x] = x
 |4                         |4 fn add(a, b) a + b
@@ -1478,7 +1477,7 @@ proc add3!(iter) do
   let a = iter:next()
   let b = iter:next()
   let c = iter:next()
-  {(:binary, :add, (:binary, :add, a, b), c)}
+  {{:binary, :add, {:binary, :add, a, b}, c}}
 end
 
 print(add3!(10, 20, 12)) # 42
@@ -1494,14 +1493,14 @@ the return value is always a table wrapping a single ast node: `{node}`
 
 ### ast data format
 
-the ast is encoded as tagged tuples -- the same format everywhere (proc macros,
+the ast is encoded as tagged tables -- the same format everywhere (proc macros,
 quasiquoting, and revo.parse)
 
 they always match up with the `Expr` struct:
 
 {{< ref "pub const Expr = union(enum)" >}}
 
-building nodes manually works directly with the tuple format:
+building nodes manually works directly with the table format:
 
 ```revo
 proc print!(iter) do
@@ -1510,7 +1509,7 @@ proc print!(iter) do
   while iter:peek() != :nil do
     args:push(iter:next())
   end
-  {(:call, (:ident, "print"), {(:call, (:ident, "fmt"), args, :false)}, :false)}
+  {{:call, {:ident, "print"}, {{:call, {:ident, "fmt"}, args, :false}}, :false}}
 end
 
 print!("hello %v", :world) # "hello :world"
@@ -1540,24 +1539,24 @@ variable's value:
 ```revo
 let a = 20
 let b = 22
-let r = `(:add, %a, %b)`
-r == (:tuple, ((:hash, "add"), 20, 22)) # :true
+let r = `(f(%a, %b))`
+r == {:call, {:ident, "f"}, {20, 22}, :false, {}} # :true
 ```
 
 numbers and atoms quote directly:
 ```revo
 let r = `42`
-r == (:number, 42) # :true
+r == {:number, 42} # :true
 
 let r = `:hello`
-r == (:hash, "hello") # :true
+r == {:hash, "hello"} # :true
 ```
 
-tables and tuples nest:
+tables nest:
 ```revo
 let v = 42
 let r = `{key = %v}`
-r == (:table, (((:ident, "key"), :false, (:number, 42)),))
+r == {:table, {{{:ident, "key"}, :false, {:number, 42}}}}
 ```
 
 combined with a proc macro:
@@ -1565,7 +1564,7 @@ combined with a proc macro:
 proc unless!(iter) do
   let cond = iter:next()
   let body = iter:next()
-  {`(:if_expr, %cond, %body, (:nil,))`}
+  {`{:if_expr, %cond, %body, {:nil}}`}
 end
 ```
 
@@ -1590,9 +1589,9 @@ proc swap!(iter) do
   let tmp = gensym()
   let a = iter:next()
   let b = iter:next()
-  {(:decl, (:binding, (:ident, tmp), :nil, a, :false), :let, :false),
-   (:assign_expr, a, b),
-   (:assign_expr, b, (:ident, tmp))}
+  {{:decl, {:binding, {:ident, tmp}, :nil, a, :false}, :let, :false},
+   {:assign_expr, a, b},
+   {:assign_expr, b, {:ident, tmp}}}
 end
 
 let x = 1
@@ -1607,10 +1606,10 @@ these live in `src/std/iface/root.d.rv` and merge into every build;
   stdlib groups can add more (`pub macro uri.shout! ...`), called qualified:
 
 ```revo
-ok?!((:ok, 42))            # :true
-err?!((:err, :Bad))        # :true
-some?!((:some, 42))        # :true
-# none!?(:none)            # (preloaded check for :none)
+ok?!({:ok, 42})            # :true
+err?!({:err, :Bad})        # :true
+some?!({:some, 42})        # :true
+# none!?({:none})          # (preloaded check for :none)
 print!("hello %v", :world) # printf-style: prints "hello :world"
 ```
 
@@ -1625,7 +1624,7 @@ const mt = {
     __index    = fn(self, key) 0,        # called when a field is missing
     __newindex = fn(self, key, val) :nil, # intercept assignment
 }
-const t = set_meta({}, mt)
+const t = set_meta({{}}, mt)
 
 len(t)    # 42
 t.missing # 0

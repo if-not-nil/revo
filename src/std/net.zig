@@ -392,13 +392,9 @@ pub fn setSocketNonBlocking(handle: std.posix.fd_t) !void {
 }
 
 fn wakeFiber(vm: *VM, fiber_id: VM.FiberID, tag: revo.core_atoms, payload: Data) !void {
-    const items = [_]Data{
-        Data.new.atom(@intFromEnum(tag)),
-        payload,
-    };
     try vm.sched.wakeFiber(
         fiber_id,
-        Data.new.tuple(try vm.tuples.create(&items)),
+        try vm.resultTable(tag, payload),
     );
 }
 

@@ -9,4 +9,4 @@ pub declare echo = fn(s: string) -> string
 pub declare strlen = fn(s: string) -> number
 pub declare typ = fn(v: any) -> number
 pub declare regex = fn(pattern: string, text: string) -> bool
-pub declare concat = fn(parts: tuple, sep: string) -> string
+pub declare concat = fn(parts: table, sep: string) -> string

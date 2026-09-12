@@ -32,9 +32,8 @@ pub fn deinit(bs: *BackendState) void {
     bs.control_w = -1;
 }
 
-fn wakeTuple(vm: *revo.VM, fiber_id: revo.VM.FiberID, tag: revo.core_atoms, payload: revo.Data) !void {
-    const items = [_]revo.Data{ revo.Data.boxed(.atom, @intFromEnum(tag)), payload };
-    try vm.sched.wakeFiber(fiber_id, revo.Data.boxed(.tuple, try vm.tuples.create(&items)));
+fn wakeResult(vm: *revo.VM, fiber_id: revo.VM.FiberID, tag: revo.core_atoms, payload: revo.Data) !void {
+    try vm.sched.wakeFiber(fiber_id, try vm.resultTable(tag, payload));
 }
 
 const CompletionRecord = extern struct {
@@ -197,26 +196,26 @@ fn processCompletion(vm: *revo.VM, rec: CompletionRecord) !void {
     switch (job.kind) {
         .socket_send => {
             if (rec.status == 0) {
-                try wakeTuple(vm, rec.fiber_id, .ok, revo.Data.new.num(rec.bytes));
+                try wakeResult(vm, rec.fiber_id, .ok, revo.Data.new.num(rec.bytes));
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.SendFailed));
+                try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.SendFailed));
             }
         },
         .socket_recv => {
             if (rec.status == 0) {
                 if (rec.bytes == 0) {
-                    try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.SocketClosed));
+                    try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.SocketClosed));
                 } else {
                     if (rec.job_ptr.*.buffer) |b| {
                         const buf_slice = b[0..rec.bytes];
                         const payload = try vm.ownDataString(buf_slice);
-                        try wakeTuple(vm, rec.fiber_id, .ok, payload);
+                        try wakeResult(vm, rec.fiber_id, .ok, payload);
                     } else {
-                        try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
+                        try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
                     }
                 }
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
+                try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.RecvFailed));
             }
         },
 
@@ -238,13 +237,13 @@ fn processCompletion(vm: *revo.VM, rec: CompletionRecord) !void {
                             .pending = &.{},
                         },
                     };
-                    try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
+                    try wakeResult(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
                 } else |_| {
                     _ = std.c.close(new_fd);
-                    try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
+                    try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
                 }
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
+                try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.AcceptFailed));
             }
         },
         .socket_connect => {
@@ -263,14 +262,14 @@ fn processCompletion(vm: *revo.VM, rec: CompletionRecord) !void {
                     },
                 };
                 if (revo.std_net.setSocketNonBlocking(new_fd)) |_| {
-                    try wakeTuple(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
+                    try wakeResult(vm, rec.fiber_id, .ok, try revo.std_net.wrapSocket(vm, new_entry_ptr, false));
                 } else |_| {
                     _ = std.c.close(new_fd);
                     vm.runtime.alloc.destroy(new_entry_ptr);
-                    try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.ConnectionFailed));
+                    try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.ConnectionFailed));
                 }
             } else {
-                try wakeTuple(vm, rec.fiber_id, .err, revo.Data.new.core(.ConnectionFailed));
+                try wakeResult(vm, rec.fiber_id, .err, revo.Data.new.core(.ConnectionFailed));
             }
         },
     }

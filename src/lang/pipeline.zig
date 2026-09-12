@@ -190,9 +190,6 @@ fn wrapPubFunctions(alloc: std.mem.Allocator, node: *Node) !void {
                 try wrapPubFunctions(alloc, e.value);
             }
         },
-        .tuple => |items| {
-            for (items) |item| try wrapPubFunctions(alloc, item);
-        },
         else => {},
     }
 }

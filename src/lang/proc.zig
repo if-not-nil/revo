@@ -438,9 +438,6 @@ fn decodeProcResult(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data
             .nil,
         ) else error.InvalidProcReturn;
     }
-    if (data.asTuple()) |_| {
-        return decodeExprNode(vm, allocator, span, data);
-    }
     if (data.asTable()) |tid| {
         return decodeNodeSequence(
             vm,
@@ -483,7 +480,7 @@ fn encodeExpr(allocator: std.mem.Allocator, node: *const Node, splices: []const 
         );
 
         if (node.expr.number.is_float) try items.append(allocator, try atomNode(allocator, node.span, "float"));
-        return tupleNode(allocator, node.span, try items.toOwnedSlice(allocator));
+        return listNode(allocator, node.span, try items.toOwnedSlice(allocator));
     }
 
     // if this ident is a placeholder, return the actual splice ident
@@ -513,7 +510,7 @@ fn encodeExpr(allocator: std.mem.Allocator, node: *const Node, splices: []const 
             errdefer items.deinit(allocator);
             try items.append(allocator, try atomNode(allocator, node.span, tag_name));
             for (payload) |item| try items.append(allocator, item);
-            return tupleNode(allocator, node.span, try items.toOwnedSlice(allocator));
+            return listNode(allocator, node.span, try items.toOwnedSlice(allocator));
         }
     }
     return error.UnsupportedProcValue;
@@ -566,7 +563,7 @@ fn encodeValue(
                     try encodeValue(allocator, span, pi.child, item, splices),
                 );
 
-                return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
+                return listNode(allocator, span, try items.toOwnedSlice(allocator));
             }
             if (pi.size == .one) {
                 if (pi.child == Node) return encodeExpr(allocator, value, splices);
@@ -595,7 +592,7 @@ fn encodeValue(
                     errdefer items.deinit(allocator);
                     try items.append(allocator, try atomNode(allocator, span, field.name));
                     for (payload) |item| try items.append(allocator, item);
-                    return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
+                    return listNode(allocator, span, try items.toOwnedSlice(allocator));
                 }
             }
             return error.UnsupportedProcValue;
@@ -610,7 +607,7 @@ fn encodeValue(
                     try encodeValue(allocator, span, field.type, @field(value, field.name), splices),
                 );
             }
-            return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
+            return listNode(allocator, span, try items.toOwnedSlice(allocator));
         },
 
         .array => {
@@ -621,7 +618,7 @@ fn encodeValue(
                 try encodeValue(allocator, span, ti.array.child, item, splices),
             );
 
-            return tupleNode(allocator, span, try items.toOwnedSlice(allocator));
+            return listNode(allocator, span, try items.toOwnedSlice(allocator));
         },
 
         else => error.UnsupportedProcValue,
@@ -629,20 +626,20 @@ fn encodeValue(
 }
 
 fn decodeExprNode(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data: Data) ExpandError!*Node {
-    const tuple = try expectTuple(vm, data);
-    if (tuple.items.len == 0 or tuple.items[0].asAtom() == null) return error.InvalidProcReturn;
-    const tag = vm.stringValue(tuple.items[0].asAtom().?);
+    const items = try expectSeq(vm, data);
+    if (items.len == 0 or items[0].asAtom() == null) return error.InvalidProcReturn;
+    const tag = vm.stringValue(items[0].asAtom().?);
 
     if (std.mem.eql(u8, tag, "number")) {
-        if (tuple.items.len < 2) return error.InvalidProcReturn;
-        const value = tuple.items[1].asNum() orelse return error.InvalidProcReturn;
-        const is_float = tuple.items.len >= 3 and tuple.items[2].asAtom() != null and std.mem.eql(
+        if (items.len < 2) return error.InvalidProcReturn;
+        const value = items[1].asNum() orelse return error.InvalidProcReturn;
+        const is_float = items.len >= 3 and items[2].asAtom() != null and std.mem.eql(
             u8,
-            vm.stringValue(tuple.items[2].asAtom().?),
+            vm.stringValue(items[2].asAtom().?),
             "float",
         );
 
-        if (tuple.items.len != 2 and tuple.items.len != 3) return error.InvalidProcReturn;
+        if (items.len != 2 and items.len != 3) return error.InvalidProcReturn;
         return ast.allocNode(allocator, span, .{ .number = .{ .value = value, .is_float = is_float } });
     }
 
@@ -650,8 +647,8 @@ fn decodeExprNode(vm: *revo.VM, allocator: std.mem.Allocator, span: Span, data: 
     inline for (info.fields) |field| {
         if (std.mem.eql(u8, field.name, tag)) {
             var idx: usize = 1;
-            const payload = try decodePayload(vm, allocator, span, field.type, tuple.items, &idx);
-            if (idx != tuple.items.len) return error.InvalidProcReturn;
+            const payload = try decodePayload(vm, allocator, span, field.type, items, &idx);
+            if (idx != items.len) return error.InvalidProcReturn;
             return ast.allocNode(allocator, span, @unionInit(Expr, field.name, payload));
         }
     }
@@ -756,9 +753,9 @@ fn decodeValue(
             return error.InvalidProcReturn;
         },
         .@"union" => |un| {
-            const union_tuple = try expectTuple(vm, data);
-            if (union_tuple.items.len == 0 or !union_tuple.items[0].isAtom()) return error.InvalidProcReturn;
-            const union_tag = vm.stringValue(union_tuple.items[0].asAtom().?);
+            const union_items = try expectSeq(vm, data);
+            if (union_items.len == 0 or !union_items[0].isAtom()) return error.InvalidProcReturn;
+            const union_tag = vm.stringValue(union_items[0].asAtom().?);
 
             inline for (un.fields) |field| {
                 if (std.mem.eql(u8, field.name, union_tag)) {
@@ -768,18 +765,18 @@ fn decodeValue(
                         allocator,
                         span,
                         field.type,
-                        union_tuple.items,
+                        union_items,
                         &union_idx,
                     );
 
-                    if (union_idx != union_tuple.items.len) return error.InvalidProcReturn;
+                    if (union_idx != union_items.len) return error.InvalidProcReturn;
                     return @unionInit(T, field.name, union_payload);
                 }
             }
             return error.InvalidProcReturn;
         },
         .@"struct" => |st| {
-            const struct_tuple = try expectTuple(vm, data);
+            const struct_items = try expectSeq(vm, data);
             var struct_idx: usize = 0;
             // SAFETY: all fields set by inline for loop below
             var out: T = undefined;
@@ -789,11 +786,11 @@ fn decodeValue(
                     allocator,
                     span,
                     field.type,
-                    struct_tuple.items,
+                    struct_items,
                     &struct_idx,
                 );
             }
-            if (struct_idx != struct_tuple.items.len) return error.InvalidProcReturn;
+            if (struct_idx != struct_items.len) return error.InvalidProcReturn;
             return out;
         },
         .array => |arr| {
@@ -803,11 +800,6 @@ fn decodeValue(
                     const tid = data.asTable().?;
                     const table = vm.tables.get(tid) catch return error.InvalidProcReturn;
                     break :blk table.array.items;
-                },
-                .tuple => blk: {
-                    const tid = data.asTuple().?;
-                    const tuple = vm.tuples.get(tid) catch return error.InvalidProcReturn;
-                    break :blk tuple.items;
                 },
                 .atom => if (data.asAtom().? == revo.core_atoms.atomId(.nil)) &.{} else return error.InvalidProcReturn,
                 else => return error.InvalidProcReturn,
@@ -844,11 +836,6 @@ fn decodeSliceValue(
             const table = vm.tables.get(tid) catch return error.InvalidProcReturn;
             break :blk table.array.items;
         },
-        .tuple => blk: {
-            const tid = data.asTuple().?;
-            const tuple = vm.tuples.get(tid) catch return error.InvalidProcReturn;
-            break :blk tuple.items;
-        },
         .atom => if (data.asAtom().? == revo.core_atoms.atomId(.nil)) &.{} else return error.InvalidProcReturn,
         else => return error.InvalidProcReturn,
     };
@@ -869,18 +856,14 @@ fn isNilData(vm: *revo.VM, data: Data) bool {
     };
 }
 
-fn expectTuple(vm: *revo.VM, data: Data) ExpandError!*revo.tuple.Tuple {
+fn expectSeq(vm: *revo.VM, data: Data) ExpandError![]const Data {
     return switch (data.tag()) {
-        .tuple => vm.tuples.get(data.asTuple().?) catch return error.InvalidProcReturn,
+        .table => blk: {
+            const table = vm.tables.get(data.asTable().?) catch return error.InvalidProcReturn;
+            break :blk table.array.items;
+        },
         else => error.InvalidProcReturn,
     };
-}
-
-fn tupleNode(allocator: std.mem.Allocator, span: Span, items: []const *Node) ExpandError!*Node {
-    var out = try std.ArrayList(*Node).initCapacity(allocator, items.len);
-    errdefer out.deinit(allocator);
-    for (items) |item| try out.append(allocator, @constCast(item));
-    return ast.allocNode(allocator, span, .{ .tuple = try out.toOwnedSlice(allocator) });
 }
 
 fn listNode(allocator: std.mem.Allocator, span: Span, items: []const *Node) ExpandError!*Node {
@@ -923,8 +906,8 @@ fn atomNode(allocator: std.mem.Allocator, span: Span, name: []const u8) ExpandEr
 fn iter(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
     if (args.len != 1) return .errArity(args.len, 1);
     const items = switch (args[0].tag()) {
-        .table, .tuple => args[0],
-        else => return .errType(0, "table or tuple", revo.std_lib.typeof(args[0], vm)),
+        .table => args[0],
+        else => return .errType(0, "table", revo.std_lib.typeof(args[0], vm)),
     };
     return .data(try makeIterValue(vm, items));
 }
@@ -961,33 +944,39 @@ fn nextOf(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
         return .panic();
     }
 
-    const tuple = if (item.asTuple()) |tid| vm.tuples.get(tid) catch {
-        try vm.setPanicMessage("proc iter:next_of expected tuple node");
-        return .panic();
+    const seq = if (item.asTable()) |tid| blk: {
+        const table = vm.tables.get(tid) catch {
+            try vm.setPanicMessage("proc iter:next_of expected table node");
+            return .panic();
+        };
+        break :blk table.array.items;
     } else {
-        try vm.setPanicMessage("proc iter:next_of expected tuple node");
+        try vm.setPanicMessage("proc iter:next_of expected table node");
         return .panic();
     };
-    if (tuple.items.len == 0 or tuple.items[0].asAtom() == null) {
-        try vm.setPanicMessage("proc iter:next_of expected tagged tuple node");
+    if (seq.len == 0 or seq[0].asAtom() == null) {
+        try vm.setPanicMessage("proc iter:next_of expected tagged table node");
         return .panic();
     }
-    if (!std.mem.eql(u8, vm.stringValue(tuple.items[0].asAtom().?), expected_name)) {
+    if (!std.mem.eql(u8, vm.stringValue(seq[0].asAtom().?), expected_name)) {
         var panic_msg = try std.ArrayList(u8).initCapacity(vm.runtime.alloc, 64);
         defer panic_msg.deinit(vm.runtime.alloc);
         try panic_msg.appendSlice(vm.runtime.alloc, "proc iter:next_of expected :");
         try panic_msg.appendSlice(vm.runtime.alloc, expected_name);
         try panic_msg.appendSlice(vm.runtime.alloc, " got :");
-        try panic_msg.appendSlice(vm.runtime.alloc, vm.stringValue(tuple.items[0].asAtom().?));
+        try panic_msg.appendSlice(vm.runtime.alloc, vm.stringValue(seq[0].asAtom().?));
         try vm.setPanicMessage(panic_msg.items);
         return .panic();
     }
 
-    if (tuple.items.len == 1) return .{ .ok = revo.Data.new.core(.nil) };
-    if (tuple.items.len == 2) return .{ .ok = tuple.items[1] };
+    if (seq.len == 1) return .{ .ok = revo.Data.new.core(.nil) };
+    if (seq.len == 2) return .{ .ok = seq[1] };
 
-    const payload_id = try vm.tuples.create(tuple.items[1..]);
-    return .{ .ok = Data.new.tuple(payload_id) };
+    // copy before create: create may reallocate the pool seq borrows from
+    var payload = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, seq.len - 1);
+    defer payload.deinit(vm.runtime.alloc);
+    try payload.appendSlice(vm.runtime.alloc, seq[1..]);
+    return .{ .ok = try vm.tableOfSlice(payload.items) };
 }
 
 fn procApply(args: []const Data, vm: *revo.VM) !revo.std_lib.HostResult {
@@ -1026,9 +1015,9 @@ fn makeIterValue(vm: *revo.VM, items: Data) !Data {
     );
 
     try iter_tbl.putRawAtom(revo.core_atoms.next.atomId(), Data.new.function(next_id), vm);
-    try iter_tbl.putRawAtom(try vm.internAtom("peek"), Data.new.function(peek_id), vm);
-    try iter_tbl.putRawAtom(try vm.internAtom("consumed"), Data.new.function(consumed_id), vm);
-    try iter_tbl.putRawAtom(try vm.internAtom("next_of"), Data.new.function(next_of_id), vm);
+    try vm.putField(iter_id, "peek", Data.new.function(peek_id));
+    try vm.putField(iter_id, "consumed", Data.new.function(consumed_id));
+    try vm.putField(iter_id, "next_of", Data.new.function(next_of_id));
     return Data.new.table(iter_id);
 }
 
@@ -1059,15 +1048,10 @@ fn iterStep(args: []const Data, vm: *revo.VM, advance: bool) !revo.std_lib.HostR
     const index_data = iter_tbl.getRawAtom(revo.core_atoms.index.atomId(), vm) orelse Data.new.num(0);
     const idx = if (index_data.asNum()) |n| try revo.asIndex(n) else return error.TypeError;
 
-    const item = if (items_data.asTable()) |tid| blk: {
-        const table = try vm.tables.get(tid);
-        if (idx >= table.array.items.len) break :blk revo.Data.new.core(.nil);
-        break :blk table.array.items[idx];
-    } else if (items_data.asTuple()) |tid| blk: {
-        const tuple = try vm.tuples.get(tid);
-        if (idx >= tuple.items.len) break :blk revo.Data.new.core(.nil);
-        break :blk tuple.items[idx];
-    } else revo.Data.new.core(.nil);
+    const item = if (items_data.asTable()) |tid|
+        vm.arrayGet(tid, idx) orelse revo.Data.new.core(.nil)
+    else
+        revo.Data.new.core(.nil);
 
     if (advance) {
         try iter_tbl.putRawAtom(revo.core_atoms.index.atomId(), Data.new.num(idx + 1), vm);
@@ -1081,7 +1065,7 @@ test "proc macro" {
     try testing.topNumber(
         \\ proc ftwo!(iter) do
         \\   let x = 40 + 2
-        \\   {(:number, 42)}
+        \\   {{:number, 42}}
         \\ end
         \\ ftwo!()
     , 42);
@@ -1090,7 +1074,7 @@ test "proc macro" {
 test "proc macro can rewrite to a constant expression" {
     try testing.topNumber(
         \\ proc answer!(iter) do
-        \\   {(:number, 42)}
+        \\   {{:number, 42}}
         \\ end
         \\ answer!()
     , 42);
@@ -1102,7 +1086,7 @@ test "proc macro uses explicit call args only" {
         \\   let a = iter:next()
         \\   let b = iter:next()
         \\   let c = iter:next()
-        \\   {(:binary, :add, (:binary, :add, a, b), c)}
+        \\   {{:binary, :add, {:binary, :add, a, b}, c}}
         \\ end
         \\ add3!(10, 20, 12)
     , 42);
@@ -1113,7 +1097,7 @@ test "proc macro uses peek without consuming" {
         \\ proc dup_add!(iter) do
         \\   let a = iter:peek()
         \\   let b = iter:next()
-        \\   {(:binary, :add, a, b)}
+        \\   {{:binary, :add, a, b}}
         \\ end
         \\ dup_add!(21)
     , 42);
@@ -1136,7 +1120,7 @@ test "proc macro can build if_expr from explicit args" {
         \\   let cond = iter:next()
         \\   let yes = iter:next()
         \\   let no = iter:next()
-        \\   {(:if_expr, cond, yes, no)}
+        \\   {{:if_expr, cond, yes, no}}
         \\ end
         \\ choose!(2 == 3, 42, 7)
         \\ choose!(2 == 2, 42, 7)
@@ -1150,13 +1134,13 @@ test "proc macro print! expands fmt call" {
         \\   let fmt = iter:next_of(:string)
         \\   let args = {}
         \\   let i = 0
-        \\   args[i] = (:string, fmt)
+        \\   args[i] = {:string, fmt}
         \\   i += 1
         \\   while iter:peek() != :nil do
         \\     args[i] = iter:next()
         \\     i += 1
         \\   end
-        \\   {(:call, (:ident, "print"), {(:call, (:ident, "fmt"), args, :false)}, :false)}
+        \\   {{:call, {:ident, "print"}, {{:call, {:ident, "fmt"}, args, :false}}, :false}}
         \\ end
         \\ print!("hello, %v!", "world")
         \\ :ok
@@ -1175,7 +1159,7 @@ test "proc cmul from examples works" {
         \\   for i in 1..5 do
         \\     acc += a * b + c
         \\   end
-        \\   {(:number, acc)}
+        \\   {{:number, acc}}
         \\ end
         \\ cmul!(10, 20, 30)
     , 1720);
@@ -1214,7 +1198,7 @@ test "proc iter next_of unwraps payload values" {
         \\   let a = iter:next_of(:number)
         \\   let b = iter:next_of(:number)
         \\   let c = iter:next_of(:number)
-        \\   {(:number, a + b + c)}
+        \\   {{:number, a + b + c}}
         \\ end
         \\ sum3!(10, 20, 12)
     , 42);
@@ -1224,7 +1208,7 @@ test "proc macro can use comp inside body" {
     try testing.topNumber(
         \\ proc add_comp!(iter) do
         \\   const n = comp (1 + 1)
-        \\   {(:number, n + iter:next_of(:number))}
+        \\   {{:number, n + iter:next_of(:number)}}
         \\ end
         \\ add_comp!(40)
     , 42);
@@ -1239,7 +1223,7 @@ test "recursive proc macro is rejected for now" {
         .text =
         \\ proc loop!(iter) do
         \\   comp (1 + 1)
-        \\   {(:call, (:ident, "loop!"), {}, :false)}
+        \\   {{:call, {:ident, "loop!"}, {}, :false}}
         \\ end
         \\ loop!()
         ,

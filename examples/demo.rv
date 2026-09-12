@@ -42,12 +42,12 @@ fn the_basics() do
   const hash = {k = "v", x = 10}
   print(arr, hash, arr[0], hash.k)
 
-  # tuples;
-  #   immutable sequences, indexed at 0
-  const tup = (1, 2, 3)
+  # tables;
+  #   sequences, indexed at 0
+  const tup = {1, 2, 3}
   print(tup[0])
-  # destructuring with (a, b) = tuple
-  const (x, y) = (10, 20)
+  # destructuring with {a, b} = table
+  const {x, y} = {10, 20}
   print(x, y)
 
   # let = mutable, const = immutable
@@ -115,15 +115,15 @@ fn control_flow() do
     | _ => "other"
   print(msg)
 
-  # match on tuples: pattern matching extracts values
-  const result = match (10, "ok")
-    | (n, "ok") when n > 5 => "success: " ~ string(n)
-    | (n, "ok") => "small success"
-    | (_, err) => "error: " ~ err
+  # match on tables: pattern matching extracts values
+  const result = match {10, "ok"}
+    | {n, "ok"} when n > 5 => "success: " ~ string(n)
+    | {n, "ok"} => "small success"
+    | {_, err} => "error: " ~ err
   print(result)
 
   # reduce iterates over a collection, accumulating a result
-  const sum = iter.reduce((0,1,2,3,4), fn(a,b) a + b, 0)
+  const sum = iter.reduce({0,1,2,3,4}, fn(a,b) a + b, 0)
   print(sum)
 
   # loop creates an infinite loop - break returns a value
@@ -133,9 +133,9 @@ fn control_flow() do
   print(loop_result)
 end
 
-# tuples: do-end blocks as values, destructuring
-fn tuples() do
-  print("\ntuples")
+# tables: do-end blocks as values, destructuring
+fn tables_destructure() do
+  print("\ntables")
 
   # do-end blocks evaluate to their last expression
   const block_result = do
@@ -145,19 +145,19 @@ fn tuples() do
   end
   print(block_result)
 
-  # tuple destructuring;
+  # table destructuring;
   #   unpack into multiple variables
-  const data = (100, "hello", :ok)
-  const (status_code, message, tag) = data
+  const data = {100, "hello", :ok}
+  const {status_code, message, tag} = data
   print(status_code, message, tag)
 
   # ignore values with _
-  const (_, _, result) = data
+  const {_, _, result} = data
   print(result)
 
   # nested destructuring
-  const nested = ((1, 2), (3, 4))
-  const ((a, b), (c, d)) = nested
+  const nested = {{1, 2}, {3, 4}}
+  const {{a, b}, {c, d}} = nested
   print(a, b, c, d)
 end
 
@@ -183,24 +183,24 @@ fn pipes() do
   print(obj.val)
 
   # chain multiple pipe operations
-  const chain = (1,2,3,4,5) |> iter.map(fn(x) x * 2) |> iter.reduce(fn(a,b) a + b, 0)
+  const chain = {1,2,3,4,5} |> iter.map(fn(x) x * 2) |> iter.reduce(fn(a,b) a + b, 0)
   print(chain)
 end
 
 fn error_handling() do
   print("\nerror handling")
 
-  #* functions return (:ok, value) or (:err, error_atom) instead of exceptions *#
+  #* functions return ({:ok, value}) or ({:err, error_atom}) instead of exceptions *#
   fn safe_div(a, b) do
-    if b == 0 (:err, :DivByZero)
-    else (:ok, a / b)
+    if b == 0 {:err, :DivByZero}
+    else {:ok, a / b}
   end
 
   # match extracts the value from a result type
   const ok_val = safe_div(10, 2)
   const result = match ok_val
-    | (:ok, v) => v
-    | (:err, e) => 0
+    | {:ok, v} => v
+    | {:err, e} => 0
 
   # orelse provides a fallback value on error
   const bad_val = safe_div(10, 0)
@@ -389,7 +389,7 @@ fn comp_time() do
   const config = comp ({
     version = "1.0",
     env = "demo",
-    features = ("pipes", "match", "fibers"),
+      features = {"pipes", "match", "fibers"},
   })
 
   print(config.version, config.env, config.features)
@@ -404,33 +404,33 @@ fn stdlib() do
   print(string(42), string(:ok))
 
   # type checking
-  print(typeof(42), typeof("hi"), typeof(:atom), typeof((1,2,3)), typeof({}))
+    print(typeof(42), typeof("hi"), typeof(:atom), typeof({1,2,3}), typeof({}))
 
   # inspection
   const val = 42
   print(inspect(val))
 
   # collection functions
-  const mapped = iter.collect(iter.map((1,2,3), fn(x) x * 2))
+    const mapped = iter.collect(iter.map({1,2,3}, fn(x) x * 2))
   print(mapped)
 
-  const filtered = iter.collect(iter.filter((1,2,3), fn(x) x > 1))
+  const filtered = iter.collect(iter.filter({1,2,3}, fn(x) x > 1))
   print(filtered)
 
-  const chained = (1,2,3,4)
+  const chained = {1,2,3,4}
     |> iter.map(fn(x) x * x)
     |> iter.filter(fn(x) x > 5)
     |> iter.fold(fn(a, b) a + b)
   print(chained)
 
-  const summed = iter.reduce((1,2,3,4), fn(a,b) a + b, 0)
+    const summed = iter.reduce({1,2,3,4}, fn(a,b) a + b, 0)
   print(summed)
 
-  const found = iter.find((1,2,3), fn(x) x == 2)
+  const found = iter.find({1,2,3}, fn(x) x == 2)
   print(found)
 
-  const all_ok = iter.all?((1,2,3), fn(x) x > 0)
-  const any_big = iter.any?((1,2,3), fn(x) x > 2)
+  const all_ok = iter.all?({1,2,3}, fn(x) x > 0)
+  const any_big = iter.any?({1,2,3}, fn(x) x > 2)
   print(all_ok, any_big)
 
   # string functions
@@ -508,7 +508,7 @@ fn main() do
   the_basics()
   functions()
   control_flow()
-  tuples()
+  tables_destructure()
   pipes()
   error_handling()
   tables()

@@ -59,7 +59,6 @@ pub const groups: []const Group = &.{
     Group.init("string", @embedFile("iface/string.d.rv"), @import("string.zig").impls),
     Group.init("table", @embedFile("iface/table.d.rv"), @import("table.zig").impls),
     Group.init("frame", @embedFile("iface/frame.d.rv"), @import("frame.zig").impls),
-    Group.init("tuple", @embedFile("iface/tuple.d.rv"), @import("tuple.zig").impls),
     Group.init("iter", @embedFile("iface/iter.d.rv"), @import("iter.zig").impls),
     Group.init("math", @embedFile("iface/math.d.rv"), @import("math.zig").impls),
     Group.init("stats", @embedFile("iface/stats.d.rv"), @import("stats.zig").impls),
@@ -253,7 +252,7 @@ pub fn renderSignature(w: *std.Io.Writer, spec: FnSpec) !void {
     try renderSignatureInner(w, spec, false);
 }
 
-/// head plus `[T]` suffix: `fs.open`, `string:len`, `tuple.unwrap_err[T]`
+/// head plus `[T]` suffix: `fs.open`, `string:len`, `table.unwrap_err[T]`
 fn renderHead(w: *std.Io.Writer, spec: FnSpec, strip_method: bool) !void {
     switch (spec.head.kind) {
         .global => try w.writeAll(spec.name),
@@ -322,7 +321,7 @@ pub const Head = struct {
     kind: Kind,
     module: ?[]const u8 = null,
     target: ?TypeSpec = null,
-    /// owned: `tuple` in `tuple:len`, for grouping display
+    /// owned: `table` in `table:len`, for grouping display
     target_name: ?[]const u8 = null,
 };
 
@@ -689,13 +688,13 @@ pub fn registerAll(
                 if (f.atom != null) {
                     has_meta = true;
                 } else {
-                    try vm.putInTable(table_id, f.name, f.fn_id);
+                    try vm.putField(table_id, f.name, Data.new.function(f.fn_id));
                 }
             }
             if (has_meta) {
                 const mt_id = try vm.tables.create();
                 for (entry.value_ptr.items) |f| {
-                    if (f.atom) |atom| try vm.putInTableAtom(mt_id, @intFromEnum(atom), f.fn_id);
+                    if (f.atom) |atom| try vm.putInTable(mt_id, @intFromEnum(atom), f.fn_id);
                 }
                 try vm.setMetatable(Data.new.table(table_id), mt_id);
             }
@@ -705,11 +704,11 @@ pub fn registerAll(
     {
         // the type metatable for each primitive iS its module table
         // , so a dynamic `x:method()` dispatch gets a single direct `getRaw`
-        const primitives = [_]TypeSpec{ .number, .string, .tuple, .table };
+        const primitives = [_]TypeSpec{ .number, .string, .table };
         for (primitives) |target| {
             const module_tid = moduleTableFor(vm, target) orelse continue;
             if (method_metas.get(target)) |metas| {
-                for (metas.items) |m| try vm.putInTableAtom(module_tid, @intFromEnum(m.atom), m.fn_id);
+                for (metas.items) |m| try vm.putInTable(module_tid, @intFromEnum(m.atom), m.fn_id);
             }
             try vm.setMetatable(try prototype(target, vm), module_tid);
         }
@@ -762,7 +761,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
         \\pub declare num.__call = fn(value: any) -> num
         \\
         \\#* generic suffix *#
-        \\pub declare tuple.unwrap_err[T] = fn(self: (:err, T)) -> T
+        \\pub declare table.unwrap_err[T] = fn(self: {:err, T}) -> T
         \\
         \\#* escaped "quotes" *#
         \\pub declare debug = fn() -> table
@@ -811,13 +810,13 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     {
         const sig = try renderAlloc(testing.allocator, unwrap_err);
         defer testing.allocator.free(sig);
-        try testing.expectEqualStrings("tuple.unwrap_err[T](self: (:err, T)) -> T", sig);
+        try testing.expectEqualStrings("table.unwrap_err[T](self: {:err, T}) -> T", sig);
     }
     try testing.expectEqualStrings("unwrap_err", unwrap_err.name);
     var ubuf = std.Io.Writer.Allocating.init(testing.allocator);
     defer ubuf.deinit();
     try revo.lang.type_serde.printTypeExpr(unwrap_err.type.kind.function.params[0].type_name.?, &ubuf.writer);
-    try testing.expectEqualStrings("(:err, T)", ubuf.written());
+    try testing.expectEqualStrings("{:err, T}", ubuf.written());
     ubuf.clearRetainingCapacity();
     try revo.lang.type_serde.printTypeExpr(unwrap_err.type.kind.function.return_type.?, &ubuf.writer);
     try testing.expectEqualStrings("T", ubuf.written());

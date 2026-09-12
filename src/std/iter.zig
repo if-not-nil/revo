@@ -4,7 +4,7 @@ pub const Impl = struct {
     pub fn to_iter(vm: *VM, obj: Ts.any) !HostResult {
         const w = (try wrapIterable(vm, obj)) orelse
             return .errType(0, "iterable", typeof(obj, vm));
-        if (w.isString() or w.isTuple() or w.isTable())
+        if (w.isString() or w.isTable())
             return makeSeqIterator(vm, w);
         return .data(w);
     }
@@ -149,7 +149,7 @@ pub const impls: []const api.Impl = root.impls(Impl).val ++ &[_]api.Impl{
 fn to_iter_fn(args: []const Data, vm: *VM) !HostResult {
     const w = (try wrapIterable(vm, args[0])) orelse
         return .errType(0, "iterable", typeof(args[0], vm));
-    if (w.isString() or w.isTuple() or w.isTable())
+    if (w.isString() or w.isTable())
         return makeSeqIterator(vm, w);
     return .data(w);
 }
@@ -228,9 +228,9 @@ pub fn zip_fn(args: []const Data, vm: *VM) !HostResult {
             return .errType(0, "iterable", typeof(a, vm));
         try ups.append(vm.runtime.alloc, w);
     }
-    const up_tuple = try vm.tuples.create(ups.items);
+    const up_table = try vm.tableOfSlice(ups.items);
     const it_id = try makeIterator(vm, .zip);
-    try putState(vm, it_id, .up, Data.new.tuple(up_tuple));
+    try putState(vm, it_id, .up, up_table);
     return .data(Data.new.table(it_id));
 }
 
@@ -326,8 +326,7 @@ fn enumerateNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var v: Data = undefined;
     var idx: Data = undefined;
     if (!try pullStep(vm, st_id, &v, &idx)) return .data(revo.Data.new.core(.done));
-    const pair = try vm.tuples.create(&[_]Data{ idx, v });
-    return .data(Data.new.tuple(pair));
+    return .data(try vm.tableOfSlice(&[_]Data{ idx, v }));
 }
 
 fn chunkNext(st_id: mem.TableID, vm: *VM) !HostResult {
@@ -351,19 +350,18 @@ fn chunkNext(st_id: mem.TableID, vm: *VM) !HostResult {
 fn zipNext(st_id: mem.TableID, vm: *VM) !HostResult {
     const ups_data = (try vm.tables.get(st_id)).getRawAtom(revo.core_atoms.up.atomId(), vm) orelse
         return .data(revo.Data.new.core(.done));
-    const ups_id = ups_data.asTuple() orelse return .data(revo.Data.new.core(.done));
+    const ups_id = ups_data.asTable() orelse return .data(revo.Data.new.core(.done));
     var vals = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, 0);
     defer vals.deinit(vm.runtime.alloc);
     var i: usize = 0;
     while (true) : (i += 1) {
-        const ups = vm.tuples.get(ups_id) catch return .data(revo.Data.new.core(.done));
-        if (i >= ups.items.len) break;
-        const v = try vm.callFunctionParts(ups.items[i], null, &.{}, null);
+        const ups = vm.tables.get(ups_id) catch return .data(revo.Data.new.core(.done));
+        if (i >= ups.array.items.len) break;
+        const v = try vm.callFunctionParts(ups.array.items[i], null, &.{}, null);
         if (isDone(v)) return .data(revo.Data.new.core(.done));
         try vals.append(vm.runtime.alloc, v);
     }
-    const t = try vm.tuples.create(vals.items);
-    return .data(Data.new.tuple(t));
+    return .data(try vm.tableOfSlice(vals.items));
 }
 
 fn flatMapNext(st_id: mem.TableID, vm: *VM) !HostResult {
@@ -397,24 +395,32 @@ fn flatMapNext(st_id: mem.TableID, vm: *VM) !HostResult {
 
 fn rangeNext(st_id: mem.TableID, vm: *VM) !HostResult {
     var st = try vm.tables.get(st_id);
+
     const a = (st.getRawAtom(revo.core_atoms.a.atomId(), vm) orelse Data.new.num(0)).asNum().?;
     const b = (st.getRawAtom(revo.core_atoms.b.atomId(), vm) orelse Data.new.num(0)).asNum().?;
     const step = (st.getRawAtom(revo.core_atoms.step.atomId(), vm) orelse Data.new.num(1)).asNum().?;
     const cur = (st.getRawAtom(revo.core_atoms.pos.atomId(), vm) orelse Data.new.num(a)).asNum().?;
+
     if ((step > 0 and cur >= b) or (step < 0 and cur <= b))
         return .data(revo.Data.new.core(.done));
+
     st = try vm.tables.get(st_id);
     try st.putRawAtom(revo.core_atoms.pos.atomId(), Data.new.num(cur + step), vm);
+
     return .data(Data.new.num(cur));
 }
 
 fn wrapIterable(vm: *VM, obj: Data) !?Data {
     if (obj.isFunction()) return obj;
+
     if (try vm.getMetamethodByAtom(obj, revo.core_atoms.__iter.atomId())) |mm|
         return try vm.callFunctionParts(mm, null, &[_]Data{obj}, null);
+
     if (obj.isTable() and try vm.resolveField(obj, Data.new.atom(revo.core_atoms.atomId(.__call)), null) != null)
         return obj;
-    if (obj.isString() or obj.isTuple() or obj.isTable()) return obj;
+
+    if (obj.isString() or obj.isTable()) return obj;
+
     return null;
 }
 
@@ -502,13 +508,6 @@ fn pullStep(vm: *VM, st_id: mem.TableID, out: *Data, out_idx: *Data) !bool {
                 out.* = try vm.ownDataString(str[pos .. pos + 1]);
                 break :blk true;
             },
-            .tuple => blk: {
-                const t_id = up.asTuple().?;
-                const t = vm.tuples.get(t_id) catch return false;
-                if (pos >= t.items.len) break :blk false;
-                out.* = t.items[pos];
-                break :blk true;
-            },
             .table => blk: {
                 const table_id = up.asTable().?;
                 const t = try vm.tables.get(table_id);
@@ -535,13 +534,12 @@ fn pullStep(vm: *VM, st_id: mem.TableID, out: *Data, out_idx: *Data) !bool {
             const t = try vm.tables.get(table_id);
             var hash_it = t.hash.orderedIterator();
             while (hash_it.next()) |entry| {
-                const pair = try vm.tuples.create(&[_]Data{ entry.key, entry.val });
-                try entries.append(vm.runtime.alloc, Data.new.tuple(pair));
+                try entries.append(vm.runtime.alloc, try vm.tableOfSlice(&[_]Data{ entry.key, entry.value }));
             }
         }
-        const entries_tuple = try vm.tuples.create(entries.items);
+        const entries_table = try vm.tableOfSlice(entries.items);
         st = try vm.tables.get(st_id);
-        try st.putRawAtom(revo.core_atoms.entries.atomId(), Data.new.tuple(entries_tuple), vm);
+        try st.putRawAtom(revo.core_atoms.entries.atomId(), entries_table, vm);
         try st.putRawAtom(revo.core_atoms.phase.atomId(), Data.new.num(1), vm);
         try st.putRawAtom(revo.core_atoms.pos.atomId(), Data.new.num(0), vm);
         phase = 1;
@@ -550,13 +548,13 @@ fn pullStep(vm: *VM, st_id: mem.TableID, out: *Data, out_idx: *Data) !bool {
 
     if (phase == 1) {
         const entries_data = st.getRawAtom(revo.core_atoms.entries.atomId(), vm) orelse return false;
-        const entries_id = entries_data.asTuple() orelse return false;
-        const entries = vm.tuples.get(entries_id) catch return false;
-        if (pos >= entries.items.len) return false;
-        const pair_data = entries.items[pos];
-        const pair = vm.tuples.get(pair_data.asTuple().?) catch return false;
-        out.* = pair.items[1];
-        out_idx.* = pair.items[0];
+        const entries_id = entries_data.asTable() orelse return false;
+        const entries = vm.tables.get(entries_id) catch return false;
+        if (pos >= entries.array.items.len) return false;
+        const pair_data = entries.array.items[pos];
+        const pair = vm.tables.get(pair_data.asTable().?) catch return false;
+        out.* = pair.array.items[1];
+        out_idx.* = pair.array.items[0];
         st = try vm.tables.get(st_id);
         try st.putRawAtom(revo.core_atoms.pos.atomId(), Data.new.num(@as(f64, @floatFromInt(pos + 1))), vm);
         return true;
@@ -606,11 +604,11 @@ test "iter functions" {
     , 11);
 
     try testing.topNumber(
-        \\ iter.reduce((1, 2, 3, 4), fn(acc, x) acc + x, 0)
+        \\ iter.reduce({1, 2, 3, 4}, fn(acc, x) acc + x, 0)
     , 10);
 
     try testing.topNumber(
-        \\ iter.reduce(iter.map((1, 2, 3), fn(x) x * 2), fn(acc, x) acc + x, 0)
+        \\ iter.reduce(iter.map({1, 2, 3}, fn(x) x * 2), fn(acc, x) acc + x, 0)
     , 12);
 
     try testing.topNumber(
@@ -622,7 +620,7 @@ test "iter functions" {
     , 42);
 
     try testing.topAtom(
-        \\ iter.each((1, 2, 3), fn(x) x)
+        \\ iter.each({1, 2, 3}, fn(x) x)
     , "ok");
 
     try testing.topAtom(
@@ -630,32 +628,32 @@ test "iter functions" {
     , "ok");
 
     try testing.topNumber(
-        \\ const it = iter.filter((1, 2, 3, 4, 5), fn(x) x > 3)
+        \\ const it = iter.filter({1, 2, 3, 4, 5}, fn(x) x > 3)
         \\ it() + it()
     , 9);
 
     try testing.topNumber(
-        \\ iter.find((1, 2, 3, 4), fn(x) x > 2)
+        \\ iter.find({1, 2, 3, 4}, fn(x) x > 2)
     , 3);
 
     try testing.topNil(
-        \\ iter.find((1, 2), fn(x) x > 10)
+        \\ iter.find({1, 2}, fn(x) x > 10)
     );
 
     try testing.topTrue(
-        \\ iter.all?((1, 2, 3), fn(x) x > 0)
+        \\ iter.all?({1, 2, 3}, fn(x) x > 0)
     );
 
     try testing.topFalse(
-        \\ iter.all?((1, 2, 0), fn(x) x > 0)
+        \\ iter.all?({1, 2, 0}, fn(x) x > 0)
     );
 
     try testing.topFalse(
-        \\ iter.any?((1, 2), fn(x) x > 10)
+        \\ iter.any?({1, 2}, fn(x) x > 10)
     );
 
     try testing.topTrue(
-        \\ iter.any?((0, 0, 3), fn(x) x > 2)
+        \\ iter.any?({0, 0, 3}, fn(x) x > 2)
     );
 
     try testing.topTrue(
@@ -669,31 +667,31 @@ test "iter functions" {
 
 test "iter lazy transforms" {
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.take((1, 2, 3, 4), 2)))
+        \\ iter.sum(iter.collect(iter.take({1, 2, 3, 4}, 2)))
     , 3);
 
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.drop((1, 2, 3, 4), 2)))
+        \\ iter.sum(iter.collect(iter.drop({1, 2, 3, 4}, 2)))
     , 7);
 
     try testing.topNumber(
-        \\ iter.collect(iter.take((1, 2, 3), 0)):len()
+        \\ iter.collect(iter.take({1, 2, 3}, 0)):len()
     , 0);
 
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.take((1, 2), 5)))
+        \\ iter.sum(iter.collect(iter.take({1, 2}, 5)))
     , 3);
 
     try testing.topNumber(
-        \\ iter.collect(iter.drop((1, 2), 5)):len()
+        \\ iter.collect(iter.drop({1, 2}, 5)):len()
     , 0);
 
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.flat_map((1, 2), fn(x) (x, x * 10))))
+        \\ iter.sum(iter.collect(iter.flat_map({1, 2}, fn(x) {x, x * 10})))
     , 33);
 
     try testing.topNumber(
-        \\ (1, 2, 3, 4)
+        \\ {1, 2, 3, 4}
         \\     |> iter.map(fn(x) x * 2)
         \\     |> iter.filter(fn(x) x > 4)
         \\     |> iter.collect()
@@ -731,7 +729,7 @@ test "iter range" {
 
 test "iter fold count sum" {
     try testing.topNumber(
-        \\ iter.fold((1, 2, 3, 4), fn(a, x) a + x)
+        \\ iter.fold({1, 2, 3, 4}, fn(a, x) a + x)
     , 10);
 
     try testing.topNil(
@@ -739,11 +737,11 @@ test "iter fold count sum" {
     );
 
     try testing.topNumber(
-        \\ iter.count((1, 2, 3, 4))
+        \\ iter.count({1, 2, 3, 4})
     , 4);
 
     try testing.topNumber(
-        \\ iter.count((1, 2, 3, 4), fn(x) x > 2)
+        \\ iter.count({1, 2, 3, 4}, fn(x) x > 2)
     , 2);
 
     try testing.topNumber(
@@ -751,7 +749,7 @@ test "iter fold count sum" {
     , 5);
 
     try testing.topNumber(
-        \\ iter.sum((1, "x", 3))
+        \\ iter.sum({1, "x", 3})
     , 4);
 
     try testing.topNumber(
@@ -762,18 +760,18 @@ test "iter fold count sum" {
 test "iter index callbacks and state hiding" {
     try testing.topNumber(
         \\ let last = -1
-        \\ iter.each((10, 20), fn(v, i) last = i)
+        \\ iter.each({10, 20}, fn(v, i) last = i)
         \\ last
     , 1);
 
     try testing.topNumber(
         \\ let total = 0
-        \\ for x, i in (7, 8) do total = total + x + i end
+        \\ for x, i in {7, 8} do total = total + x + i end
         \\ total
     , 16);
 
     try testing.topNumber(
-        \\ const it = iter.map((1, 2, 3), fn(x) x)
+        \\ const it = iter.map({1, 2, 3}, fn(x) x)
         \\ it:len()
     , 4);
 
@@ -813,7 +811,7 @@ test "iter Host closures can allocate tables without corrupting pools" {
     , "ok");
 
     try testing.topNumber(
-        \\ iter.reduce((1, 2, 3), fn(acc, n) do
+        \\ iter.reduce({1, 2, 3}, fn(acc, n) do
         \\     const t = {}
         \\     t:push("x")
         \\     acc + 1
@@ -823,7 +821,7 @@ test "iter Host closures can allocate tables without corrupting pools" {
 
 test "iter method chaining" {
     try testing.topNumber(
-        \\ to_iter((1, 2, 3, 4, 5))
+        \\ to_iter({1, 2, 3, 4, 5})
         \\   :map(fn(x) x * 2)
         \\   :filter(fn(x) x / 1.5 > 3)
         \\   :collect()
@@ -831,7 +829,7 @@ test "iter method chaining" {
     , 24);
 
     try testing.topNumber(
-        \\ (1, 2, 3, 4, 5)
+        \\ {1, 2, 3, 4, 5}
         \\   |> iter.map(fn(x) x * 2)
         \\   |> iter.filter(fn(x) x / 1.5 > 3)
         \\   |> iter.collect()

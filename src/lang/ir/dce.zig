@@ -50,12 +50,6 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
             return 3;
         },
 
-        .tuple_new => {
-            const cnt = inst.op_arg;
-            for (0..cnt) |k| out[k] = r + @as(Register, @intCast(k));
-            return cnt;
-        },
-
         .call, .spawn => {
             const cnt = inst.op_arg + 1;
             for (0..cnt) |k| out[k] = r + @as(Register, @intCast(k));
@@ -68,10 +62,10 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
             return cnt;
         },
 
-        .halt, .ret, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err,
-        .jump_if_err, .store_global, .store_global_const, .store_upval,
+        .halt, .ret, .jump_if_false, .jump_if_true, .jump_err,
+        .store_global, .store_global_const, .store_upval,
         .store_local, .bind_local, .negate, .not, .negate_int,
-        .tuple_get_const, .join, .add_int_imm, .sub_int_imm, .mul_int_imm,
+        .join, .add_int_imm, .sub_int_imm, .mul_int_imm,
         .band_int_imm, .lt_int_imm, .unwrap_result => {
             out[0] = r;
             return 1;
@@ -91,7 +85,7 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
         .bor_int, .bxor_int, .shl_int, .shr_int, .div_int,
         .pow, .pow_int, .eq, .neq, .lt, .gt, .lte, .gte,
         .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int,
-        .@"and", .@"or", .tuple_get, .table_get,
+        .@"and", .@"or", .table_get,
         .table_set_atom => {
             out[0] = r;
             out[1] = r + 1;
@@ -123,7 +117,7 @@ pub fn writeRegs(inst: *const ir.IrInst, out: *[3]Register) usize {
     switch (inst.opcode) {
         // zig fmt: off
         .ret, .halt, .jump, .jump_if_false, .jump_if_true,
-        .jump_if_not_nil_and_not_err, .jump_if_err,
+        .jump_err,
         .store_global, .store_global_const, .store_upval,
         .store_local, .bind_local, .yield => return 0,
 

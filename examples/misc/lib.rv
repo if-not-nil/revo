@@ -1,16 +1,16 @@
 type Version = { major: number, minor: number }
 
-fn version_of_string(str) -> (:ok, Version) do
+fn version_of_string(str) -> {:ok, Version} do
   const res = str:split(".")
     |> iter.map(fn(c) number(c))
     |> iter.collect()
 
-  return (:ok, {
+  return {:ok, {
     major = res[0]?,
     minor = res[1]?,
     is_beta = fn(self) self.major < 1,
     to_string = fn(self) fmt("%v.%v", self.major, self.minor),
-  })
+  }}
 end
 
 const v = version_of_string("1.2.3")

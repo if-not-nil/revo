@@ -1,5 +1,5 @@
 #!
-global tuple helpers, calllable as `1337:is_nan?` and `number.is_nan?(1337)`
+global number helpers, calllable as `1337:is_nan?` and `number.is_nan?(1337)`
 !#
 
 #* converts value to number: number("12") => 12 *#

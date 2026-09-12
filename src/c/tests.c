@@ -1,7 +1,7 @@
 //
 // c api test suite for revo
 // compile and run with: zig build test-c
-// or: cc -I zig-out/include src/c/tests.c zig-out/lib/liberevo.a -lm -o
+// or: cc -I zig-out/include/revo src/c/tests.c zig-out/lib/liberevo.a -lm -o
 // /tmp/revo-c-test && /tmp/revo-c-test
 //
 
@@ -13,460 +13,451 @@
 
 static int failed = 0;
 
-#define T(name)                                                                \
-  do {                                                                         \
-    printf("  " name "... ");                                                  \
-    fflush(stdout);                                                            \
+#define FAIL(msg)                                                            \
+  do {                                                                       \
+    printf("FAIL: %s\n", msg);                                               \
+    failed = 1;                                                              \
   } while (0)
-#define OK                                                                     \
-  do {                                                                         \
-    printf("ok\n");                                                            \
-  } while (0)
-#define FAIL(msg)                                                              \
-  do {                                                                         \
-    printf("FAIL: %s\n", msg);                                                 \
-    failed = 1;                                                                \
+// prints the name on entry and "ok" on normal exit (assert aborts otherwise)
+#define T(name)                                                              \
+  for (int _t_done = (printf("  " name "... "), fflush(stdout), 0);          \
+       !_t_done;                                                             \
+       _t_done = (printf("ok\n"), 1))
+// asserts, reporting the vm error first on failure
+#define check(cond)                                                          \
+  do {                                                                       \
+    if (!(cond))                                                             \
+      FAIL(erevo_vm_last_error(vm));                                         \
+    assert(cond);                                                            \
   } while (0)
 
 int main(void) {
   puts("c api tests");
 
-  T("vm create");
-  ErevoVM *vm = erevo_vm_create();
-  assert(vm && "vm should not be null");
-  OK;
-
-  T("compile and run 1 + 2");
-  ErevoProgram *prog = erevo_compile(vm, "test", "1 + 2");
-  if (!prog)
-    FAIL(erevo_vm_last_error(vm));
-  assert(prog);
+  ErevoVM *vm;
+  ErevoProgram *prog;
   ErevoData val;
-  int ok = erevo_run(vm, prog, &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_number(val));
-  assert(fabs(revo_num_value(val) - 3.0) < 1e-12);
-  OK;
+  int ok;
+  uint64_t sid;
+  RevoData tval;
+  RevoData t;
+  int call_ok;
+  RevoData call_result;
 
-  T("compile and run string literal");
-  ok = erevo_eval(vm, "test", "\"hello\"", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_string(val));
-  uint64_t sid = revo_string_id(val);
-  assert(revo_string_length(vm, sid) == 5);
-  assert(memcmp(revo_string_data(vm, sid), "hello", 5) == 0);
-  OK;
+  T("vm create") {
+    vm = erevo_vm_create();
+    assert(vm && "vm should not be null");
+  }
 
-  T("compile and run bool true");
-  ok = erevo_eval(vm, "test", ":true", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_bool(val));
-  assert(revo_string_id(val) == ra_true);
-  OK;
+  T("compile and run 1 + 2") {
+    prog = erevo_compile(vm, "test", "1 + 2");
+    check(prog);
+    ok = erevo_run(vm, prog, &val);
+    check(ok);
 
-  T("compile and run bool false");
-  ok = erevo_eval(vm, "test", ":false", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_bool(val));
-  assert(revo_string_id(val) == ra_false);
-  OK;
+    assert(revo_is_number(val));
+    assert(fabs(revo_num_value(val) - 3.0) < 1e-12);
+  }
 
-  T("compile and run :nil");
-  ok = erevo_eval(vm, "test", ":nil", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_nil(val));
-  OK;
+  T("compile and run string literal") {
+    ok = erevo_eval(vm, "test", "\"hello\"", &val);
+    check(ok);
 
-  T("compile and run atom :ok");
-  ok = erevo_eval(vm, "test", ":ok", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_atom(val));
-  assert(revo_string_id(val) == ra_ok);
-  OK;
+    assert(revo_is_string(val));
+    sid = revo_string_id(val);
+    assert(revo_string_length(vm, sid) == 5);
+    assert(memcmp(revo_string_data(vm, sid), "hello", 5) == 0);
+  }
 
-  T("compile and run table literal");
-  ok = erevo_eval(vm, "test", "{a = 1}", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_table(val));
-  OK;
+  T("compile and run bool true") {
+    ok = erevo_eval(vm, "test", ":true", &val);
+    check(ok);
 
-  T("set and get global");
-  revo_setglobal(vm, (uint64_t)(uintptr_t)"pi", 2, revo_num(3.14));
-  val = revo_getglobal(vm, (uint64_t)(uintptr_t)"pi", 2);
-  assert(revo_is_number(val));
-  assert(fabs(revo_num_value(val) - 3.14) < 1e-12);
-  OK;
+    assert(revo_is_bool(val));
+    assert(revo_string_id(val) == ra_true);
+  }
 
-  T("get missing global returns nil");
-  val = revo_getglobal(vm, (uint64_t)(uintptr_t)"nope", 4);
-  assert(revo_is_nil(val));
-  OK;
+  T("compile and run bool false") {
+    ok = erevo_eval(vm, "test", ":false", &val);
+    check(ok);
 
-  T("intern and read back string");
-  sid = revo_intern(vm, (uint64_t)(uintptr_t)"world", 5);
-  assert(sid != 0);
-  assert(revo_string_length(vm, sid) == 5);
-  assert(memcmp(revo_string_data(vm, sid), "world", 5) == 0);
-  OK;
+    assert(revo_is_bool(val));
+    assert(revo_string_id(val) == ra_false);
+  }
 
-  T("intern atom");
-  uint64_t aid = revo_intern_atom(vm, (uint64_t)(uintptr_t)"hello", 5);
-  assert(aid != 0);
-  OK;
+  T("compile and run :nil") {
+    ok = erevo_eval(vm, "test", ":nil", &val);
+    check(ok);
+
+    assert(revo_is_nil(val));
+  }
+
+  T("compile and run atom :ok") {
+    ok = erevo_eval(vm, "test", ":ok", &val);
+    check(ok);
+
+    assert(revo_is_atom(val));
+    assert(revo_string_id(val) == ra_ok);
+  }
+
+  T("compile and run table literal") {
+    ok = erevo_eval(vm, "test", "{a = 1}", &val);
+    check(ok);
+
+    assert(revo_is_table(val));
+  }
+
+  T("set and get global") {
+    revo_setglobal(vm, (uint64_t)(uintptr_t)"pi", 2, revo_num(3.14));
+    val = revo_getglobal(vm, (uint64_t)(uintptr_t)"pi", 2);
+
+    assert(revo_is_number(val));
+    assert(fabs(revo_num_value(val) - 3.14) < 1e-12);
+  }
+
+  T("get missing global returns nil") {
+    val = revo_getglobal(vm, (uint64_t)(uintptr_t)"nope", 4);
+
+    assert(revo_is_nil(val));
+  }
+
+  T("intern and read back string") {
+    sid = revo_intern(vm, (uint64_t)(uintptr_t)"world", 5);
+    assert(sid != 0);
+    assert(revo_string_length(vm, sid) == 5);
+    assert(memcmp(revo_string_data(vm, sid), "world", 5) == 0);
+  }
+
+  T("intern atom") {
+    uint64_t aid = revo_intern_atom(vm, (uint64_t)(uintptr_t)"hello", 5);
+
+    assert(aid != 0);
+  }
 
   //
   // table
   //
-  T("create table via eval, read field from c");
-  ok = erevo_eval(vm, "test", "do let t = {} t.x = 42 t end", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_table(val));
-  uint64_t tid = revo_string_id(val);
-  uint64_t x_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"x", 1);
-  ErevoData tval = revo_table_get(vm, tid, revo_atom_val(x_atom));
-  assert(revo_is_number(tval));
-  assert(fabs(revo_num_value(tval) - 42.0) < 1e-12);
-  OK;
+  T("create table via eval, read field from c") {
+    ok = erevo_eval(vm, "test", "do let t = {} t.x = 42 t end", &val);
+    check(ok);
+    assert(revo_is_table(val));
 
-  T("table_set and table_get round-trip");
-  revo_table_set(vm, tid, revo_atom_val(x_atom), revo_num(99.0));
-  tval = revo_table_get(vm, tid, revo_atom_val(x_atom));
-  assert(revo_is_number(tval));
-  assert(fabs(revo_num_value(tval) - 99.0) < 1e-12);
-  OK;
+    assert(revo_table_get_name(vm, val, (uint64_t)(uintptr_t)"x", 1, &tval));
+    assert(revo_is_number(tval));
+    assert(fabs(revo_num_value(tval) - 42.0) < 1e-12);
+  }
 
-  T("table_get missing key returns nil");
-  uint64_t y_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"y", 1);
-  tval = revo_table_get(vm, tid, revo_atom_val(y_atom));
-  assert(revo_is_nil(tval));
-  OK;
+  T("table_set and table_get round-trip") {
+    uint64_t x_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"x", 1);
 
-  T("revo_table_create returns empty table");
-  RevoData t = revo_table_create(vm);
-  assert(revo_is_table(t));
-  assert(revo_table_len(vm, revo_table_id(t)) == 0);
-  OK;
+    assert(revo_table_set(vm, val, revo_atom_val(x_atom), revo_num(99.0)));
+    assert(revo_table_get(vm, val, revo_atom_val(x_atom), &tval));
+    assert(revo_is_number(tval));
+    assert(fabs(revo_num_value(tval) - 99.0) < 1e-12);
+  }
 
-  T("revo_table_create set and get fields");
-  uint64_t a_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"a", 1);
-  uint64_t b_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"b", 1);
-  revo_table_set(vm, revo_table_id(t), revo_atom_val(a_atom), revo_num(10.0));
-  revo_table_set(vm, revo_table_id(t), revo_atom_val(b_atom), revo_num(20.0));
-  assert(revo_table_len(vm, revo_table_id(t)) == 2);
-  RevoData tv = revo_table_get(vm, revo_table_id(t), revo_atom_val(a_atom));
-  assert(revo_is_number(tv));
-  assert(fabs(revo_num_value(tv) - 10.0) < 1e-12);
-  tv = revo_table_get(vm, revo_table_id(t), revo_atom_val(b_atom));
-  assert(revo_is_number(tv));
-  assert(fabs(revo_num_value(tv) - 20.0) < 1e-12);
-  OK;
+  T("table_get missing key returns false") {
+    uint64_t y_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"y", 1);
 
-  //
-  // tuple
-  //
-  T("revo_tuple_create and read back");
-  RevoData items[3];
-  items[0] = revo_num(1.0);
-  items[1] = revo_num(2.0);
-  items[2] = revo_num(3.0);
-  RevoData tp = revo_tuple_create(vm, 3, items);
-  assert(revo_is_tuple(tp));
-  assert(revo_tuple_len(vm, revo_tuple_id(tp)) == 3);
-  tv = revo_tuple_get(vm, revo_tuple_id(tp), 0);
-  assert(revo_is_number(tv));
-  assert(fabs(revo_num_value(tv) - 1.0) < 1e-12);
-  tv = revo_tuple_get(vm, revo_tuple_id(tp), 2);
-  assert(revo_is_number(tv));
-  assert(fabs(revo_num_value(tv) - 3.0) < 1e-12);
-  OK;
+    assert(!revo_table_get(vm, val, revo_atom_val(y_atom), &tval));
+    assert(!revo_table_get_name(vm, val, (uint64_t)(uintptr_t)"y", 1, &tval));
+  }
 
-  T("revo_tuple_get out of bounds returns nil");
-  tv = revo_tuple_get(vm, revo_tuple_id(tp), 99);
-  assert(revo_is_nil(tv));
-  OK;
+  T("revo_table_create returns empty table") {
+    t = revo_table_create(vm);
 
-  T("revo_tuple_create with mixed types");
-  {
-    uint64_t s_id = revo_intern(vm, (uint64_t)(uintptr_t)"hi", 2);
-    RevoData mix[3];
-    mix[0] = revo_num(42.0);
-    mix[1] = revo_string(s_id);
-    mix[2] = revo_atom_val(ra_true);
-    RevoData tp2 = revo_tuple_create(vm, 3, mix);
-    assert(revo_is_tuple(tp2));
-    assert(revo_tuple_len(vm, revo_tuple_id(tp2)) == 3);
-    tv = revo_tuple_get(vm, revo_tuple_id(tp2), 0);
-    assert(revo_is_number(tv));
-    assert(fabs(revo_num_value(tv) - 42.0) < 1e-12);
-    tv = revo_tuple_get(vm, revo_tuple_id(tp2), 1);
-    assert(revo_is_string(tv));
-    assert(revo_string_length(vm, revo_string_id(tv)) == 2);
-    assert(memcmp(revo_string_data(vm, revo_string_id(tv)), "hi", 2) == 0);
-    tv = revo_tuple_get(vm, revo_tuple_id(tp2), 2);
-    assert(revo_is_bool(tv));
-    assert(revo_string_id(tv) == ra_true);
-    OK;
+    assert(revo_is_table(t));
+    assert(revo_table_len(vm, t) == 0);
+    assert(revo_table_alen(vm, t) == 0);
+  }
+
+  T("revo_table_create set and get fields") {
+    uint64_t a_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"a", 1);
+    uint64_t b_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"b", 1);
+
+    assert(revo_table_set_name(vm, t, (uint64_t)(uintptr_t)"a", 1,
+                               revo_num(10.0)));
+    assert(revo_table_set(vm, t, revo_atom_val(b_atom), revo_num(20.0)));
+
+    assert(revo_table_len(vm, t) == 2);
+    assert(revo_table_get(vm, t, revo_atom_val(a_atom), &tval));
+    assert(revo_is_number(tval));
+    assert(fabs(revo_num_value(tval) - 10.0) < 1e-12);
+    assert(revo_table_get(vm, t, revo_atom_val(b_atom), &tval));
+    assert(revo_is_number(tval));
+    assert(fabs(revo_num_value(tval) - 20.0) < 1e-12);
+  }
+
+  T("revo_table_from_items builds array tables") {
+    RevoData items[3] = {revo_num(1.0), revo_num(2.0), revo_num(3.0)};
+    RevoData arr = revo_table_from_items(vm, 3, items);
+
+    assert(revo_is_table(arr));
+    assert(revo_table_len(vm, arr) == 3);
+    assert(revo_table_alen(vm, arr) == 3);
+    assert(revo_table_get_idx(vm, arr, 1, &tval));
+    assert(fabs(revo_num_value(tval) - 2.0) < 1e-12);
+    assert(!revo_table_get_idx(vm, arr, 3, &tval));
+    assert(revo_table_push(vm, arr, revo_num(4.0)));
+    assert(revo_table_alen(vm, arr) == 4);
+  }
+
+  T("result helpers classify {:ok}/{:err} tables") {
+    RevoData pok = revo_ok(vm, revo_num(1.0));
+    RevoData perr = revo_err(vm, revo_atom_val(ra_ok));
+
+    assert(revo_is_ok(vm, pok));
+    assert(!revo_is_err(vm, pok));
+    assert(revo_is_err(vm, perr));
+    assert(!revo_is_ok(vm, perr));
+    assert(!revo_is_ok(vm, revo_num(1.0)));
+    assert(revo_ok_value(vm, pok, &tval));
+    assert(fabs(revo_num_value(tval) - 1.0) < 1e-12);
+    assert(!revo_ok_value(vm, perr, &tval));
   }
 
   //
   // revo_table_remove
   //
-  T("revo_table_remove removes by key");
-  {
+  T("revo_table_remove removes by key") {
     RevoData rt = revo_table_create(vm);
-    uint64_t rtid = revo_table_id(rt);
     RevoData rk = revo_atom_val(ra_ok);
-    revo_table_set(vm, rtid, rk, revo_num(42.0));
-    assert(revo_is_number(revo_table_get(vm, rtid, rk)));
-    int removed = revo_table_remove(vm, rtid, rk);
+
+    assert(revo_table_set(vm, rt, rk, revo_num(42.0)));
+    assert(revo_table_get(vm, rt, rk, &tval));
+    assert(revo_is_number(tval));
+    int removed = revo_table_remove(vm, rt, rk);
     assert(removed);
-    assert(revo_is_nil(revo_table_get(vm, rtid, rk)));
+    assert(!revo_table_get(vm, rt, rk, &tval));
     // second remove returns false
-    assert(!revo_table_remove(vm, rtid, rk));
-    OK;
+    assert(!revo_table_remove(vm, rt, rk));
   }
 
-  T("revo_table_remove integer key from array");
-  {
+  T("revo_table_remove integer key from array") {
     ok = erevo_eval(vm, "test", "{10, 20, 30}", &val);
-    if (!ok) FAIL(erevo_vm_last_error(vm));
-    assert(ok);
+    check(ok);
     assert(revo_is_table(val));
-    uint64_t rtid = revo_table_id(val);
-    assert(revo_table_len(vm, rtid) == 3);
-    int removed = revo_table_remove(vm, rtid, revo_num(0.0));
+    assert(revo_table_len(vm, val) == 3);
+    int removed = revo_table_remove(vm, val, revo_num(0.0));
     assert(removed);
-    assert(revo_table_len(vm, rtid) == 3);  // array slots aren't compacted
-    assert(revo_is_nil(revo_table_get(vm, rtid, revo_num(0.0))));
-    OK;
+    assert(revo_table_len(vm, val) ==
+           2); // integer keys compact via orderedRemove
+    assert(revo_table_get_idx(vm, val, 0, &tval));
+    assert(revo_num_value(tval) == 20.0);
   }
 
-  T("revo_table_remove missing key");
-  {
+  T("revo_table_remove missing key") {
     RevoData rt = revo_table_create(vm);
-    assert(!revo_table_remove(vm, revo_table_id(rt), revo_num(99.0)));
-    OK;
+
+    assert(!revo_table_remove(vm, rt, revo_num(99.0)));
   }
 
   //
   // revo_call
   //
-  T("revo_call a compiled function");
-  ok = erevo_eval(vm, "test", "fn(x) x + 1", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_function(val));
-  RevoData call_args[1] = {revo_num(41.0)};
-  RevoData call_result;
-  int call_ok = revo_call(vm, val, 1, call_args, &call_result);
-  assert(call_ok);
-  assert(revo_is_number(call_result));
-  assert(fabs(revo_num_value(call_result) - 42.0) < 1e-12);
-  OK;
+  T("revo_call a compiled function") {
+    ok = erevo_eval(vm, "test", "fn(x) x + 1", &val);
+    check(ok);
+    assert(revo_is_function(val));
 
-  T("revo_call with no args");
-  ok = erevo_eval(vm, "test", "fn() 99", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  call_ok = revo_call(vm, val, 0, NULL, &call_result);
-  assert(call_ok);
-  assert(revo_is_number(call_result));
-  assert(fabs(revo_num_value(call_result) - 99.0) < 1e-12);
-  OK;
+    RevoData call_args[1] = {revo_num(41.0)};
+    call_ok = revo_call(vm, val, 1, call_args, &call_result);
 
-  T("revo_call returning string");
-  ok = erevo_eval(vm, "test", "fn() \"hello\"", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  call_ok = revo_call(vm, val, 0, NULL, &call_result);
-  assert(call_ok);
-  assert(revo_is_string(call_result));
-  assert(revo_string_length(vm, revo_string_id(call_result)) == 5);
-  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello",
+    assert(call_ok);
+    assert(revo_is_number(call_result));
+    assert(fabs(revo_num_value(call_result) - 42.0) < 1e-12);
+  }
+
+  T("revo_call with no args") {
+    ok = erevo_eval(vm, "test", "fn() 99", &val);
+    check(ok);
+
+    call_ok = revo_call(vm, val, 0, NULL, &call_result);
+
+    assert(call_ok);
+    assert(revo_is_number(call_result));
+    assert(fabs(revo_num_value(call_result) - 99.0) < 1e-12);
+  }
+
+  T("revo_call returning string") {
+    ok = erevo_eval(vm, "test", "fn() \"hello\"", &val);
+    check(ok);
+
+    call_ok = revo_call(vm, val, 0, NULL, &call_result);
+
+    assert(call_ok);
+    assert(revo_is_string(call_result));
+    assert(revo_string_length(vm, revo_string_id(call_result)) == 5);
+    assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello",
                 5) == 0);
-  OK;
+  }
 
-  T("revo_call returning multi-word string");
-  ok = erevo_eval(vm, "test", "fn() \"hello from c\"", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  call_ok = revo_call(vm, val, 0, NULL, &call_result);
-  assert(call_ok);
-  assert(revo_is_string(call_result));
-  assert(revo_string_length(vm, revo_string_id(call_result)) == 12);
-  assert(memcmp(revo_string_data(vm, revo_string_id(call_result)),
+  T("revo_call returning multi-word string") {
+    ok = erevo_eval(vm, "test", "fn() \"hello from c\"", &val);
+    check(ok);
+
+    call_ok = revo_call(vm, val, 0, NULL, &call_result);
+
+    assert(call_ok);
+    assert(revo_is_string(call_result));
+    assert(revo_string_length(vm, revo_string_id(call_result)) == 12);
+    assert(memcmp(revo_string_data(vm, revo_string_id(call_result)),
                 "hello from c", 12) == 0);
-  OK;
+  }
 
-  T("revo_call multiple args");
-  ok = erevo_eval(vm, "test", "fn(a, b, c) a + b * c", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  RevoData multi_args[3] = {revo_num(10.0), revo_num(3.0), revo_num(4.0)};
-  call_ok = revo_call(vm, val, 3, multi_args, &call_result);
-  assert(call_ok);
-  assert(revo_is_number(call_result));
-  assert(fabs(revo_num_value(call_result) - 22.0) < 1e-12);
-  OK;
+  T("revo_call multiple args") {
+    ok = erevo_eval(vm, "test", "fn(a, b, c) a + b * c", &val);
+    check(ok);
 
-  T("revo_call non-function returns false");
-  call_ok = revo_call(vm, revo_num(42.0), 0, NULL, &call_result);
-  assert(!call_ok);
-  OK;
+    RevoData multi_args[3] = {revo_num(10.0), revo_num(3.0), revo_num(4.0)};
+    call_ok = revo_call(vm, val, 3, multi_args, &call_result);
+
+    assert(call_ok);
+    assert(revo_is_number(call_result));
+    assert(fabs(revo_num_value(call_result) - 22.0) < 1e-12);
+  }
+
+  T("revo_call non-function returns false") {
+    call_ok = revo_call(vm, revo_num(42.0), 0, NULL, &call_result);
+
+    assert(!call_ok);
+  }
 
   //
   // c-string convenience wrappers
   //
-  T("revo_getglobal_cstr");
-  revo_setglobal_cstr(vm, "abc", revo_num(123.0));
-  RevoData gv = revo_getglobal_cstr(vm, "abc");
-  assert(revo_is_number(gv));
-  assert(fabs(revo_num_value(gv) - 123.0) < 1e-12);
-  // missing key returns nil
-  gv = revo_getglobal_cstr(vm, "does-not-exist");
-  assert(revo_is_nil(gv));
-  OK;
+  T("revo_getglobal_cstr") {
+    revo_setglobal_cstr(vm, "abc", revo_num(123.0));
+    RevoData gv = revo_getglobal_cstr(vm, "abc");
 
-  T("revo_atom_id");
-  RevoData atom_val = revo_atom_val(ra_ok);
-  assert(revo_atom_id(atom_val) == ra_ok);
-  assert(revo_atom_id(revo_bool(1)) == ra_true);
-  OK;
+    assert(revo_is_number(gv));
+    assert(fabs(revo_num_value(gv) - 123.0) < 1e-12);
+    // missing key returns nil
+    gv = revo_getglobal_cstr(vm, "does-not-exist");
+    assert(revo_is_nil(gv));
+  }
+
+  T("revo_atom_id") {
+    RevoData atom_val = revo_atom_val(ra_ok);
+
+    assert(revo_atom_id(atom_val) == ra_ok);
+    assert(revo_atom_id(revo_bool(1)) == ra_true);
+  }
 
   //
   // helper macros and inline functions
   //
-  T("revo_nil");
-  assert(revo_is_nil(revo_nil()));
-  OK;
+  T("revo_nil") {
+    assert(revo_is_nil(revo_nil()));
+  }
 
-  T("revo_bool");
-  assert(revo_is_bool(revo_bool(1)));
-  assert(revo_is_bool(revo_bool(0)));
-  assert(revo_string_id(revo_bool(1)) == ra_true);
-  assert(revo_string_id(revo_bool(0)) == ra_false);
-  OK;
+  T("revo_bool") {
+    assert(revo_is_bool(revo_bool(1)));
+    assert(revo_is_bool(revo_bool(0)));
+    assert(revo_string_id(revo_bool(1)) == ra_true);
+    assert(revo_string_id(revo_bool(0)) == ra_false);
+  }
 
-  T("revo_num");
-  assert(revo_is_number(revo_num(42.0)));
-  assert(fabs(revo_num_value(revo_num(42.0)) - 42.0) < 1e-12);
-  assert(revo_is_number(revo_num(-1.5)));
-  assert(fabs(revo_num_value(revo_num(-1.5)) + 1.5) < 1e-12);
-  OK;
+  T("revo_num") {
+    assert(revo_is_number(revo_num(42.0)));
+    assert(fabs(revo_num_value(revo_num(42.0)) - 42.0) < 1e-12);
+    assert(revo_is_number(revo_num(-1.5)));
+    assert(fabs(revo_num_value(revo_num(-1.5)) + 1.5) < 1e-12);
+  }
 
-  T("revo_atom_val");
-  assert(revo_is_atom(revo_atom_val(ra_ok)));
-  assert(revo_string_id(revo_atom_val(ra_ok)) == ra_ok);
-  OK;
+  T("revo_atom_val") {
+    assert(revo_is_atom(revo_atom_val(ra_ok)));
+    assert(revo_string_id(revo_atom_val(ra_ok)) == ra_ok);
+  }
 
-  T("revo_string macro");
-  sid = revo_intern(vm, (uint64_t)(uintptr_t)"test-str", 8);
-  val = revo_string(sid);
-  assert(revo_is_string(val));
-  assert(revo_string_id(val) == sid);
-  OK;
+  T("revo_string macro") {
+    sid = revo_intern(vm, (uint64_t)(uintptr_t)"test-str", 8);
+    val = revo_string(sid);
+
+    assert(revo_is_string(val));
+    assert(revo_string_id(val) == sid);
+  }
 
   //
   // type tag helpers
   //
-  T("revo_is_number false on string");
-  assert(!revo_is_number(revo_string(sid)));
-  OK;
+  T("revo_is_number false on string") {
+    assert(!revo_is_number(revo_string(sid)));
+  }
 
-  T("revo_is_string false on number");
-  assert(!revo_is_string(revo_num(1)));
-  OK;
+  T("revo_is_string false on number") {
+    assert(!revo_is_string(revo_num(1)));
+  }
 
-  T("revo_is_atom false on number");
-  assert(!revo_is_atom(revo_num(1)));
-  OK;
+  T("revo_is_atom false on number") {
+    assert(!revo_is_atom(revo_num(1)));
+  }
 
-  T("revo_is_table false on number");
-  assert(!revo_is_table(revo_num(1)));
-  OK;
+  T("revo_is_table false on number") {
+    assert(!revo_is_table(revo_num(1)));
+  }
 
-  T("revo_is_bool false on nil");
-  assert(!revo_is_bool(revo_nil()));
-  OK;
+  T("revo_is_bool false on nil") {
+    assert(!revo_is_bool(revo_nil()));
+  }
 
-  T("revo_type");
-  assert(revo_type(revo_num(1)) == revo_number);
-  assert(revo_type(revo_string(sid)) == revo_string);
-  assert(revo_type(revo_atom_val(ra_ok)) == revo_atom);
-  assert(revo_type(revo_table(t)) == revo_table);
-  OK;
+  T("revo_type") {
+    assert(revo_type(revo_num(1)) == revo_number);
+    assert(revo_type(revo_string(sid)) == revo_string);
+    assert(revo_type(revo_atom_val(ra_ok)) == revo_atom);
+    assert(revo_type(revo_table(t)) == revo_table);
+  }
 
-  T("revo_bool_val");
-  assert(revo_bool_val(revo_bool(1)) == 1);
-  assert(revo_bool_val(revo_bool(0)) == 0);
-  assert(revo_bool_val(revo_num(1.0)) == 0); // not a bool
-  assert(revo_bool_val(revo_nil()) == 0);
-  OK;
+  T("revo_bool_val") {
+    assert(revo_bool_val(revo_bool(1)) == 1);
+    assert(revo_bool_val(revo_bool(0)) == 0);
+    assert(revo_bool_val(revo_num(1.0)) == 0); // not a bool
+    assert(revo_bool_val(revo_nil()) == 0);
+  }
 
   //
   // error handling
   //
-  T("compile error sets last_error");
-  ErevoProgram *bad = erevo_compile(vm, "bad", "1 + ");
-  assert(bad == NULL);
-  assert(strlen(erevo_vm_last_error(vm)) > 0);
-  OK;
+  T("compile error sets last_error") {
+    ErevoProgram *bad = erevo_compile(vm, "bad", "1 + ");
 
-  T("run null program returns false");
-  assert(!erevo_run(vm, NULL, &val));
-  OK;
+    assert(bad == NULL);
+    assert(strlen(erevo_vm_last_error(vm)) > 0);
+  }
+
+  T("run null program returns false") {
+    assert(!erevo_run(vm, NULL, &val));
+  }
 
   //
   // eval with output
   //
-  T("erevo_eval returns result");
-  ok = erevo_eval(vm, "test", "40 + 2", &val);
-  if (!ok)
-    FAIL(erevo_vm_last_error(vm));
-  assert(ok);
-  assert(revo_is_number(val));
-  assert(fabs(revo_num_value(val) - 42.0) < 1e-12);
-  OK;
+  T("erevo_eval returns result") {
+    ok = erevo_eval(vm, "test", "40 + 2", &val);
+    check(ok);
 
-  T("erevo_eval nil vm returns false");
-  assert(!erevo_eval(NULL, "test", "1", &val));
-  OK;
+    assert(revo_is_number(val));
+    assert(fabs(revo_num_value(val) - 42.0) < 1e-12);
+  }
+
+  T("erevo_eval nil vm returns false") {
+    assert(!erevo_eval(NULL, "test", "1", &val));
+  }
 
   //
   // program lifecycle
   //
-  T("erevo_program_destroy null is safe");
-  erevo_program_destroy(NULL);
-  OK;
+  T("erevo_program_destroy null is safe") {
+    erevo_program_destroy(NULL);
+  }
 
-  T("erevo_vm_destroy null is safe");
-  erevo_vm_destroy(NULL);
-  OK;
+  T("erevo_vm_destroy null is safe") {
+    erevo_vm_destroy(NULL);
+  }
 
-  T("erevo_vm_last_error null returns empty");
-  assert(strcmp(erevo_vm_last_error(NULL), "") == 0);
-  OK;
+  T("erevo_vm_last_error null returns empty") {
+    assert(strcmp(erevo_vm_last_error(NULL), "") == 0);
+  }
 
   //
   // cleanup

@@ -25,42 +25,6 @@ pub fn resolveField(self: *VM, object: Data, key: Data, result_reg: ?@import("op
             }
             return resolveTableMiss(self, object, t, key, result_reg);
         },
-        .tuple => {
-            const tuple_id = object.asTuple().?;
-            var instance_mt_id: ?mem.TableID = null;
-            var tuple_ref: ?*revo.tuple.Tuple = null;
-            if (self.tuples.get(tuple_id)) |t| {
-                tuple_ref = t;
-                instance_mt_id = t.metatable;
-            } else |_| {} // invalid tuple id, fall through to use default metatable
-
-            // fast path::: tuple numeric indexing should not require mm lookup
-            if (tuple_ref) |t| {
-                const idx_opt: ?usize = if (key.asNum()) |n|
-                    if (n >= 0 and @floor(n) == n and n <= @as(f64, @floatFromInt(std.math.maxInt(usize)))) @as(
-                        usize,
-                        @intFromFloat(n),
-                    ) else null
-                else
-                    null;
-                if (idx_opt) |idx| {
-                    if (idx < t.items.len) {
-                        return .{ .value = t.items[idx], .from_meta = false };
-                    }
-                    return null;
-                }
-            }
-
-            if (instance_mt_id) |mt_id| {
-                if (try resolveViaMetatable(self, object, key, mt_id, result_reg)) |resolved| {
-                    return resolved;
-                }
-            }
-
-            const type_mt_id = self.metatables[@intFromEnum(mem.Type.tuple)] orelse return null;
-            if (instance_mt_id != null and instance_mt_id.? == type_mt_id) return null;
-            return resolveViaMetatable(self, object, key, type_mt_id, result_reg);
-        },
         .string => {
             const type_mt_id = self.metatables[@intFromEnum(mem.Type.string)] orelse return null;
             const mt = try self.tables.get(type_mt_id);
@@ -171,14 +135,6 @@ fn resolveIndexDepth(self: *VM, object: Data, key: Data, indexer: Data, depth: u
 pub fn setMetatable(self: *VM, val: Data, mt: ?mem.TableID) !void {
     switch (val.tag()) {
         .table => try self.setTableMetatable(val.asTable().?, mt),
-        .tuple => {
-            const id = val.asTuple().?;
-            if (self.tuples.get(id)) |tuple_ref| {
-                tuple_ref.metatable = mt;
-            } else |_| {
-                self.metatables[@intFromEnum(mem.Type.tuple)] = mt;
-            }
-        },
         .number => self.metatables[@intFromEnum(mem.Type.number)] = mt,
         else => self.metatables[@intFromEnum(val.tag())] = mt,
     }

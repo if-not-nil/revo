@@ -51,7 +51,7 @@ pub const IrBuilder = struct {
 /// fused range back-branch). dce, peephole, and promote all walk these
 pub fn isBranch(op: Opcode) bool {
     return switch (op) {
-        .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err, .range_loop => true,
+        .jump, .jump_if_false, .jump_if_true, .jump_err, .range_loop => true,
         else => false,
     };
 }
@@ -65,16 +65,15 @@ pub fn valueReg(v: IrValue) Register {
 }
 
 /// the number of contiguous regs starting at `result_reg` that the
-/// instruction touches in its lowering (uni & tuple/call arg blocks)
+/// instruction touches in its lowering (call arg blocks)
 /// this is what `maxRegister` adds per instruction: the flat +2 below covers the
-/// fixed-width ops, and the var-length ops (call args, tuple_new items,
+/// fixed-width ops, and the var-length ops (call args,
 /// slice) contribute their real span
 fn spanFor(i: *IrInst) usize {
     return switch (i.opcode) {
         .slice => 4,
         .call, .spawn => i.op_arg + 1,
         .call_field => (i.op_arg & ~@as(Operand, 1 << 7)) + 2,
-        .tuple_new => i.op_arg,
         .table_set, .range_init => 3,
         .table_get, .table_set_atom, .range_loop, .@"and", .@"or" => 2,
         else => 1,
@@ -157,11 +156,9 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
         .load_const => bc = .{ .op = op, .a = r, .bx = bxi },
         .halt, .ret => bc = .{ .op = op, .a = if (r == 0) 0 else r },
         .jump => bc = .{ .op = op, .bx = bxi },
-        .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => bc = .{ .op = op, .a = r, .bx = bxi },
+        .jump_if_false, .jump_if_true, .jump_err => bc = .{ .op = op, .a = r, .bx = bxi },
         .store_global, .store_global_const, .store_upval => bc = .{ .op = op, .a = r, .bx = bxi },
         .store_local, .bind_local => bc = .{ .op = op, .a = @intCast(bx), .b = r },
-        .tuple_new => bc = .{ .op = op, .a = r, .b = r, .bx = bxi },
-        .tuple_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .table_set => bc = .{ .op = op, .a = r, .b = r + 1, .c = r + 2 },
         .table_get => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 },
         .slice => bc = .{ .op = op, .a = r, .b = r, .c = r + 1 }, // vm reads R[b..b+4) as object/start/step/end
@@ -170,7 +167,6 @@ pub fn lowerInst(alloc: std.mem.Allocator, out: *std.ArrayList(Instruction), ins
             const b = if (inst.operands.len >= 1) valueReg(inst.operands[0]) else r;
             bc = .{ .op = op, .a = r, .b = b, .bx = bxi };
         },
-        .tuple_get_const => bc = .{ .op = op, .a = r, .b = r, .bx = bxi },
         .call, .spawn => bc = .{ .op = op, .a = r, .b = @intCast(bx), .c = r },
         .call_field => bc = .{ .op = op, .a = r, .b = @intCast(bx), .c = r },
         .join => bc = .{ .op = op, .a = r },
