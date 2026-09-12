@@ -66,6 +66,7 @@ pub const groups: []const Group = &.{
     Group.init("json", @embedFile("iface/json.d.rv"), @import("json.zig").impls),
     Group.init("csv", @embedFile("iface/csv.d.rv"), @import("csv.zig").impls),
     Group.init("time", @embedFile("iface/time.d.rv"), @import("time.zig").impls),
+    Group.init("datetime", @embedFile("iface/datetime.d.rv"), @import("datetime.zig").impls),
     Group.init("net", @embedFile("iface/net.d.rv"), @import("net.zig").impls),
     Group.init("http", @embedFile("iface/http.d.rv"), @import("http.zig").impls),
     Group.init("uri", @embedFile("iface/uri.d.rv"), @import("uri.zig").impls),

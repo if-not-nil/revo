@@ -1,0 +1,2 @@
+#* returns current date in UTC using ISO 8601 (YYYY-MM-DD) date format*#
+pub declare datetime.today = fn() -> string 
