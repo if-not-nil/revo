@@ -70,7 +70,7 @@ pub fn peepholeIr(self: *Compiler) !void {
             .store_local, .bind_local => eliminateSelfLoad(i, insts, live, is_target),
             .table_set_atom => eliminateFieldRefetch(i, insts, live, is_target),
             .table_get_atom => reuseObjectLoad(i, insts, live, is_target),
-            .add, .sub, .mul, .div, .mod, .int_div, .band, .bor, .bxor, .shl, .shr, .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => _ = try foldIdentity(self, i, insts, live),
+            .add, .sub, .mul, .div, .mod, .int_div, .band, .bor, .bxor, .shl, .shr, .add_imm, .sub_imm, .mul_imm, .band_imm, .lt_int_imm => _ = try foldIdentity(self, i, insts, live),
             .jump => {
                 if (inst.op_arg == i + 1) live[i] = false;
             },
@@ -614,15 +614,15 @@ fn commutative(op: Opcode) bool {
 
 fn identityWith(op: Opcode, c: i64) bool {
     return switch (op) {
-        .add, .add_int_imm, .sub, .sub_int_imm => c == 0,
-        .mul, .mul_int_imm, .div, .int_div => c == 1,
+        .add, .add_imm, .sub, .sub_imm => c == 0,
+        .mul, .mul_imm, .div, .int_div => c == 1,
         else => false,
     };
 }
 
 fn annihilatorWith(op: Opcode, c: i64) bool {
     return switch (op) {
-        .mul_int_imm, .band_int_imm => c == 0,
+        .mul_imm, .band_imm => c == 0,
         else => false,
     };
 }

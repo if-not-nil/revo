@@ -218,8 +218,8 @@ test "recursive typed calls stay specialized" {
     var saw_add = false;
     for (built.ok.instructions) |inst| {
         if (inst.op == .lt or inst.op == .lt_int or inst.op == .lt_int_imm) saw_lt = true;
-        if (inst.op == .sub or inst.op == .sub_int_imm) saw_sub = true;
-        if (inst.op == .add or inst.op == .add_int_imm) saw_add = true;
+        if (inst.op == .sub or inst.op == .sub_imm) saw_sub = true;
+        if (inst.op == .add or inst.op == .add_imm) saw_add = true;
     }
 
     try std.testing.expect(saw_lt);
