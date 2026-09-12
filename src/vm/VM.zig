@@ -816,9 +816,18 @@ pub fn currentFrame(self: *VM) !*Frame {
 }
 
 pub inline fn currentClosure(self: *VM) !?*root.functions.Closure {
-    const frame = try self.currentFrame();
+    return self.currentClosureIn(self.currentFiber());
+}
+
+/// currentClosure without re deriving the fiber
+///
+/// dispatch already has it, and these run per upvalue access on hot paths
+pub inline fn currentClosureIn(self: *VM, fiber: *Fiber) !?*root.functions.Closure {
+    if (fiber.frames.items.len == 0) return error.FrameUnderflow;
+    const frame = &fiber.frames.items[fiber.frames.items.len - 1];
     const closure_id = frame.closure_id orelse return null;
     const func = try self.functionFast(closure_id);
+
     return switch (func.*) {
         .closure => |*closure| closure,
         .host, .c_function => null,
@@ -882,9 +891,14 @@ pub inline fn loadUpvalueData(self: *VM, upvalue_id: root.functions.UpvalueID) !
 }
 
 pub inline fn storeUpvalueData(self: *VM, upvalue_id: root.functions.UpvalueID, value: Data) !void {
+    return self.storeUpvalueDataIn(self.currentFiber(), upvalue_id, value);
+}
+
+/// storeUpvalueData without re deriving the fiber( dispatch already has it)
+pub inline fn storeUpvalueDataIn(self: *VM, fiber: *Fiber, upvalue_id: root.functions.UpvalueID, value: Data) !void {
     const upvalue = try self.functions.getUpvalue(upvalue_id);
     if (upvalue.open_index) |slot_index| {
-        self.currentFiber().registers[slot_index] = value;
+        fiber.registers[slot_index] = value;
     } else {
         upvalue.closed = value;
     }

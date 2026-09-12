@@ -631,15 +631,15 @@ inline fn execFiberDispatch(
             continue :dispatch instr.op;
         },
         .load_upval => {
-            const closure2 = (try self.currentClosure()) orelse return self.evalFailure(error.InvalidLocal);
+            const closure2 = (try self.currentClosureIn(fiber)) orelse return self.evalFailure(error.InvalidLocal);
             regWrite(regs, base, instr.a, try self.loadUpvalueData(closure2.upvalues[instr.bx]));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
         .store_upval => {
-            const closure2 = (try self.currentClosure()) orelse return self.evalFailure(error.InvalidLocal);
-            try self.storeUpvalueData(closure2.upvalues[instr.bx], regRead(regs, base, instr.a));
+            const closure2 = (try self.currentClosureIn(fiber)) orelse return self.evalFailure(error.InvalidLocal);
+            try self.storeUpvalueDataIn(fiber, closure2.upvalues[instr.bx], regRead(regs, base, instr.a));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -1226,7 +1226,7 @@ noinline fn execClosure(
                 const frame_base = fiber.top_base;
                 upv_buf[i] = try self.captureUpvalue(frame_base + spec.index);
             } else {
-                const closure2 = (try self.currentClosure()) orelse
+                const closure2 = (try self.currentClosureIn(fiber)) orelse
                     return self.fail(error.TypeError, "expected closure", .{});
                 upv_buf[i] = closure2.upvalues[spec.index];
             }
@@ -1245,7 +1245,7 @@ noinline fn execClosure(
                 const frame_base = fiber.top_base;
                 try list.append(alloc, try self.captureUpvalue(frame_base + spec.index));
             } else {
-                const closure2 = (try self.currentClosure()) orelse
+                const closure2 = (try self.currentClosureIn(fiber)) orelse
                     return self.fail(error.TypeError, "expected closure", .{});
                 try list.append(alloc, closure2.upvalues[spec.index]);
             }
