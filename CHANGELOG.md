@@ -146,6 +146,10 @@ tuples and structs are gone now, most breaking change yet
   `fn id[T](v: T) -> T`, `f(a: num, b?: num)` in hover and signature help
 - `revo -e` no longer runs piped stdin as a program first, stdin stays available
   for `input()`, so `echo hi | revo -e 'input()?'` runs the inline code
+- `join` nested inside a host call (eg `:map(fn(h) join h)`) waits by pumping
+  the scheduler instead of falling through with the fiber handle
+- `spawn` snapshots upvalues instead of sharing them, so fibers spawned in a
+  `for` loop each see their own iteration value instead of all seeing the last
 
 ## [0.1.2] - 2026-09-05
 

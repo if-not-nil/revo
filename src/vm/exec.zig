@@ -18,68 +18,101 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).EvalResult {
             return .{ .err = failure };
         }
 
+        // wait errors become eval failures here so the main loop keeps a
+        // narrow error set for its compile-time callers
+        const live = waitForActivity(self) catch |e| return .{ .err = self.evalFailure(e) };
+        if (!live) break;
+    }
+    return .ok;
+}
+
+/// one idle step of the main loop, shared by runReport and nested blocking
+/// waits: wake due sleepers, then block briefly on io/sleep/channel
+/// activity. false when nothing is left to wait for.
+fn waitForActivity(self: *VM) VM.EvalError!bool {
+    try self.sched.wakeDueSleepers(self.schedNowMonotonicNs());
+
+    const has_sleepers = self.sched.sleepers.items.len > 0;
+    const has_io_waiters = self.sched.io_waiters.items.len > 0;
+    const has_waiting = self.sched.waiting_cnt > 0;
+    const has_runnable = self.sched.ring_head != self.sched.ring_tail;
+
+    if (!has_sleepers and !has_waiting and !has_runnable) {
+        @branchHint(.unlikely);
+        return false;
+    }
+
+    if (has_io_waiters or (revo.has_async_backend and has_waiting)) {
+        @branchHint(.likely);
+        const timeout_ms: i32 = if (self.sched.nextSleepDelayNs(
+            self.schedNowMonotonicNs(),
+        )) |delay_ns|
+            @as(i32, @intCast(@min(
+                delay_ns / std.time.ns_per_ms,
+                @as(u64, std.math.maxInt(i32)),
+            )))
+        else if (!has_io_waiters)
+            1 // no sleepers and no io then don't block forever on the control pipe
+        else
+            -1;
+
+        if (revo.has_async_backend) {
+            _ = revo.async_backend_impl.pollAll(
+                &self.runtime.async_backend,
+                self,
+                timeout_ms,
+            ) catch return error.Panic;
+        } else if (comptime !revo.is_freestanding) {
+            _ = revo.std_net.pollIoWaiters(self, timeout_ms) catch
+                return error.Panic;
+        }
+
         try self.sched.wakeDueSleepers(self.schedNowMonotonicNs());
+        return true;
+    }
 
-        const has_sleepers = self.sched.sleepers.items.len > 0;
-        const has_io_waiters = self.sched.io_waiters.items.len > 0;
-        const has_waiting = self.sched.waiting_cnt > 0;
-        const has_runnable = self.sched.ring_head != self.sched.ring_tail;
-
-        if (!has_sleepers and !has_waiting and !has_runnable) {
-            @branchHint(.unlikely);
-            break;
-        }
-
-        if (has_io_waiters or (revo.has_async_backend and has_waiting)) {
-            @branchHint(.likely);
-            const timeout_ms: i32 = if (self.sched.nextSleepDelayNs(
-                self.schedNowMonotonicNs(),
-            )) |delay_ns|
-                @as(i32, @intCast(@min(
-                    delay_ns / std.time.ns_per_ms,
-                    @as(u64, std.math.maxInt(i32)),
-                )))
-            else if (!has_io_waiters)
-                1 // no sleepers and no io then don't block forever on the control pipe
-            else
-                -1;
-
-            if (revo.has_async_backend) {
-                _ = revo.async_backend_impl.pollAll(
-                    &self.runtime.async_backend,
-                    self,
-                    timeout_ms,
-                ) catch return .{ .err = self.evalFailure(error.Panic) };
-            } else if (comptime !revo.is_freestanding) {
-                _ = revo.std_net.pollIoWaiters(self, timeout_ms) catch
-                    return .{ .err = self.evalFailure(error.Panic) };
-            }
-
-            try self.sched.wakeDueSleepers(self.schedNowMonotonicNs());
-            continue;
-        }
-
-        if (has_sleepers) {
-            @branchHint(.unlikely);
-            const now_ns = self.schedNowMonotonicNs();
-            if (self.sched.nextSleepDelayNs(now_ns)) |diff_ns| {
-                if (diff_ns > 0) std.Io.sleep(
-                    self.runtime.io,
-                    std.Io.Duration.fromNanoseconds(@intCast(diff_ns)),
-                    .awake,
-                ) catch {};
-            }
-            try self.sched.wakeDueSleepers(self.schedNowMonotonicNs());
-        } else if (has_waiting) {
-            // channel waiters without io backend, so yield to avoid busy-wait
-            std.Io.sleep(
+    if (has_sleepers) {
+        @branchHint(.unlikely);
+        const now_ns = self.schedNowMonotonicNs();
+        if (self.sched.nextSleepDelayNs(now_ns)) |diff_ns| {
+            if (diff_ns > 0) std.Io.sleep(
                 self.runtime.io,
-                std.Io.Duration.fromNanoseconds(std.time.ns_per_ms),
+                std.Io.Duration.fromNanoseconds(@intCast(diff_ns)),
                 .awake,
             ) catch {};
         }
+        try self.sched.wakeDueSleepers(self.schedNowMonotonicNs());
+    } else if (has_waiting) {
+        // channel waiters without io backend, so yield to avoid busy-wait
+        std.Io.sleep(
+            self.runtime.io,
+            std.Io.Duration.fromNanoseconds(std.time.ns_per_ms),
+            .awake,
+        ) catch {};
     }
-    return .ok;
+    return true;
+}
+
+/// drive other fibers inline until target_id finishes
+/// . a join nested inside a host call cannot suspend the host call stack
+///   , so instead of parking it pumps the scheduler and blocks
+/// . reports the first fiber failure seen.
+fn pumpUntilDone(self: *VM, target_id: VM.FiberID) !?VM.EvalFailure {
+    // runReadyFibers parks current_fiber on whatever ran last
+    // , so restore ours on every exit
+    // : the suspended dispatch below resumes on it
+    const outer = self.sched.current_fiber;
+    defer self.sched.current_fiber = outer;
+
+    while (self.sched.fibers.items[target_id].state != .dead) {
+        if (try runReadyFibers(self)) |failure| return failure;
+        if (self.sched.fibers.items[target_id].state == .dead) break;
+        if (!try waitForActivity(self)) break;
+    }
+    if (self.sched.fibers.items[target_id].state != .dead) {
+        return self.fail(error.Panic, "join: target fiber did not finish", .{});
+    }
+    return null;
 }
 
 inline fn runReadyFibers(self: *VM) !?@TypeOf(self.*).EvalFailure {
@@ -560,6 +593,9 @@ inline fn execFiberDispatch(
             const t = try self.tableFast(t_id);
             try t.put(t_id, self, key, regRead(regs, base, instr.c));
 
+            // put runs __newindex user code, which may have spawned
+            fiber = self.currentFiber();
+
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
@@ -572,9 +608,18 @@ inline fn execFiberDispatch(
                 if (t.getRaw(key, self)) |value| {
                     regWrite(regs, base, instr.a, value);
                 } else if (try lookup.resolveTableMiss(self, object, t, key, instr.a)) |resolved| {
+
+                    // resolve may run __index user code, refetch the window
+                    fiber = self.currentFiber();
+                    base = fiber.top_base;
+                    regs = fiber.registers[0..fiber.registers_len];
+
                     regWrite(regs, base, instr.a, resolved.value);
                 } else regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
             } else if (try self.resolveField(object, key, instr.a)) |resolved| {
+                fiber = self.currentFiber();
+                base = fiber.top_base;
+                regs = fiber.registers[0..fiber.registers_len];
                 regWrite(regs, base, instr.a, resolved.value);
             } else regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
 
@@ -596,6 +641,9 @@ inline fn execFiberDispatch(
             const key = Data.new.atom(instr.bx);
             try t.put(t_id, self, key, regRead(regs, base, instr.c));
 
+            // put may run __newindex user code, which may have spawned
+            fiber = self.currentFiber();
+
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
@@ -608,11 +656,19 @@ inline fn execFiberDispatch(
                 if (t.getRaw(key, self)) |value| {
                     regWrite(regs, base, instr.a, value);
                 } else if (try lookup.resolveTableMiss(self, object, t, key, instr.a)) |resolved| {
+                    // resolve may run __index user code, refetch the window
+                    fiber = self.currentFiber();
+                    base = fiber.top_base;
+                    regs = fiber.registers[0..fiber.registers_len];
+
                     regWrite(regs, base, instr.a, resolved.value);
                 } else {
                     regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
                 }
             } else if (try self.resolveField(object, key, instr.a)) |resolved| {
+                fiber = self.currentFiber();
+                base = fiber.top_base;
+                regs = fiber.registers[0..fiber.registers_len];
                 regWrite(regs, base, instr.a, resolved.value);
             } else {
                 regWrite(regs, base, instr.a, revo.Data.new.core(.undef));
@@ -711,6 +767,9 @@ inline fn execFiberDispatch(
                 if (e == error.Parked) return e;
                 return self.evalFailure(e);
             };
+            // callRegister runs user code, which may have spawned and
+            // reallocated the fibers array or grown registers
+            fiber = self.currentFiber();
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
 
@@ -728,6 +787,8 @@ inline fn execFiberDispatch(
                 if (e == error.Parked) return e;
                 return self.evalFailure(e);
             };
+            // execCallField runs user code, same hazard as .call above
+            fiber = self.currentFiber();
             base = fiber.top_base;
             regs = fiber.registers[0..fiber.registers_len];
 
@@ -778,6 +839,17 @@ inline fn execFiberDispatch(
             const target = &self.sched.fibers.items[target_id];
             if (target.state == .dead) {
                 regWrite(regs, base, instr.a, target.result);
+            } else if (comptime use_depth) {
+                // nested join (inside a host call): the host call stack
+                // cannot suspend, so drive other fibers inline until the
+                // target finishes instead of parking
+                if (try pumpUntilDone(self, target_id)) |failure| return failure;
+                // pumped fibers may have spawned: re-fetch everything
+                fiber = self.currentFiber();
+                base = fiber.top_base;
+                regs = fiber.registers[0..fiber.registers_len];
+                const done = &self.sched.fibers.items[target_id];
+                regWrite(regs, base, instr.a, done.result);
             } else {
                 try target.waiters.append(alloc, self.sched.current_fiber);
                 self.sched.parkCurrentWithResult(.{ .join = target_id }, base + instr.a);
@@ -1238,12 +1310,18 @@ noinline fn execCallField(self: *VM, regs: []Data, base: usize, instr: Instructi
         return error.NotAFunction;
     };
 
+    // resolveField may run __index user code, which may have spawned and
+    // reallocated the fibers array or grown registers
+    const live = self.currentFiber();
+    const live_regs = live.registers[0..live.registers_len];
+    const live_base = live.top_base;
+
     if (colon) {
-        regWrite(regs, base, instr.a, lookup_result.value);
-        regWrite(regs, base, instr.a + 1, object);
+        regWrite(live_regs, live_base, instr.a, lookup_result.value);
+        regWrite(live_regs, live_base, instr.a + 1, object);
         try self.callRegister(.{ .op = .call, .a = instr.a, .b = @intCast(explicit_argc + 1), .c = instr.c });
     } else {
-        regWrite(regs, base, instr.a + 1, lookup_result.value);
+        regWrite(live_regs, live_base, instr.a + 1, lookup_result.value);
         try self.callRegister(.{ .op = .call, .a = instr.a + 1, .b = @intCast(explicit_argc), .c = instr.c });
     }
 }
