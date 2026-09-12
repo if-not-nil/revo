@@ -29,10 +29,12 @@ pub const Opcode = enum(u8) {
     shr, // "R[a] <- R[b] >> R[c] (int operands)"
     int_div, // "R[a] <- R[b] // R[c] (floor int division)"
     negate, // "R[a] <- -R[b]"
-    // typed arith with an immediate operand (bx = constant)
-    add_imm, // "R[a] <- (int)R[b] + bx"
-    sub_imm, // "R[a] <- (int)R[b] - bx"
-    mul_imm, // "R[a] <- (int)R[b] * bx"
+    // arithmetic with an immediate operand (bx = constant)
+    // add/sub/mul are unchecked f64 like the generic ops
+    // band neEds integral lhs like generic band
+    add_imm, // "R[a] <- R[b] + bx"
+    sub_imm, // "R[a] <- R[b] - bx"
+    mul_imm, // "R[a] <- R[b] * bx"
     band_imm, // "R[a] <- (int)R[b] & bx"
     pow, // "R[a] <- R[b] ^ R[c] (int if both integral, else float)"
     /// "R[a] <- R[b] == R[c]"

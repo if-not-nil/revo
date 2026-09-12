@@ -525,11 +525,18 @@ fn eliminateMove(i: usize, insts: []*ir.IrInst, live: []bool, read_buf: []Regist
 ///
 /// when the surviving operand already writes the result register the
 /// instruction is a register no-op and is deleted; otherwise it becomes a
-/// copy. only integral small constants participate, and annihilators apply
-/// to the typed int opcodes where the vm has no string/float fallback.
-/// the `*_int_imm` forms carry their constant in `op_arg` (single operand),
+/// copy
+///
+/// only integral small constants participate
+/// identity folds hold for floats too (including NaN)
+/// annihilators apply only where the op is exact on all inputs it accepts:
+///   band_imm requires integral lhs, so x&0 is 0,
+///
+/// but mul_imm takes any float and NaN*0 is NaN, so it has no annihilator
+///
+/// the `*_int_imm` forms carry their constant in `op_arg` (single operand)
 /// so they are folded against that constant too: the compiler's immediate
-/// emission must not hide an identity from this pass.
+/// emission must not hide an identity from this pass
 fn foldIdentity(self: *Compiler, i: usize, insts: []*ir.IrInst, live: []bool) !bool {
     const inst = insts[i];
     if (inst.operands.len == 1) return foldIdentityImm(self, i, insts, live, inst);
@@ -622,7 +629,7 @@ fn identityWith(op: Opcode, c: i64) bool {
 
 fn annihilatorWith(op: Opcode, c: i64) bool {
     return switch (op) {
-        .mul_imm, .band_imm => c == 0,
+        .band_imm => c == 0,
         else => false,
     };
 }

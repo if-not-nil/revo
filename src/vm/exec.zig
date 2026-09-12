@@ -863,20 +863,29 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        inline .add_imm, .sub_imm, .mul_imm, .band_imm => |op| {
+        inline .add_imm, .sub_imm, .mul_imm => |op| {
+            const lhs_val = regRead(regs, base, instr.b);
+            if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
+            const lhs: f64 = @bitCast(lhs_val.bits);
+            const rhs: f64 = @floatFromInt(@as(i64, @intCast(instr.bx)));
+            const result: f64 = switch (op) {
+                .add_imm => lhs + rhs,
+                .sub_imm => lhs - rhs,
+                .mul_imm => lhs * rhs,
+                else => unreachable,
+            };
+            regWrite(regs, base, instr.a, Data.new.num(result));
+
+            if (!fetchNext(fiber, &instr)) break :dispatch;
+            continue :dispatch instr.op;
+        },
+        .band_imm => {
             const lhs_val = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs_val.bits))) orelse
                 return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs_val, self)});
             const ri: i64 = @intCast(instr.bx);
-            const result: i64 = switch (op) {
-                .add_imm => li + ri,
-                .sub_imm => li - ri,
-                .mul_imm => li * ri,
-                .band_imm => li & ri,
-                else => unreachable,
-            };
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(result))));
+            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(li & ri))));
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
