@@ -146,7 +146,7 @@ pub fn build(b: *Build) !void {
     const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, zig_backend") orelse
         // isocline needs libc and not wasm; wasi gets lsp but not isocline
         // async is disabled on windows/wasi/freestanding (handled in src/root.zig)
-        if (is_freestanding) "" else if (is_wasm) "lsp,regex" else "isocline,lsp,regex";
+        if (is_freestanding) "" else if (is_wasm) "lsp,regex" else "isocline,lsp,regex,mimalloc";
 
     // windows missing features: isocline (no libc), async (no posix threads)
     if (builtin.os.tag == .windows) {
