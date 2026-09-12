@@ -461,10 +461,12 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
     var out = revo.stdout().writer(init.io, &banner_buffer);
     const writer = &out.interface;
 
+    const target_triple = try builtin.target.linuxTriple(gpa);
     try writer.print(
         "revo {s} repl ({s} for {s})\n> :q to exit, :h <name> for docs, <C-j> to start new line\n",
-        .{ build_options.version, build_options.git_commit, try builtin.target.linuxTriple(gpa) },
+        .{ build_options.version, build_options.git_commit, target_triple },
     );
+    gpa.free(target_triple);
     try writer.print("\x1b[0;95m# {s}\x1b[0m\n", .{
         splashText(splashSeed(vm, &banner_buffer, writer)),
     });
@@ -485,6 +487,7 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             .current_input = try std.ArrayList(u8).initCapacity(gpa, 256),
             .cursor_pos = 0,
         };
+        defer isocline_ctx.?.current_input.deinit(gpa);
 
         var b: [512]u8 = undefined;
         const hist_path = if (std.c.getenv("HOME")) |p|
