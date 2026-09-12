@@ -124,7 +124,7 @@ pub fn populateArgv(vm: *revo.VM) !void {
     const argv_id = argv_val.asTable() orelse return;
     const argv = try vm.tables.get(argv_id);
     for (vm.runtime.argv) |arg| {
-        try argv.push(try vm.ownDataString(arg));
+        try argv.push(vm.runtime.alloc, try vm.ownDataString(arg));
     }
 }
 

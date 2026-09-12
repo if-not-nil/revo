@@ -156,20 +156,20 @@ fn parseParam(param: []const u8, query_id: usize, vm: *VM) !void {
             // key exists, add to or create a table
             if (existing.asTable()) |id| {
                 var table = try vm.tables.get(id);
-                try table.push(data);
+                try table.push(vm.runtime.alloc, data);
             } else {
                 const id = try vm.tables.create();
                 var table = try vm.tables.get(id);
 
-                try table.push(existing);
-                try table.push(data);
+                try table.push(vm.runtime.alloc, existing);
+                try table.push(vm.runtime.alloc, data);
                 try query.putRawAtom(key, Data.new.table(id), vm);
             }
         } else {
             try query.putRawAtom(key, data, vm);
         }
     } else {
-        try query.push(try vm.ownDataString(param));
+        try query.push(vm.runtime.alloc, try vm.ownDataString(param));
     }
 }
 

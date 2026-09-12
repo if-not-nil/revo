@@ -296,7 +296,7 @@ pub const Impl = struct {
         const d = try vm.tables.get(id);
         for (s.array.items) |item| {
             const v = if (item.asTable()) |tid| try deepCopyInto(vm, tid, seen) else item;
-            try d.array.append(d.alloc, v);
+            try d.array.append(vm.runtime.alloc, v);
         }
         var it = s.hash.orderedIterator();
         while (it.next()) |entry| {

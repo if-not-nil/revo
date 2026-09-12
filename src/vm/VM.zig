@@ -397,7 +397,7 @@ pub fn stringValue(self: *VM, id: mem.StringID) []const u8 {
 pub fn tableOfSlice(self: *VM, val: []const Data) !Data {
     const id = try self.tables.create();
     const ptr = try self.tables.get(id);
-    try ptr.array.appendSlice(ptr.alloc, val);
+    try ptr.array.appendSlice(self.runtime.alloc, val);
     return Data.new.table(id);
 }
 
@@ -472,7 +472,7 @@ pub fn copyTable(self: *VM, src: mem.TableID) !Data {
     const id = try self.tables.create();
     const d = try self.tables.get(id);
 
-    try d.array.appendSlice(d.alloc, s.array.items);
+    try d.array.appendSlice(self.runtime.alloc, s.array.items);
     var it = s.hash.orderedIterator();
 
     while (it.next()) |entry|

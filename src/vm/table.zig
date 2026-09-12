@@ -56,7 +56,7 @@ pub const TablePool = struct {
 
     pub fn deinit(self: *TablePool) void {
         for (self.tables.items) |maybe_t| {
-            if (maybe_t) |t| t.deinit();
+            if (maybe_t) |t| t.deinit(self.alloc);
         }
         self.box_pool.deinit(self.alloc);
         self.tables.deinit(self.alloc);
@@ -69,7 +69,6 @@ pub const TablePool = struct {
         if (self.dead.pop()) |id| {
             const t = self.tables.items[id].?;
             t.metatable = null;
-            t.alloc = self.alloc;
             self.marks.unset(id);
             pool.relink(&self.first, &self.last, &self.next, id);
             return id;
@@ -81,7 +80,7 @@ pub const TablePool = struct {
 
         const box = try self.box_pool.create(self.alloc);
         errdefer self.box_pool.destroy(box);
-        box.* = Table.init(self.alloc);
+        box.* = Table.init();
 
         try self.tables.append(self.alloc, box);
         errdefer _ = self.tables.pop();
@@ -162,14 +161,13 @@ const MAX_RETAINED_ARRAY = 16;
 
 fn freeTable(t: *Table, alloc: std.mem.Allocator) void {
     if (t.array.capacity > MAX_RETAINED_ARRAY) {
-        t.array.deinit(t.alloc);
+        t.array.deinit(alloc);
         t.array = .empty;
     } else {
         t.array.clearRetainingCapacity();
     }
     t.hash.deinit(alloc);
     t.metatable = null;
-    t.alloc = alloc;
 }
 
 pub const Table = struct {
@@ -377,22 +375,20 @@ pub const Table = struct {
         }
     };
 
-    alloc: std.mem.Allocator,
     array: SmallArray,
     hash: HashPart,
     metatable: ?memory.TableID = null,
 
-    pub fn init(alloc: std.mem.Allocator) Table {
+    pub fn init() Table {
         return .{
-            .alloc = alloc,
             .array = .empty,
             .hash = .{},
         };
     }
 
-    pub fn deinit(self: *Table) void {
-        self.array.deinit(self.alloc);
-        self.hash.deinit(self.alloc);
+    pub fn deinit(self: *Table, alloc: std.mem.Allocator) void {
+        self.array.deinit(alloc);
+        self.hash.deinit(alloc);
     }
 
     /// array part with a few inline slots
@@ -514,22 +510,22 @@ pub const Table = struct {
                 self.array.items[idx] = val;
                 return;
             } else if (idx == self.array.items.len) {
-                try self.push(val);
+                try self.push(vm.runtime.alloc, val);
                 return;
             } // else fallback to hash
         }
 
-        const entry = try self.hash.getOrPut(self.alloc, key, vm);
+        const entry = try self.hash.getOrPut(vm.runtime.alloc, key, vm);
         entry.* = val;
     }
 
     pub fn putRawAtom(self: *Table, id: memory.AtomID, val: Data, vm: *revo.VM) !void {
-        const entry = try self.hash.getOrPut(self.alloc, Data.new.atom(id), vm);
+        const entry = try self.hash.getOrPut(vm.runtime.alloc, Data.new.atom(id), vm);
         entry.* = val;
     }
 
-    pub inline fn push(self: *Table, val: Data) !void {
-        try self.array.append(self.alloc, val);
+    pub inline fn push(self: *Table, alloc: std.mem.Allocator, val: Data) !void {
+        try self.array.append(alloc, val);
     }
 
     pub inline fn getRaw(self: *Table, key: Data, vm: *revo.VM) ?Data {
@@ -705,12 +701,12 @@ test "table float keys stay distinct when non integral" {
 test "table push appends positional values" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
 
-    try table.push(Data.new.num(10));
-    try table.push(Data.new.num(20));
-    try table.push(Data.new.num(30));
+    try table.push(std.testing.allocator, Data.new.num(10));
+    try table.push(std.testing.allocator, Data.new.num(20));
+    try table.push(std.testing.allocator, Data.new.num(30));
 
     try std.testing.expectEqual(@as(usize, 3), table.count());
     try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0), &vm).?);
@@ -724,7 +720,7 @@ test "boxed table pointers survive pool growth from create()" {
 
     const id = try vm.tables.create();
     const t = try vm.tables.get(id); // pointer we intend to keep using
-    try t.push(Data.new.num(1));
+    try t.push(std.testing.allocator, Data.new.num(1));
 
     // grow the slot array far past its initial capacity. with inline (?Table)
     // storage this reallocation moved the slots and left `t` dangling; boxing
@@ -734,7 +730,7 @@ test "boxed table pointers survive pool growth from create()" {
     while (i < 512) : (i += 1) _ = try vm.tables.create();
 
     try std.testing.expectEqual(@as(usize, 1), t.array.items.len);
-    try t.push(Data.new.num(2));
+    try t.push(std.testing.allocator, Data.new.num(2));
     try std.testing.expectEqual(@as(usize, 2), t.array.items.len);
     try std.testing.expectEqual(t, try vm.tables.get(id)); // same stable address
 }
@@ -746,11 +742,11 @@ test "boxed table pointers survive pool growth from create()" {
 test "putRaw: integer key in range 0..<len overwrites existing element" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
-    try table.push(Data.new.num(10));
-    try table.push(Data.new.num(20));
-    try table.push(Data.new.num(30));
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
+    try table.push(std.testing.allocator, Data.new.num(10));
+    try table.push(std.testing.allocator, Data.new.num(20));
+    try table.push(std.testing.allocator, Data.new.num(30));
 
     try table.putRaw(Data.new.num(1), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 3), table.array.items.len);
@@ -762,10 +758,10 @@ test "putRaw: integer key in range 0..<len overwrites existing element" {
 test "putRaw: integer key == len appends to array" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
-    try table.push(Data.new.num(10));
-    try table.push(Data.new.num(20));
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
+    try table.push(std.testing.allocator, Data.new.num(10));
+    try table.push(std.testing.allocator, Data.new.num(20));
 
     try table.putRaw(Data.new.num(2), Data.new.num(30), &vm);
     try std.testing.expectEqual(@as(usize, 3), table.array.items.len);
@@ -775,9 +771,9 @@ test "putRaw: integer key == len appends to array" {
 test "putRaw: integer key > len goes to hash" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
-    try table.push(Data.new.num(10));
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
+    try table.push(std.testing.allocator, Data.new.num(10));
 
     try table.putRaw(Data.new.num(5), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
@@ -787,9 +783,9 @@ test "putRaw: integer key > len goes to hash" {
 test "putRaw: negative integer key always goes to hash" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
-    try table.push(Data.new.num(10));
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
+    try table.push(std.testing.allocator, Data.new.num(10));
 
     try table.putRaw(Data.new.num(-1), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
@@ -799,8 +795,8 @@ test "putRaw: negative integer key always goes to hash" {
 test "putRaw: float key always goes to hash" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
 
     try table.putRaw(Data.new.num(1.5), Data.new.num(99), &vm);
     try std.testing.expectEqual(@as(usize, 0), table.array.items.len);
@@ -810,8 +806,8 @@ test "putRaw: float key always goes to hash" {
 test "putRaw: NaN and Infinity keys go to hash" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
 
     try table.putRaw(Data.new.num(std.math.nan(f64)), Data.new.num(1), &vm);
     try table.putRaw(Data.new.num(std.math.inf(f64)), Data.new.num(2), &vm);
@@ -822,10 +818,10 @@ test "putRaw: NaN and Infinity keys go to hash" {
 test "putRaw: getRaw retrieves from array for integer keys" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
-    try table.push(Data.new.num(10));
-    try table.push(Data.new.num(20));
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
+    try table.push(std.testing.allocator, Data.new.num(10));
+    try table.push(std.testing.allocator, Data.new.num(20));
 
     try std.testing.expectEqual(Data.new.num(10), table.getRaw(Data.new.num(0), &vm).?);
     try std.testing.expectEqual(Data.new.num(20), table.getRaw(Data.new.num(1), &vm).?);
@@ -835,8 +831,8 @@ test "putRaw: getRaw retrieves from array for integer keys" {
 test "putRaw: getRaw retrieves from hash for negative and float keys" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
     try table.putRaw(Data.new.num(-1), Data.new.num(42), &vm);
     try table.putRaw(Data.new.num(1.5), Data.new.num(99), &vm);
 
@@ -847,8 +843,8 @@ test "putRaw: getRaw retrieves from hash for negative and float keys" {
 test "putRaw: integer key > len in empty table goes to hash" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
 
     try table.putRaw(Data.new.num(0), Data.new.num(10), &vm);
     try std.testing.expectEqual(@as(usize, 1), table.array.items.len);
@@ -868,14 +864,14 @@ test "putRaw: integer key > len in empty table goes to hash" {
 //
 
 test "array fills inline slots before touching the heap" {
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), table.array.capacity);
 
-    try table.push(Data.new.num(10));
-    try table.push(Data.new.num(20));
-    try table.push(Data.new.num(30));
-    try table.push(Data.new.num(40));
+    try table.push(std.testing.allocator, Data.new.num(10));
+    try table.push(std.testing.allocator, Data.new.num(20));
+    try table.push(std.testing.allocator, Data.new.num(30));
+    try table.push(std.testing.allocator, Data.new.num(40));
     try std.testing.expectEqual(@as(usize, 4), table.array.items.len);
     try std.testing.expectEqual(@as(usize, 4), table.array.capacity);
     try std.testing.expectEqual(Data.new.num(10), table.array.items[0]);
@@ -885,10 +881,10 @@ test "array fills inline slots before touching the heap" {
 test "fifth array element spills inline contents to the heap intact" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
     for ([_]f64{ 10, 20, 30, 40, 50, 60 }) |n|
-        try table.push(Data.new.num(n));
+        try table.push(std.testing.allocator, Data.new.num(n));
 
     try std.testing.expectEqual(@as(usize, 6), table.array.items.len);
     try std.testing.expect(table.array.capacity >= 6);
@@ -899,10 +895,10 @@ test "fifth array element spills inline contents to the heap intact" {
 test "cursor walks inline then heap then hash in order" {
     var vm = try revo.VM.init(testing.runtime());
     defer vm.deinit();
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
     for ([_]f64{ 1, 2, 3, 4, 5, 6 }) |n|
-        try table.push(Data.new.num(n));
+        try table.push(std.testing.allocator, Data.new.num(n));
     try table.putRaw(Data.new.atom(try vm.internAtom("k")), Data.new.num(99), &vm);
 
     var cur = table.cursor();
@@ -915,10 +911,10 @@ test "cursor walks inline then heap then hash in order" {
 }
 
 test "insert and orderedRemove work across the inline boundary" {
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
     for ([_]f64{ 1, 2, 3, 4 }) |n|
-        try table.push(Data.new.num(n));
+        try table.push(std.testing.allocator, Data.new.num(n));
 
     try table.array.insert(std.testing.allocator, 4, Data.new.num(5));
     try std.testing.expectEqual(@as(usize, 5), table.array.items.len);
@@ -935,8 +931,8 @@ test "insert and orderedRemove work across the inline boundary" {
 }
 
 test "appendSlice bulk-fills without a growth chain" {
-    var table = Table.init(std.testing.allocator);
-    defer table.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
     const vals = [_]Data{
         Data.new.num(1), Data.new.num(2), Data.new.num(3),
         Data.new.num(4), Data.new.num(5), Data.new.num(6),

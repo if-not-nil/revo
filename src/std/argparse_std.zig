@@ -122,7 +122,7 @@ pub const Impl = struct {
         const lo_id = try vm.tables.create();
         const lo = try vm.tables.get(lo_id);
         for (leftover.items) |item| {
-            try lo.push(try vm.ownDataString(item));
+            try lo.push(vm.runtime.alloc, try vm.ownDataString(item));
         }
         try vm.putField(result_id, "leftover", Data.new.table(lo_id));
 

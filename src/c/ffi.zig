@@ -126,7 +126,7 @@ pub export fn revo_table_push(vm_ptr: *anyopaque, table: Data, value: Data) call
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     const tid = table.asTable() orelse return false;
     const tbl = v.tables.get(tid) catch return false;
-    tbl.push(value) catch return false;
+    tbl.push(v.runtime.alloc, value) catch return false;
     return true;
 }
 
