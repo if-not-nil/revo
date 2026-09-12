@@ -65,8 +65,8 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
         .halt, .ret, .jump_if_false, .jump_if_true, .jump_err,
         .store_global, .store_global_const, .store_upval,
         .store_local, .bind_local, .negate, .not,
-        .join, .add_int_imm, .sub_int_imm, .mul_int_imm,
-        .band_int_imm, .lt_int_imm, .unwrap_result => {
+        .join, .add_imm, .sub_imm, .mul_imm,
+        .band_imm, .lt_int_imm, .unwrap_result => {
             out[0] = r;
             return 1;
         },

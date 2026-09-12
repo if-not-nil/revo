@@ -863,17 +863,17 @@ inline fn execFiberDispatch(
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
         },
-        inline .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm => |op| {
+        inline .add_imm, .sub_imm, .mul_imm, .band_imm => |op| {
             const lhs_val = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs_val.bits))) orelse
                 return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs_val, self)});
             const ri: i64 = @intCast(instr.bx);
             const result: i64 = switch (op) {
-                .add_int_imm => li + ri,
-                .sub_int_imm => li - ri,
-                .mul_int_imm => li * ri,
-                .band_int_imm => li & ri,
+                .add_imm => li + ri,
+                .sub_imm => li - ri,
+                .mul_imm => li * ri,
+                .band_imm => li & ri,
                 else => unreachable,
             };
             regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(result))));

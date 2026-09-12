@@ -546,16 +546,16 @@ fn scanRemats(
 
 fn isChainOp(op: Opcode) bool {
     return switch (op) {
-        .add, .concat, .sub, .mul, .div, .mod, .band, .bor, .bxor, .shl, .shr, .int_div, .pow, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => true,
+        .add, .concat, .sub, .mul, .div, .mod, .band, .bor, .bxor, .shl, .shr, .int_div, .pow, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .add_imm, .sub_imm, .mul_imm, .band_imm, .lt_int_imm => true,
         else => false,
     };
 }
 
-/// checks if an opcode is an immediate-operand operation (like `add_int_imm`)
+/// checks if an opcode is an immediate-operand operation (like `add_imm`)
 /// these only use the accumulator register, so no extra leaf register is needed
 fn isImmOp(op: Opcode) bool {
     return switch (op) {
-        .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => true,
+        .add_imm, .sub_imm, .mul_imm, .band_imm, .lt_int_imm => true,
         else => false,
     };
 }

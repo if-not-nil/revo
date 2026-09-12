@@ -338,7 +338,7 @@ fn operandText(vm: *revo.VM, inst: revo.Instruction, buf: []u8) []const u8 {
         .range_init => return fmt(buf, "r{d}, r{d}..r{d}, step=r{d}", .{ a, b, c, bx }),
         .range_loop => return fmt(buf, "r{d}, state=r{d}, idx=r{d}, -> L{d}", .{ a, b, c, bx }),
         .unwrap_result => return fmt(buf, "r{d}, mode={d}", .{ a, bx }),
-        .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => return fmt(
+        .add_imm, .sub_imm, .mul_imm, .band_imm, .lt_int_imm => return fmt(
             buf,
             "r{d}, r{d}, {d}",
             .{ a, b, bx },

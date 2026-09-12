@@ -1,5 +1,3 @@
-const std = @import("std");
-
 const revo = @import("revo");
 
 const Data = @import("memory.zig").Data;

@@ -30,10 +30,10 @@ pub const Opcode = enum(u8) {
     int_div, // "R[a] <- R[b] // R[c] (floor int division)"
     negate, // "R[a] <- -R[b]"
     // typed arith with an immediate operand (bx = constant)
-    add_int_imm, // "R[a] <- (int)R[b] + bx"
-    sub_int_imm, // "R[a] <- (int)R[b] - bx"
-    mul_int_imm, // "R[a] <- (int)R[b] * bx"
-    band_int_imm, // "R[a] <- (int)R[b] & bx"
+    add_imm, // "R[a] <- (int)R[b] + bx"
+    sub_imm, // "R[a] <- (int)R[b] - bx"
+    mul_imm, // "R[a] <- (int)R[b] * bx"
+    band_imm, // "R[a] <- (int)R[b] & bx"
     pow, // "R[a] <- R[b] ^ R[c] (int if both integral, else float)"
     /// "R[a] <- R[b] == R[c]"
     eq,

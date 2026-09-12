@@ -1735,7 +1735,7 @@ test "comp block infers num from literal" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -1766,7 +1766,7 @@ test "never arms don't poison match result type" {
 
 test "match narrowing works for call subjects" {
     // the subject is a call, not an ident: `v` still narrows to the payload
-    // type (from the fn's declared return) and `v + 1` emits add_int_imm
+    // type (from the fn's declared return) and `v + 1` emits add_imm
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1785,13 +1785,13 @@ test "match narrowing works for call subjects" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
 
-test "match narrowing enables specialized add_int_imm from table union payload" {
-    // `v` narrows to num so `v + 1` emits add_int_imm
+test "match narrowing enables specialized add_imm from table union payload" {
+    // `v` narrows to num so `v + 1` emits add_imm
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1810,14 +1810,14 @@ test "match narrowing enables specialized add_int_imm from table union payload" 
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
 
 test "match ascriptions narrow to the annotated type" {
     // `v: num` narrows even with an `any` subject
-    //   ; so `v + 1` emits add_int_imm
+    //   ; so `v + 1` emits add_imm
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1835,7 +1835,7 @@ test "match ascriptions narrow to the annotated type" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -1857,7 +1857,7 @@ test "return type propagation: const binding with annotated fn" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -1879,7 +1879,7 @@ test "return type propagation: fn five() 5" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -1901,7 +1901,7 @@ test "annotated function return type propagates to caller via pointer" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -1984,7 +1984,7 @@ test "substituteTypeParams function sig with type var" {
     alloc.destroy(result.tag.function);
 }
 
-test "generics identity fn enables add_int_imm" {
+test "generics identity fn enables add_imm" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -2001,7 +2001,7 @@ test "generics identity fn enables add_int_imm" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -2084,7 +2084,7 @@ test "generics repeated type param works" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -2123,7 +2123,7 @@ test "stdlib sigs: method return types reach the compiler" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }
@@ -2274,7 +2274,7 @@ test "declare fn return type reaches the compiler" {
 
     var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int_imm) saw_add_imm = true;
+        if (inst.op == .add_imm) saw_add_imm = true;
     }
     try std.testing.expect(saw_add_imm);
 }

@@ -393,7 +393,7 @@ pub const Compiler = struct {
                 const opnd = try self.pop();
                 _ = try self.record(op, &.{.{ .inst = opnd }}, true, result_reg, 0);
             },
-            .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => {
+            .add_imm, .sub_imm, .mul_imm, .band_imm, .lt_int_imm => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);
                 try self.recordStackOp(op, 1, 1, result_reg, op_arg);
@@ -1761,10 +1761,10 @@ pub fn immInt(node: *const Node) ?u32 {
 /// returns null for float/`div`/`pow`/`concat` (no imm form, or float math)
 pub fn immOpFor(op: ast.BinOp) ?Opcode {
     return switch (op) {
-        .add => .add_int_imm,
-        .sub => .sub_int_imm,
-        .mul => .mul_int_imm,
-        .band => .band_int_imm,
+        .add => .add_imm,
+        .sub => .sub_imm,
+        .mul => .mul_imm,
+        .band => .band_imm,
         .lt => .lt_int_imm,
         else => null,
     };
