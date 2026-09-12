@@ -51,15 +51,9 @@ fn writeJsonValue(data: Data, vm: *VM, writer: *std.Io.Writer) anyerror!void {
             break :blk try writeJsonString(writer, atom);
         },
         .table => try writeTableJson(data.asTable().?, vm, writer),
-        .tuple => try writeTupleJson(data.asTuple().?, vm, writer),
         .function => return error.UnsupportedJsonValue,
         .foreign => return error.UnsupportedJsonValue,
     };
-}
-
-fn writeTupleJson(id: revo.memory.TupleID, vm: *VM, writer: *std.Io.Writer) anyerror!void {
-    const tuple = try vm.tuples.get(id);
-    try writeArrayJson(tuple.items, vm, writer);
 }
 
 fn writeArrayJson(items: []const Data, vm: *VM, writer: *std.Io.Writer) anyerror!void {
@@ -140,10 +134,13 @@ fn fromJsonValue(value: json.Value, vm: *VM) anyerror!Data {
 }
 
 fn arrayToData(items: []const json.Value, vm: *VM) anyerror!Data {
-    var tuples = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, items.len);
-    defer tuples.deinit(vm.runtime.alloc);
-    for (items) |item| try tuples.append(vm.runtime.alloc, try fromJsonValue(item, vm));
-    return Data.new.tuple(try vm.tuples.create(tuples.items));
+    // fromJsonValue recurses and can reallocate the pool backing store
+    // , so the table is created only hwen everything is decoded
+    var elems = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, items.len);
+    defer elems.deinit(vm.runtime.alloc);
+
+    for (items) |item| try elems.append(vm.runtime.alloc, try fromJsonValue(item, vm));
+    return vm.tableOfSlice(elems.items);
 }
 
 fn objectToData(object: json.ObjectMap, vm: *VM) anyerror!Data {
@@ -152,12 +149,13 @@ fn objectToData(object: json.ObjectMap, vm: *VM) anyerror!Data {
     while (it.next()) |entry| {
         const atom = try vm.internAtom(entry.key_ptr.*);
         // fromJsonValue recurses on nested objects/arrays and can call
-        // vm.tables.create()/vm.tuples.create(), which may reallocate the pool
-        // backing store. re-fetch the table afterwards instead of holding a
-        // pointer across the recursion, or the putRawAtom below writes through
-        // a dangling pointer.
+        // vm.tables.create(), which could  reallocate the pool backing store
+        //
+        // re-fetch the table afterwards instead of holding a pointer across the recursion
+        //   or the putRawAtom below writes through a dangling pointer
         const value = try fromJsonValue(entry.value_ptr.*, vm);
         const table = try vm.tables.get(table_id);
+
         try table.putRawAtom(atom, value, vm);
     }
     return Data.new.table(table_id);
@@ -167,12 +165,32 @@ test "json encode and decode round trip" {
     const testing = revo.lang.testing;
 
     try testing.topString(
-        \\ json.encode(("a", "b", "c")):unwrap()
+        \\ json.encode({"a", "b", "c"}):unwrap()
     , "[\"a\",\"b\",\"c\"]");
 
     try testing.topNumber(
         \\ json.decode("{{ \"a\" : 1}}"):unwrap().a
     , 1);
+}
+
+test "json decode builds tables for arrays" {
+    const testing = revo.lang.testing;
+
+    try testing.topNumber(
+        \\ json.decode("[1, 2, 3]"):unwrap()[0]
+    , 1);
+    try testing.topNumber(
+        \\ json.decode("[1, 2, 3]"):unwrap():len()
+    , 3);
+    try testing.topNumber(
+        \\ json.decode("{{ \"a\": [1, 2] }}"):unwrap().a[1]
+    , 2);
+    try testing.topString(
+        \\ json.encode(json.decode("[1, 2]"):unwrap()):unwrap()
+    , "[1,2]");
+    try testing.topAtom(
+        \\ type(json.decode("[1]"))
+    , "table");
 }
 
 test "json decode of nested objects does not use a stale table pointer" {

@@ -100,7 +100,6 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\  revo_atom = 9,
         \\  revo_function = 10,
         \\  revo_table = 11,
-        \\  revo_tuple = 12,
         \\  revo_foreign = 15,
         \\} RevoType;
         \\
@@ -134,7 +133,6 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\#define revo_bool(v) revo_atom_val((v) ? ra_true : ra_false)
         \\#define revo_string(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_string << REVO_TAG_SHIFT) | (id)))
         \\#define revo_table(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_table << REVO_TAG_SHIFT) | (id)))
-        \\#define revo_tuple(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_tuple << REVO_TAG_SHIFT) | (id)))
         \\#define revo_function(id) ((RevoData)(REVO_BOX_TAG | ((uint64_t)revo_function << REVO_TAG_SHIFT) | (id)))
         \\static inline int revo_type(RevoData d) {
         \\  return (d & 0xFFF8000000000000ULL) == REVO_BOX_TAG ? (int)((d >> REVO_TAG_SHIFT) & REVO_TAG_MASK) : revo_number;
@@ -145,7 +143,6 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\static inline uint64_t revo_string_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
         \\static inline uint64_t revo_atom_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
         \\static inline uint64_t revo_table_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
-        \\static inline uint64_t revo_tuple_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
         \\static inline uint64_t revo_function_id(RevoData d) { return d & REVO_PAYLOAD_MASK; }
         \\static inline int revo_is_nil(RevoData d) { return revo_type(d) == revo_atom && (d & REVO_PAYLOAD_MASK) == ra_nil; }
         \\static inline int revo_is_number(RevoData d) { return revo_type(d) == revo_number; }
@@ -153,7 +150,6 @@ pub fn data(allocator: Allocator) !std.ArrayList(u8) {
         \\static inline int revo_is_atom(RevoData d) { return revo_type(d) == revo_atom; }
         \\static inline int revo_is_function(RevoData d) { return revo_type(d) == revo_function; }
         \\static inline int revo_is_table(RevoData d) { return revo_type(d) == revo_table; }
-        \\static inline int revo_is_tuple(RevoData d) { return revo_type(d) == revo_tuple; }
         \\static inline int revo_is_bool(RevoData d) { return revo_is_atom(d) && ((d & REVO_PAYLOAD_MASK) == ra_true || (d & REVO_PAYLOAD_MASK) == ra_false); }
         \\static inline int revo_bool_val(RevoData d) { return revo_is_bool(d) ? ((d & REVO_PAYLOAD_MASK) == ra_true ? 1 : 0) : 0; }
         \\
@@ -320,7 +316,7 @@ fn buildSignature(
         try sig.appendSlice(allocator, "void");
     } else {
         for (params.items, 0..) |param, i| {
-            // for RevoData revo_table_get(void* vm, uint64_t table_id, RevoData key);,
+            // for bool revo_table_get(void* vm, RevoData table, RevoData key, RevoData* out);,
 
             // RevoData
             const ty = std.mem.trim(u8, param.ty, " ");
@@ -332,7 +328,7 @@ fn buildSignature(
                 try sig.appendSlice(allocator, name);
             }
 
-            // (void* vm, uint64_t table_id, RevoData key);
+            // (void* vm, RevoData table, RevoData key, RevoData* out);
             if (i < params.items.len - 1) {
                 try sig.appendSlice(allocator, ", ");
             }

@@ -99,7 +99,8 @@ revo
 
 ### made with revo
 
-- if you want to feature your project on the readme, you can submit a project via issues/email/discord
+- [hachem-wtf/revel](https://github.com/hachem-wtf/revel) -- a unix-like kernel
+- if you want to feature your project on the readme, you can submit a project via issues/discussion/email/discord
 
 ### in c/zig/odin/what have you
 

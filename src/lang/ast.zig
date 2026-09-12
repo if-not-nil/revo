@@ -114,7 +114,6 @@ pub const TypeExpr = struct {
     pub const Kind = union(enum) {
         named: []const u8,
         atom: []const u8,
-        tuple: []const *TypeExpr,
         union_of: []const *TypeExpr,
         record: []const RecordField,
         /// qualified module type: `a.T` names alias T from module a
@@ -238,8 +237,8 @@ pub const Binding = struct {
 };
 
 pub const Expr = union(enum) {
-    number: NumberLiteral, // (:number, 123) or (:number, 123.0)
-    string: []const u8, // (:string, "asdf")
+    number: NumberLiteral, // {:number, 123} or {:number, 123.0}
+    string: []const u8, // {:string, "asdf"}
     multiline_string: []const u8,
     hash: []const u8,
     nil,
@@ -265,7 +264,7 @@ pub const Expr = union(enum) {
     binding: Binding,
     decl: DeclNode,
     // ill probably ignore node's span field for now just do its expr
-    // (:assign_expr, (:ident, "aaa"), (:ident, "bbb"))
+    // {:assign_expr, {:ident, "aaa"}, {:ident, "bbb"}}
     assign_expr: struct { target: *Node, value: *Node },
     compound_assign: struct { target: *Node, op: BinOp, value: *Node },
     loop_expr: struct { body: *Node, label: ?[]const u8 = null },
@@ -291,8 +290,6 @@ pub const Expr = union(enum) {
     test_block: struct { name: []const u8, body: *Node, skip: bool = false },
     test_suite: struct { name: []const u8, body: *Node },
     block: []*Node,
-    tuple: []*Node,
-    tuple_pattern: []*Node,
     table_pattern: []*Node,
 
     table: []TableEntry,
@@ -652,8 +649,6 @@ pub const Node = struct {
                 try close(writer, depth);
             },
             .block => |exprs| try printNodeList(writer, "block", exprs, depth),
-            .tuple => |items| try printNodeList(writer, "tuple", items, depth),
-            .tuple_pattern => |items| try printNodeList(writer, "tuple-pattern", items, depth),
             .table_pattern => |items| try printNodeList(writer, "table-pattern", items, depth),
             .ascribed => |a| {
                 try writer.writeAll("(ascribed");
@@ -958,7 +953,7 @@ fn walkTypeExprWithVisitor(comptime Visitor: type, visitor: *Visitor, te: *const
             visitor.visit(&name_temp);
         },
         .atom => {},
-        .tuple => |items| for (items) |item| walkTypeExprWithVisitor(Visitor, visitor, item),
+
         .union_of => |variants| for (variants) |v| walkTypeExprWithVisitor(Visitor, visitor, v),
         .record => |fields| for (fields) |f| walkTypeExprWithVisitor(Visitor, visitor, f.type_expr),
         .function => |f| {
@@ -1083,13 +1078,11 @@ test "hasUnderscore" {
     try std.testing.expect(hasUnderscore(res.root));
     res = (try lang.parse(arena, .{ .text = "x", .name = "<>" }, .{})).ok;
     try std.testing.expect(!hasUnderscore(res.root));
-    res = (try lang.parse(arena, .{ .text = "(_, x)", .name = "<>" }, .{})).ok;
-    // std.debug.print("is: {s}\n\n\n\n of len {d}\n\n", .{ res.root.expr.tuple[0].expr.ident,
-    //     res.root.expr.tuple[0].expr.ident.len });
+    res = (try lang.parse(arena, .{ .text = "{_, x}", .name = "<>" }, .{})).ok;
     try std.testing.expect(hasUnderscore(res.root));
     res = (try lang.parse(arena, .{ .text = "call{_, x}", .name = "<>" }, .{})).ok;
     try std.testing.expect(hasUnderscore(res.root));
-    res = (try lang.parse(arena, .{ .text = "(a, b)", .name = "<>" }, .{})).ok;
+    res = (try lang.parse(arena, .{ .text = "{a, b}", .name = "<>" }, .{})).ok;
     try std.testing.expect(!hasUnderscore(res.root));
     res = (try lang.parse(arena, .{ .text = "_:meth()", .name = "<>" }, .{})).ok;
     try std.testing.expect(hasUnderscore(res.root));
@@ -1284,12 +1277,6 @@ pub fn walkExpr(
             ), .mutable = v.mutable } },
         ),
 
-        .tuple => |items| allocNode(allocator, expr.span, .{
-            .tuple = try walkSliceWith(allocator, items, Transform, ctx),
-        }),
-        .tuple_pattern => |items| allocNode(allocator, expr.span, .{
-            .tuple_pattern = try walkSliceWith(allocator, items, Transform, ctx),
-        }),
         .table_pattern => |items| allocNode(allocator, expr.span, .{
             .table_pattern = try walkSliceWith(allocator, items, Transform, ctx),
         }),

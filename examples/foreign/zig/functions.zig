@@ -26,18 +26,18 @@ fn zsetglobal(args: []const Data, vm: *VM) anyerror!HostResult {
 }
 
 fn zconcat(args: []const Data, vm: *VM) anyerror!HostResult {
-    const tup_id = args[0].asTuple() orelse return .errType(0, "tuple", "other");
+    const tab_id = args[0].asTable() orelse return .errType(0, "table", "other");
     const sep_id = args[1].asString() orelse return .errType(1, "string", "other");
     const sep = vm.stringValue(sep_id);
-    const parts = try vm.tuples.get(tup_id);
+    const tab = try vm.tables.get(tab_id);
 
     var buf = std.ArrayList(u8).initCapacity(vm.runtime.alloc, 32) catch {
         return .other("out of memory");
     };
     defer buf.deinit(vm.runtime.alloc);
-    for (parts.items, 0..) |item, i| {
+    for (tab.array.items, 0..) |item, i| {
         if (i > 0) try buf.appendSlice(vm.runtime.alloc, sep);
-        const s_id = item.asString() orelse return .errType(0, "tuple of strings", "other");
+        const s_id = item.asString() orelse return .errType(0, "table of strings", "other");
         try buf.appendSlice(vm.runtime.alloc, vm.stringValue(s_id));
     }
     const new_id = revo.ffi.revo_intern(@ptrCast(vm), @intFromPtr(buf.items.ptr), buf.items.len);

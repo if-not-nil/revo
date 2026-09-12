@@ -478,7 +478,6 @@ const SemanticChecker = struct {
                     }
                 }
             },
-            .tuple => |items| for (items) |item| try self.checkQualifiedTypes(item),
             .union_of => |variants| for (variants) |v| try self.checkQualifiedTypes(v),
             .record => |fields| for (fields) |f| try self.checkQualifiedTypes(f.type_expr),
             .function => |f| {
@@ -511,11 +510,10 @@ const SemanticChecker = struct {
                 }
             }
         }
-        // method lookup for string, tuple, and table
+        // method lookup for string and table
         const target: ?revo.std_lib.TypeSpec = switch (object_type.tag) {
             .number => .number,
             .string => .string,
-            .tuple => .tuple,
             .table => .table,
             else => null,
         };
@@ -526,7 +524,7 @@ const SemanticChecker = struct {
                 }
             }
             // single-entry stdlib: the module fn doubles as the method, e.g.
-            // `t:unwrap_err()` resolves `tuple.unwrap_err` at runtime
+            // `t:unwrap_err()` resolves `table.unwrap_err` at runtime
             if (findModuleByNameAndTarget(name, t)) |spec| {
                 if (self.makeStdlibSig(spec) catch null) |sig| {
                     return .{ .tag = .{ .function = sig } };
@@ -715,7 +713,7 @@ const SemanticChecker = struct {
                 const inner_type = try self.analyzeNode(inner);
                 if (inner_type.tag != .any and !types_mod.isResultType(inner_type)) {
                     try self.appendError(
-                        try std.fmt.allocPrint(self.alloc, "try expects :ok/:err tagged tuple, got {s}", .{try type_serde.formatType(self.alloc, inner_type)}),
+                        try std.fmt.allocPrint(self.alloc, "try expects :ok/:err tagged result, got {s}", .{try type_serde.formatType(self.alloc, inner_type)}),
                         inner.span,
                         "not a result type",
                     );
@@ -853,7 +851,7 @@ const SemanticChecker = struct {
                 try self.declare(m.name, .{ .tag = .any }, null);
                 break :blk .{ .tag = .any };
             },
-            .number, .string, .multiline_string, .hash, .nil, .tuple, .table, .tuple_pattern, .table_pattern, .quasiquote, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
+            .number, .string, .multiline_string, .hash, .nil, .table, .table_pattern, .quasiquote, .test_block, .test_suite, .proc_macro => types_mod.inferExprType(self, node),
             .ascribed => blk: {
                 try self.appendError(
                     "type ascriptions only go in match patterns",
@@ -950,7 +948,7 @@ const SemanticChecker = struct {
 
     fn analyzeBinding(self: *SemanticChecker, binding: ast.Binding, decl_doc: ?[]const u8, _: ast.Span) !types_mod.TypeInfo {
         if (binding.target.expr != .ident) {
-            if (binding.target.expr == .tuple_pattern or binding.target.expr == .table_pattern) {
+            if (binding.target.expr == .table_pattern) {
                 const value_type = try self.analyzeNode(binding.value);
                 _ = try self.declarePatternNames(binding.target);
                 try self.checkPatternAscriptions(binding.target, value_type);
@@ -1084,7 +1082,7 @@ const SemanticChecker = struct {
                     try self.declare(name, .{ .tag = .any }, null);
                 }
             },
-            .tuple_pattern, .table_pattern => |items| {
+            .table_pattern => |items| {
                 for (items) |item| {
                     _ = try self.declarePatternNames(item);
                 }
@@ -1113,12 +1111,12 @@ const SemanticChecker = struct {
     /// pass like nothinh happeneg since `canCoerce` treats `any` as top on both sides
     fn checkPatternAscriptions(self: *SemanticChecker, pattern: *const ast.Node, context: types_mod.TypeInfo) !void {
         const items = switch (pattern.expr) {
-            .tuple_pattern, .table_pattern => |items| items,
+            .table_pattern => |items| items,
             else => return,
         };
 
         for (items, 0..) |item, i| {
-            if (item.expr != .ascribed and item.expr != .tuple_pattern and item.expr != .table_pattern) continue;
+            if (item.expr != .ascribed and item.expr != .table_pattern) continue;
             const elem = patternElemType(self, context, i) orelse continue;
 
             if (item.expr == .ascribed) {
@@ -1138,10 +1136,8 @@ const SemanticChecker = struct {
     }
 
     /// positional element type of a destructured value, or null when unknown.
-    /// table patterns index tuples and tables alike (`t[0]` works on both).
     fn patternElemType(self: *SemanticChecker, context: types_mod.TypeInfo, i: usize) ?types_mod.TypeInfo {
         switch (context.tag) {
-            .tuple => |items| if (i < items.len) return items[i] else return null,
             .table => |tbl| {
                 const fields = tbl.fields orelse return null;
                 const key = std.fmt.allocPrint(self.alloc, "{d}", .{i}) catch return null;
@@ -1154,8 +1150,8 @@ const SemanticChecker = struct {
     }
 
     /// narrow match pattern bindings when the subject type is a tagged union
-    /// `(:ok, v)` and `{:ok, v}` patterns against `(:ok, int) | (:err, string)`
-    /// (or the table-union spelling) bind `v` as `.int`, not `.any`
+    /// `{:ok, v}` patterns against `{:ok, int} | {:err, string}`
+    /// bind `v` as `.int`, not `.any`
     fn narrowPatternNames(self: *SemanticChecker, pattern: *const ast.Node, subject_type: types_mod.TypeInfo) !void {
         // ascriptions apply regardless of subject type
         //   ; and win over union narrowing
@@ -1175,7 +1171,7 @@ const SemanticChecker = struct {
         if (subject_type.tag == .any) return;
 
         const items = switch (pattern.expr) {
-            .tuple_pattern, .table_pattern => |items| items,
+            .table_pattern => |items| items,
             else => return,
         };
         if (items.len == 0) return;
@@ -1411,7 +1407,6 @@ const SemanticChecker = struct {
                 const obj_type = types_mod.inferExprType(self, f.object);
                 const dispatches = switch (obj_type.tag) {
                     .string => findMethodByNameAndTarget(f.name, .string) != null,
-                    .tuple => findMethodByNameAndTarget(f.name, .tuple) != null,
                     .table => findMethodByNameAndTarget(f.name, .table) != null,
                     else => false,
                 };

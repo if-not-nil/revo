@@ -62,11 +62,6 @@ pub fn compileLocalBinding(
     }
 
     state.markLocalInitialized(self, slot);
-    state.markLocalValueKind(
-        self,
-        slot,
-        if (value.expr == .tuple) .tuple_literal else .unknown,
-    );
 
     const inferred_type = if (type_name) |tn|
         try type_serde.evalTypeExpr(self, tn)
@@ -97,15 +92,6 @@ pub fn bindDeclaredPattern(
             _ = try self.pop();
             state.reserveLocalSlots(self);
         },
-        .tuple_pattern => |items| {
-            for (items, 0..) |item, idx| {
-                const mv_dst = try state.pushRegister(self);
-                try self.spans.append(self.alloc, self.active_span);
-                _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst, 0);
-                try self.emit(.tuple_get_const, idx);
-                try bindDeclaredPattern(self, item, self.active_registers - 1, kind);
-            }
-        },
         .table_pattern => |items| {
             for (items, 0..) |item, idx| {
                 const mv_dst = try state.pushRegister(self);
@@ -133,7 +119,7 @@ pub fn declarePatternLocals(
             _ = try state.reuseOrDeclareLocal(self, name, mutable);
             state.reserveLocalSlots(self);
         },
-        .tuple_pattern, .table_pattern => |items| {
+        .table_pattern => |items| {
             for (items) |item| {
                 try declarePatternLocals(self, item, mutable);
             }
@@ -152,7 +138,7 @@ pub fn declareGlobalPattern(
             if (ast.isDiscardName(name)) return;
             try self.declared_globals.put(name, {});
         },
-        .tuple_pattern, .table_pattern => |items| {
+        .table_pattern => |items| {
             for (items) |item| {
                 try declareGlobalPattern(self, item);
             }
@@ -179,32 +165,6 @@ pub fn bindPattern(
                 try self.vm.internAtom(name),
             );
         },
-        .tuple_pattern => |items| {
-            const is_mutable = kind != .con;
-            for (items, 0..) |item, idx| {
-                switch (item.expr) {
-                    .ident => |name| {
-                        if (ast.isDiscardName(name)) continue;
-                        const mv_dst2 = try state.pushRegister(self);
-                        try self.spans.append(self.alloc, self.active_span);
-                        _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst2, 0);
-                        try self.emit(.tuple_get_const, idx);
-                        try self.emit(
-                            if (is_mutable) .store_global else .store_global_const,
-                            try self.vm.internAtom(name),
-                        );
-                    },
-                    .tuple_pattern, .table_pattern => {
-                        const mv_dst2 = try state.pushRegister(self);
-                        try self.spans.append(self.alloc, self.active_span);
-                        _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst2, 0);
-                        try self.emit(.tuple_get_const, idx);
-                        try bindPattern(self, item, self.active_registers - 1, kind);
-                    },
-                    else => {},
-                }
-            }
-        },
         .table_pattern => |items| {
             const is_mutable = kind != .con;
             for (items, 0..) |item, idx| {
@@ -223,7 +183,7 @@ pub fn bindPattern(
                             try self.vm.internAtom(name),
                         );
                     },
-                    .tuple_pattern, .table_pattern => {
+                    .table_pattern => {
                         const mv_dst2 = try state.pushRegister(self);
                         try self.spans.append(self.alloc, self.active_span);
                         _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst2, 0);
@@ -248,9 +208,6 @@ pub fn compileAssign(
     value: *const Node,
 ) !void {
     switch (target.expr) {
-        .tuple_pattern => |items| {
-            try validateTuplePatternShape(self, items, value, "assignment");
-        },
         .table_pattern => |items| {
             try validateTablePatternShape(self, items, value, "assignment");
         },
@@ -261,23 +218,6 @@ pub fn compileAssign(
     return bindPattern(self, target, src_idx, .let);
 }
 
-pub fn validateTuplePatternShape(
-    self: *Compiler,
-    pattern: []*Node,
-    value: *const Node,
-    context: []const u8,
-) !void {
-    if (value.expr != .tuple) return;
-    // allow extra but not fewer
-    if (value.expr.tuple.len >= pattern.len) return;
-    const msg = try std.fmt.allocPrint(
-        self.alloc,
-        "tuple {s} expects at least {d} items, got {d}",
-        .{ context, pattern.len, value.expr.tuple.len },
-    );
-    return self.fail(.ParseError, value, msg);
-}
-
 pub fn validateTablePatternShape(
     self: *Compiler,
     pattern: []*Node,
@@ -285,17 +225,19 @@ pub fn validateTablePatternShape(
     context: []const u8,
 ) !void {
     if (value.expr != .table) return;
-    // only array part counts, hash entries dont matter
+    // only array part counts
+    // , hash entries dont matter
     var got: usize = 0;
     for (value.expr.table) |entry| {
         if (entry.key == null and !entry.computed) got += 1;
     }
 
-    // allow extra but not fewer
-    if (got >= pattern.len) return;
+    // exact arity on the array part
+    // ; hash entries dont matter
+    if (got == pattern.len) return;
     const msg = try std.fmt.allocPrint(
         self.alloc,
-        "table {s} expects at least {d} items, got {d}",
+        "table {s} expects {d} items, got {d}",
         .{ context, pattern.len, got },
     );
     return self.fail(.ParseError, value, msg);
@@ -358,7 +300,6 @@ fn storeIdentTop(self: *Compiler, name: []const u8, target: *const Node, hint_no
             return self.fail(.CompileError, target, "reassignment to constant!");
 
         try self.emit(.store_local, slot);
-        state.markLocalValueKind(self, slot, .unknown);
         const inferred_type = type_check.inferExprType(self, hint_node);
 
         try state.setLocalTypeHint(self, name, inferred_type);

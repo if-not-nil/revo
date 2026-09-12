@@ -1,8 +1,8 @@
-# built-in for tables, tuples, strings
+# built-in for tables, strings
 for v in {10, 20, 30} do print(v) end
 # 10 20 30
 
-for v in (1, 2, 3) do print(v) end
+for v in {1, 2, 3} do print(v) end
 # 1 2 3
 
 for c in "hi" do print(c) end

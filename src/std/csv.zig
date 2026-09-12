@@ -44,32 +44,29 @@ pub const Impl = struct {
         var fixed_reader = std.Io.Reader.fixed(str);
         var reader = Reader.init(&fixed_reader, dialect);
 
-        const table_id = try vm.tables.create();
-
         var record = Record.init(vm.runtime.alloc);
         defer record.deinit();
 
+        var rows = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, 8);
+        defer rows.deinit(vm.runtime.alloc);
+
         while (try reader.next(&record)) {
-            const data = try recordToData(record, vm);
-            const table = try vm.tables.get(table_id);
-            try table.push(data);
+            try rows.append(vm.runtime.alloc, try recordToData(record, vm));
         }
 
-        return .data(Data.new.table(table_id));
+        return .data(try vm.tableOfSlice(rows.items));
     }
 };
 
 pub const impls = root.impls(Impl).val;
 
 fn recordToData(record: Record, vm: *VM) anyerror!Data {
-    const table_id = try vm.tables.create();
-    const table = try vm.tables.get(table_id);
+    var fields = try std.ArrayList(Data).initCapacity(vm.runtime.alloc, record.len());
+    defer fields.deinit(vm.runtime.alloc);
     for (0..record.len()) |i| {
-        const field = record.get(i);
-        const data = try fieldToData(field, vm);
-        try table.array.append(vm.runtime.alloc, data);
+        try fields.append(vm.runtime.alloc, try fieldToData(record.get(i), vm));
     }
-    return Data.new.table(table_id);
+    return vm.tableOfSlice(fields.items);
 }
 
 fn fieldToData(field: []const u8, vm: *VM) !Data {
@@ -106,14 +103,6 @@ fn writeCsvValue(data: Data, vm: *VM, writer: *Writer, nested: bool) anyerror!vo
             }
             if (nested) try writer.terminateRecord();
         },
-        .tuple => {
-            const tuple_id = data.asTuple().?;
-            const tuple = try vm.tuples.get(tuple_id);
-            for (tuple.items) |item| {
-                try writeCsvValue(item, vm, writer, true);
-            }
-            if (nested) try writer.terminateRecord();
-        },
         .function => return error.UnsupportedCsvValue,
         .foreign => return error.UnsupportedCsvValue,
     }
@@ -132,14 +121,14 @@ fn writeNum(data: Data, vm: *VM, writer: *Writer) anyerror!void {
 
 test "csv encode" {
     try testing.topString(
-        \\ csv.encode(({"a", :b, 3}, {1.2, 0.3, "1.2"}, {1,2,3}), {}):unwrap()
+        \\ csv.encode({{"a", :b, 3}, {1.2, 0.3, "1.2"}, {1,2,3}}, {}):unwrap()
     , "a,b,3\r\n1.2,0.3,1.2\r\n1,2,3\r\n");
 }
 
 fn buildOpts(raw_opts: Ts.table, vm: *VM) !HostErrOr(Dialect) {
     var dialect = Dialect{};
-    const opts = try vm.tables.get(@intFromEnum(raw_opts));
-    if (opts.getRawAtom(try vm.internAtom("delimiter"), vm)) |id| {
+    const opts = Data.new.table(@intFromEnum(raw_opts));
+    if (vm.getField(opts, "delimiter")) |id| {
         if (id.asStr()) |delim_id| {
             const delim = vm.stringValue(delim_id);
             if (delim.len == 1) {
@@ -149,7 +138,7 @@ fn buildOpts(raw_opts: Ts.table, vm: *VM) !HostErrOr(Dialect) {
             }
         }
     }
-    if (opts.getRawAtom(try vm.internAtom("terminator"), vm)) |id| {
+    if (vm.getField(opts, "terminator")) |id| {
         if (id.asStr()) |terminator_id| {
             const terminator = vm.stringValue(terminator_id);
             if (terminator.len == 1) {
@@ -159,7 +148,7 @@ fn buildOpts(raw_opts: Ts.table, vm: *VM) !HostErrOr(Dialect) {
             }
         }
     }
-    if (opts.getRawAtom(try vm.internAtom("quote"), vm)) |id| {
+    if (vm.getField(opts, "quote")) |id| {
         if (id.asStr()) |quote_id| {
             const quote = vm.stringValue(quote_id);
             if (quote.len == 1) {
@@ -173,7 +162,7 @@ fn buildOpts(raw_opts: Ts.table, vm: *VM) !HostErrOr(Dialect) {
             }
         }
     }
-    if (opts.getRawAtom(try vm.internAtom("bom"), vm)) |id| {
+    if (vm.getField(opts, "bom")) |id| {
         if (id.asAtom()) |bom_id| {
             if (bom_id == @intFromEnum(revo.core_atoms.true)) {
                 dialect.bom = true;

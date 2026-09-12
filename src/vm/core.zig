@@ -33,7 +33,6 @@ pub const core_atoms = enum(usize) {
     items,
     len,
     type,
-    tuple,
     to_iter,
     chan,
     eof,

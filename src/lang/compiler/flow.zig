@@ -323,7 +323,7 @@ pub fn emitLoopRecurse(
     param_count: usize,
     loop_sym: revo.AtomID,
 ) !void {
-    // `loop foo` tail-recurses, load args from result tuple, call, ret -- avoids stack growth
+    // `loop foo` tail-recurses, load args from result table, call, ret -- avoids stack growth
     const result_slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
     self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
     if (self.max_registers < result_slot + 1) self.max_registers = result_slot + 1;
@@ -338,9 +338,10 @@ pub fn emitLoopRecurse(
     if (param_count == 1) {
         try self.emit(.load_local, result_slot);
     } else if (param_count > 1) {
-        for (0..param_count) |idx| { // unpack result tuple into args
+        for (0..param_count) |idx| { // unpack result table into args
             try self.emit(.load_local, result_slot);
-            try self.emit(.tuple_get_const, idx);
+            try self.emit(.load_small_int, idx);
+            try self.emit(.table_get, 0);
         }
     }
     try self.emit(.call, @intCast(param_count));
@@ -486,17 +487,14 @@ pub fn bindMatchPattern(
             try self.emit(.bind_local, slot);
             state.reserveLocalSlots(self);
         },
-        .tuple_pattern, .table_pattern => |items| {
-            const from_table = matcher.expr == .table_pattern;
+        .table_pattern => |items| {
             for (items, 0..) |item, idx| {
                 switch (item.expr) {
                     .ident => |name| {
                         if (ast.isDiscardName(name)) continue;
                         try emitStorageLoad(self, subject);
-                        if (from_table) {
-                            try self.emit(.load_small_int, idx);
-                            try self.emit(.table_get, 0);
-                        } else try self.emit(.tuple_get_const, idx);
+                        try self.emit(.load_small_int, idx);
+                        try self.emit(.table_get, 0);
 
                         const slot = try state.declareLocal(self, name, true);
                         state.markLocalInitialized(self, slot);
@@ -504,12 +502,10 @@ pub fn bindMatchPattern(
 
                         state.reserveLocalSlots(self);
                     },
-                    .tuple_pattern, .table_pattern, .ascribed => {
+                    .table_pattern, .ascribed => {
                         try emitStorageLoad(self, subject);
-                        if (from_table) {
-                            try self.emit(.load_small_int, idx);
-                            try self.emit(.table_get, 0);
-                        } else try self.emit(.tuple_get_const, idx);
+                        try self.emit(.load_small_int, idx);
+                        try self.emit(.table_get, 0);
 
                         // temp for nested pattern
                         const nested_slot = try state.declareLocal(self, "__bind_tmp", false);
@@ -550,43 +546,6 @@ pub fn compilePatternChecks(
             const inner_fails = try compilePatternChecks(self, subject, a.expr);
             defer self.alloc.free(inner_fails);
             try fail_jumps.appendSlice(self.alloc, inner_fails);
-        },
-        .tuple_pattern => |items| {
-            // type check, then length, then each element
-            try self.emit(.load_global, revo.core_atoms.type.atomId());
-            try emitStorageLoad(self, subject);
-            try self.emit(.call, 1);
-            try self.@"const"(Data.new.atom(revo.core_atoms.tuple.atomId()));
-            try self.emit(.eq, 0);
-            try fail_jumps.append(self.alloc, try self.jump(.jump_if_false));
-
-            try self.emit(.load_global, revo.core_atoms.len.atomId());
-            try emitStorageLoad(self, subject);
-            try self.emit(.call, 1);
-            try self.@"const"(Data.new.num(items.len));
-            try self.emit(.eq, 0);
-            try fail_jumps.append(self.alloc, try self.jump(.jump_if_false));
-
-            for (items, 0..) |item, idx| {
-                switch (item.expr) {
-                    .ident => |name| if (ast.isDiscardName(name)) continue,
-                    else => {},
-                }
-                const depth_before = self.active_registers;
-                const slot_before = self.slot_allocators.items[self.slot_allocators.items.len - 1];
-                try emitStorageLoad(self, subject);
-                try self.emit(.tuple_get_const, idx);
-                // avoids re-indexing in nested checks
-                const nested_slot = try state.declareLocal(self, "__match_tmp", false);
-                state.markLocalInitialized(self, nested_slot);
-                try self.emit(.bind_local, nested_slot);
-                state.reserveLocalSlots(self);
-                const nested_fails = try compilePatternChecks(self, .{ .local = nested_slot }, item);
-                for (nested_fails) |jump_idx| try fail_jumps.append(self.alloc, jump_idx);
-                self.alloc.free(nested_fails);
-                self.active_registers = depth_before;
-                self.slot_allocators.items[self.slot_allocators.items.len - 1] = slot_before;
-            }
         },
         .table_pattern => |items| {
             // type check
@@ -705,9 +664,6 @@ fn compileTypeSatisfies(
                 try fail_jumps.append(self.alloc, try self.jump(.jump_if_false));
             }
         },
-        // tuples are gone
-        //   ; nothing satisfies a tuple ascription
-        .tuple => try fail_jumps.append(self.alloc, try self.jump(.jump)),
         .table => |tbl| {
             try fail_jumps.append(self.alloc, try jumpIfNotType(self, subject, "table"));
 
@@ -796,7 +752,7 @@ fn compileTypeSatisfies(
                         try variant_fails.appendSlice(self.alloc, inner);
                         self.alloc.free(inner);
                     } else {
-                        // empty and multi-type tuple shapes gont satisfy
+                        // empty and multi-type shapes gont satisfy
                         try variant_fails.append(self.alloc, try self.jump(.jump));
                     }
 
@@ -1021,15 +977,6 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
         .number => .{ .tag = .number },
         .string, .multiline_string => .{ .tag = .string },
         .hash => |name| .{ .tag = .{ .atom = name } },
-        .tuple_pattern => |items| blk: {
-            var types = std.ArrayList(types_mod.TypeInfo).initCapacity(self.alloc, items.len) catch break :blk null;
-            defer types.deinit(self.alloc);
-            for (items) |item| {
-                types.append(self.alloc, patternTypeInfo(self, item) orelse types_mod.TypeInfo{ .tag = .any }) catch break :blk null;
-            }
-            const tuple_items = types.toOwnedSlice(self.alloc) catch break :blk null;
-            break :blk .{ .tag = .{ .tuple = tuple_items } };
-        },
         .table_pattern => |items| blk: {
             var fields = std.ArrayList(types_mod.RecordField).initCapacity(self.alloc, items.len) catch break :blk null;
             defer fields.deinit(self.alloc);
@@ -1063,9 +1010,8 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
 }
 
 /// narrow pattern variables by subject's union type:
-///     `| (:ok, v) =>`
-/// and `| {:ok, v} =>`
-///     narrow `v` to the payload
+///     `| {:ok, v} =>`
+///     narrows `v` to the payload
 ///     type of the `:ok` variant
 fn narrowMatchPattern(
     self: *Compiler,
@@ -1088,7 +1034,7 @@ fn narrowMatchPattern(
     }
 
     const items = switch (pattern.expr) {
-        .tuple_pattern, .table_pattern => |items| items,
+        .table_pattern => |items| items,
         else => return,
     };
 

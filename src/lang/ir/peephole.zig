@@ -53,7 +53,7 @@ pub fn peepholeIr(self: *Compiler) !void {
         if (inst.op_arg < n) is_target[inst.op_arg] = true;
     };
 
-    // register reads can span contiguous ranges (call args, tuple_new,
+    // register reads can span contiguous ranges (call args,
     // slice), so reuse dce's model with a buffer sized to the register file
     const read_buf = try self.alloc.alloc(Register, ir.maxRegister(insts) + 1);
     defer self.alloc.free(read_buf);
@@ -74,7 +74,7 @@ pub fn peepholeIr(self: *Compiler) !void {
             .jump => {
                 if (inst.op_arg == i + 1) live[i] = false;
             },
-            .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => {
+            .jump_if_false, .jump_if_true, .jump_err => {
                 if (inst.op_arg == i + 1) {
                     live[i] = false;
                 } else if (inst.opcode == .jump_if_false or inst.opcode == .jump_if_true) {
@@ -103,7 +103,7 @@ fn threadJumps(insts: []*ir.IrInst, inst: *ir.IrInst) void {
 /// read register cannot shift a register block that later instructions rely on
 fn isPureReader(op: Opcode) bool {
     return switch (op) {
-        .store_local, .bind_local, .store_global, .store_global_const, .store_upval, .ret, .halt, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => true,
+        .store_local, .bind_local, .store_global, .store_global_const, .store_upval, .ret, .halt, .jump_if_false, .jump_if_true, .jump_err => true,
         else => false,
     };
 }
@@ -191,7 +191,7 @@ fn propagateMove(i: usize, insts: []*ir.IrInst, live: []bool, is_target: []const
     for (i + 1..user_idx) |k| {
         if (is_target[k]) return false;
         switch (insts[k].opcode) {
-            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => return false,
+            .jump, .jump_if_false, .jump_if_true, .jump_err => return false,
             else => {},
         }
         var wbuf: [3]Register = undefined;
@@ -409,7 +409,7 @@ fn shiftSetterCopy(i: usize, insts: []*ir.IrInst, live: []bool, is_target: []con
         if (!live[k]) continue;
         if (is_target[k]) return false;
         switch (insts[k].opcode) {
-            .jump, .jump_if_false, .jump_if_true, .jump_if_not_nil_and_not_err, .jump_if_err => return false,
+            .jump, .jump_if_false, .jump_if_true, .jump_err => return false,
             else => {},
         }
         if (writesReg(insts[k], src_reg)) return false;

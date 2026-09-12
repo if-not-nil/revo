@@ -17,7 +17,7 @@ top-level
   fn zadd(a: number, b: number) -> number
     add a + b
 
-  fn zconcat(parts: tuple, sep: string) -> string
+  fn zconcat(parts: table, sep: string) -> string
     get a string of parts separated by separator
 
   fn zecho(s: string) -> string
@@ -79,7 +79,7 @@ return HostResult.errType(arg_index, "expected_type", "got_type");
 return HostResult.other("something went wrong");
 ```
 
-**error tuples**
+**error tables**
 
 ### accessing the vm
 

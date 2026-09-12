@@ -268,12 +268,6 @@ pub const AstSubstituter = struct {
                 n.synthetic_block = node.synthetic_block;
                 break :blk n;
             },
-            .tuple => |items| blk: {
-                var out = try std.ArrayList(*Node).initCapacity(self.allocator, items.len);
-                defer out.deinit(self.allocator);
-                for (items) |item| try out.append(self.allocator, try self.substitute(item));
-                break :blk try self.alloc(node.span, .{ .tuple = try out.toOwnedSlice(self.allocator) });
-            },
             .table => |entries| blk: {
                 var out = try std.ArrayList(ast.TableEntry).initCapacity(self.allocator, entries.len);
                 defer out.deinit(self.allocator);
@@ -350,7 +344,7 @@ pub const AstSubstituter = struct {
                 .value = try self.substitute(b.value),
                 .mutable = b.mutable,
             } }),
-            .number, .string, .multiline_string, .hash, .nil, .range_literal, .slice_literal, .tuple_pattern, .table_pattern, .ascribed, .macro_expr, .quasiquote, .decl, .comp_block, .test_block, .test_suite, .proc_macro, .try_expr, .orelse_expr, .type_alias, .import_stmt => node,
+            .number, .string, .multiline_string, .hash, .nil, .range_literal, .slice_literal, .table_pattern, .ascribed, .macro_expr, .quasiquote, .decl, .comp_block, .test_block, .test_suite, .proc_macro, .try_expr, .orelse_expr, .type_alias, .import_stmt => node,
         };
     }
 
@@ -882,12 +876,12 @@ pub const testing = struct {
         defer arena.deinit();
 
         const expanded = try expandExpr(arena.allocator(), try pipeline.parseSource(arena.allocator(),
-            \\ macro ok! `(%what:expr)` `(:ok, %what)`
-            \\ macro err! `(%what:expr)` `(:err, %what)`
+            \\ macro ok! `(%what:expr)` `{:ok, %what}`
+            \\ macro err! `(%what:expr)` `{:err, %what}`
             \\ ok!(42)
             \\ err!("fail")
         ));
-        try doesMatch(expanded, "(block nil nil (tuple :ok 42) (tuple :err \"fail\"))");
+        try doesMatch(expanded, "(block nil nil (table :ok 42) (table :err \"fail\"))");
     }
 
     test "expands all_true macro" {

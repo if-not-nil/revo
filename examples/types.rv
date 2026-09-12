@@ -40,30 +40,30 @@ let nums: table<int> = { 1, 2, 3 }
 let pairs: table<string, int> = { a = 1, b = 2 }
 
 if :true 1 else "asdf"
-type A = (:ok, any) | (:err, atom)
+type A = {:ok, any} | {:err, atom}
 
 fn pick(how: A) -> any do
   print(how)
   match how
-  | (:ok, v) => print("ok: ", v)
-  | (:err, e) => print("err: ", e)
+  | {:ok, v} => print("ok: ", v)
+  | {:err, e} => print("err: ", e)
 end
 
 fn is_len(what) do
-  const length, str = what
+  const {length, str} = what
   len(str) == length
 end
 
-let pred1: A = (:err, :UhOh)
+let pred1: A = {:err, :UhOh}
 pick(pred1)
 
-let pred2: A = (:ok, "asdf")
+let pred2: A = {:ok, "asdf"}
 pick(pred2)
 
 # should infer
-pick((:err, :Boom))
+pick({:err, :Boom})
 
-# let pred3: A = (:eee, "asdf") # must crash
+# let pred3: A = {:eee, "asdf"} # must crash
 # pick(pred3)
 
 # error: return type mismatch: wanted :true, got false
@@ -133,15 +133,15 @@ let rep = repeat(1, 2)
 # repeat(1, "asdf")   # argument 2 to `repeat` expects same type as argument 1
 
 
-# multiple type params with tuple return
-fn swap[T, U](a: T, b: U) -> (U, T)
-  return (b, a)
+# multiple type params with table return
+fn swap[T, U](a: T, b: U) -> {U, T}
+  return {b, a}
 
 let swapped = swap(1, "two")
 
 # compound return type with type param
-fn wrap[T](x: T) -> (:ok, T)
-  return (:ok, x)
+fn wrap[T](x: T) -> {:ok, T}
+  return {:ok, x}
 let wrapped = wrap(42)
 
 # non-inferrable: return-only type param needs explicit annotation

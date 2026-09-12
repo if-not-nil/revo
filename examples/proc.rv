@@ -4,7 +4,7 @@
   
   they execute any program at compile-time
     they get an iterator of ast nodes inside parens
-    ...then return the resulting ast as a tuple of nodes
+    ...then return the resulting ast as a table of nodes
   
   macro documentation does not have to document the exact logic,
     only what the reasonably expected behavior is
@@ -30,24 +30,24 @@ proc print!(iter) do
 	let fmt = iter:next_of(:string)
 	let args = {}
 	let i = 0
-	args[i] = (:string, fmt)
+	args[i] = {:string, fmt}
 	i += 1
 	while iter:peek() != :nil do
 		args[i] = iter:next()
 		i += 1
 	end
 
-	{(
+	{{
 		:call,
-		(:ident, "print"),
-		{(
+		{:ident, "print"},
+		{{
 			:call,
-			(:ident, "fmt"),
+			{:ident, "fmt"},
 			args,
 			:false,
-		)},
+		}},
 		:false,
-	)}
+	}}
 end
 
 print!("print works!! %v %v", "asdfasdf", "aaaaaa")
@@ -81,14 +81,14 @@ proc mul!(iter) do
 	let a = iter:next()
 	let b = iter:next()
 	
-	{(:binary, :mul, a, b)}
+    {{:binary, :mul, a, b}}
 end
 
 print("mul 1 2: ", mul!(1, 2))
 
 proc madd!(iter) do
 	print("inner: ", mul!(1, 2))
-	{(:hash, "ok")}
+  {{:hash, "ok"}}
 end
 
 print("m add: ", madd!())
@@ -111,7 +111,7 @@ proc add3!(iter) do
   let a = iter:next()
   let b = iter:next()
   let c = iter:next()
-  {(:binary, :add, (:binary, :add, a, b), c)}
+  {{:binary, :add, {:binary, :add, a, b}, c}}
 end
 
 print(add3!(10, 20, 12))
@@ -121,9 +121,9 @@ proc cmul!(iter) do
 	print("inner: ", add3!(10,20,12))
 	print("peek: ", iter:peek())
 	match iter:peek()
-		| (:number, n) => print("is number", n)
-		| (other, n) => print(other, n)
-		| x => print("not tuple: ", x)
+		| {:number, n} => print("is number", n)
+		| {other, n} => print(other, n)
+		| x => print("not table: ", x)
 	let a = 10 + (iter:next_of(:number))
   let b = iter:next_of(:number)
   let c = iter:next_of(:number)
@@ -132,7 +132,7 @@ proc cmul!(iter) do
 		acc += a * b + c
 	end
 
-  {(:number, acc)}
+  {{:number, acc}}
 end
 
 print(cmul!(10,20,30))
@@ -143,7 +143,7 @@ proc fold_add!(iter) do
 
   while iter:peek() != :nil do
     let nxt = iter:next()
-    acc = (:binary, :add, acc, nxt)
+    acc = {:binary, :add, acc, nxt}
   end
 
   {acc}
@@ -156,7 +156,7 @@ proc choose!(iter) do
   let cond = iter:next()
   let yes = iter:next()
   let no = iter:next()
-  {(:if_expr, cond, yes, no)}
+  {{:if_expr, cond, yes, no}}
 end
 
 print(choose!(2 == 3, 1, 0))

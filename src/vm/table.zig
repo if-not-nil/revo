@@ -1,5 +1,5 @@
 // a table is a value that maps keys to values. keys can be numbers, atoms,
-// strings, tables, tuples, or functions. values can be anything
+// strings, tables, or functions. values can be anything
 //
 // integer keys (non-negative, finite, whole numbers) have special behavior:
 // sequential keys 0, 1, 2, ... fill contiguous slots. a gap -- like setting
@@ -13,8 +13,8 @@
 // assignment to an existing key overwrites the old value, whether it's an
 // integer slot or a keyed entry
 //
-// equality is by identity: `{a = 1} == {a = 1}` is false -- two literals
-// are different tables
+// equality is by value: `{a = 1} == {a = 1}` is true -- array part
+// in order, then keyed entries
 
 const std = @import("std");
 
@@ -197,12 +197,12 @@ pub const Table = struct {
         const Bucket = struct {
             status: enum(u8) { empty, occupied } = .empty,
             key: Data = Data.new.nil(),
-            val: Data = Data.new.nil(),
+            value: Data = Data.new.nil(),
             // cached key hash
             // ~ computed once at insertion
             // ~ grow() and remove()'s backward-shift repair both
             //   need each stored key's hash again later
-            //   reading it here avoids rehashing string/tuple
+            //   reading it here avoids rehashing string
             //   content they already hashed once
             hash: u64 = 0,
             next: u32 = NULL_ID,
@@ -232,12 +232,12 @@ pub const Table = struct {
 
         fn get(self: *const HashPart, key: Data, vm: *revo.VM) ?Data {
             const idx = self.lookup(key, vm) orelse return null;
-            return self.buckets[idx].val;
+            return self.buckets[idx].value;
         }
 
         fn getPtr(self: *HashPart, key: Data, vm: *revo.VM) ?*Data {
             const idx = self.lookup(key, vm) orelse return null;
-            return &self.buckets[idx].val;
+            return &self.buckets[idx].value;
         }
 
         fn getOrPut(self: *HashPart, alloc: std.mem.Allocator, key: Data, vm: *revo.VM) !*Data {
@@ -250,7 +250,7 @@ pub const Table = struct {
 
             while (self.buckets[idx].status == .occupied) {
                 if (fastEq(vm, self.buckets[idx].key, key))
-                    return &self.buckets[idx].val;
+                    return &self.buckets[idx].value;
                 idx = (idx + 1) & mask;
             }
 
@@ -267,7 +267,7 @@ pub const Table = struct {
             self.last = idx;
             self.count += 1;
 
-            return &self.buckets[idx].val;
+            return &self.buckets[idx].value;
         }
 
         fn grow(self: *HashPart, alloc: std.mem.Allocator, vm: *revo.VM) !void {
@@ -296,7 +296,7 @@ pub const Table = struct {
                 new_buckets[ni] = .{
                     .status = .occupied,
                     .key = old.key,
-                    .val = old.val,
+                    .value = old.value,
                     .hash = old.hash,
                     .next = NULL_ID,
                     .prev = new_last,
@@ -351,7 +351,7 @@ pub const Table = struct {
 
         pub fn removeAndReturn(self: *HashPart, key: Data, vm: *revo.VM) ?Data {
             const idx = self.remove(key, vm) orelse return null;
-            return self.buckets[idx].val;
+            return self.buckets[idx].value;
         }
 
         fn clone(self: *const HashPart, alloc: std.mem.Allocator) !HashPart {
@@ -364,11 +364,11 @@ pub const Table = struct {
             part: *const HashPart,
             cur: ?u32,
 
-            pub fn next(it: *OrderedIter) ?struct { key: Data, val: Data } {
+            pub fn next(it: *OrderedIter) ?KeyValue {
                 const idx = it.cur orelse return null;
                 const b = &it.part.buckets[idx];
                 it.cur = if (b.next != NULL_ID) @as(?u32, b.next) else null;
-                return .{ .key = b.key, .val = b.val };
+                return .{ .key = b.key, .value = b.value };
             }
         };
 
@@ -463,15 +463,40 @@ pub const Table = struct {
         value: Data,
     };
 
+    /// cursor over array items first, then keyed entries in insertion order
+    /// one obvious way to walk a whole table
+    pub const Cursor = struct {
+        array: []const Data,
+        idx: usize = 0,
+        hash: HashPart.OrderedIter,
+
+        pub fn nextValue(self: *Cursor) ?Data {
+            if (self.idx < self.array.len) {
+                defer self.idx += 1;
+                return self.array[self.idx];
+            }
+            return if (self.hash.next()) |entry| entry.value else null;
+        }
+
+        pub fn nextEntry(self: *Cursor) ?KeyValue {
+            if (self.idx < self.array.len) {
+                defer self.idx += 1;
+                return .{ .key = Data.new.num(self.idx), .value = self.array[self.idx] };
+            }
+            const entry = self.hash.next() orelse return null;
+            return .{ .key = entry.key, .value = entry.value };
+        }
+    };
+
+    pub fn cursor(self: *const Table) Cursor {
+        return .{ .array = self.array.items, .hash = self.hash.orderedIterator() };
+    }
+
     /// walk keyed (non-integer) entries in insertion order
     pub fn keyedEntries(self: *const Table, alloc: std.mem.Allocator) ![]KeyValue {
         var out = try std.ArrayList(KeyValue).initCapacity(alloc, self.hash.count);
-        var cur = self.hash.first;
-        while (cur != NULL_ID) {
-            const bucket = &self.hash.buckets[cur];
-            out.appendAssumeCapacity(.{ .key = bucket.key, .value = bucket.val });
-            cur = bucket.next;
-        }
+        var it = self.hash.orderedIterator();
+        while (it.next()) |entry| out.appendAssumeCapacity(entry);
         return out.toOwnedSlice(alloc);
     }
 
@@ -515,14 +540,10 @@ pub const Table = struct {
     }
 
     pub fn mark(self: *Table, vm: *revo.VM) void {
-        for (self.array.items) |entry|
-            vm.markData(entry);
-
-        var cur = self.hash.first;
-        while (cur != NULL_ID) {
-            vm.markData(self.hash.buckets[cur].key);
-            vm.markData(self.hash.buckets[cur].val);
-            cur = self.hash.buckets[cur].next;
+        var cur = self.cursor();
+        while (cur.nextEntry()) |entry| {
+            vm.markData(entry.key);
+            vm.markData(entry.value);
         }
     }
 
@@ -803,14 +824,6 @@ test "concatenated string keys match literal keys" {
         \\ t["user" ~ 42] = 1
         \\ t["user42"] + t["user" ~ 42]
     , 2);
-}
-
-test "tuple keys match by content" {
-    try testing.topNumber(
-        \\ const t = {}
-        \\ t[(1, 2)] = 5
-        \\ t[(1, 2)]
-    , 5);
 }
 
 test "metatable __tostring works on tables" {

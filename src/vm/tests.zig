@@ -301,48 +301,6 @@ test "vm gc keeps rooted closures and captured tables alive" {
     _ = try vm.tables.get(table_id);
 }
 
-test "vm gc reuses freed tuple ids" {
-    var vm = try VM.init(vt_runtime());
-    defer vm.deinit();
-
-    const first_id = try vm.tuples.create(&.{Data.new.num(1)});
-    triggerGc(&vm);
-
-    try testing.expectError(error.InvalidTuple, vm.tuples.get(first_id));
-
-    const reused_id = try vm.tuples.create(&.{Data.new.num(2)});
-    try testing.expectEqual(first_id, reused_id);
-}
-
-test "vm gc keeps rooted tuples and nested tuples alive" {
-    var vm = try VM.init(vt_runtime());
-    defer vm.deinit();
-
-    const child_id = try vm.tuples.create(&.{ Data.new.num(2), Data.new.num(3) });
-    const parent_id = try vm.tuples.create(&.{ Data.new.num(1), Data.new.tuple(child_id) });
-
-    try vm.push(Data.new.tuple(parent_id));
-    defer _ = vm.pop() catch {};
-
-    triggerGc(&vm);
-
-    const parent = try vm.tuples.get(parent_id);
-    const child = try vm.tuples.get(child_id);
-    try testing.expectEqual(@as(usize, 2), parent.items.len);
-    try testing.expectEqual(@as(usize, 2), child.items.len);
-    try testing.expectEqual(child_id, parent.items[1].asTuple().?);
-}
-
-test "vm gc collects unreachable tuples" {
-    var vm = try VM.init(vt_runtime());
-    defer vm.deinit();
-
-    const tuple_id = try vm.tuples.create(&.{Data.new.num(9)});
-    triggerGc(&vm);
-
-    try testing.expectError(error.InvalidTuple, vm.tuples.get(tuple_id));
-}
-
 test "vm gc reuses freed string storage" {
     var vm = try VM.init(vt_runtime());
     defer vm.deinit();
@@ -379,9 +337,6 @@ test "vm gc stress test allocates many objects" {
     var table_ids = try std.ArrayList(revo.memory.TableID).initCapacity(vt_runtime().alloc, 200);
     defer table_ids.deinit(vt_runtime().alloc);
 
-    var tuple_ids = try std.ArrayList(revo.memory.TupleID).initCapacity(vt_runtime().alloc, 200);
-    defer tuple_ids.deinit(vt_runtime().alloc);
-
     var string_ids = try std.ArrayList(revo.memory.StringID).initCapacity(vt_runtime().alloc, 200);
     defer string_ids.deinit(vt_runtime().alloc);
 
@@ -394,18 +349,14 @@ test "vm gc stress test allocates many objects" {
         const ttbl = try vm.tables.get(tid);
         try ttbl.putRaw(try vm.ownDataString("index"), Data.new.num(i), &vm);
 
-        const tpl_id = try vm.tuples.create(&.{ Data.new.num(i), Data.new.num(i * 2) });
-        try tuple_ids.append(vt_runtime().alloc, tpl_id);
-
         const sid = try vm.strings.own("stress-string");
         try string_ids.append(vt_runtime().alloc, sid);
     }
 
     try vm.push(try vm.ownDataString("root"));
     try vm.push(Data.new.table(table_ids.items[0]));
-    try vm.push(Data.new.tuple(tuple_ids.items[0]));
     try vm.push(try vm.ownDataString(vm.stringValue(string_ids.items[0])));
-    // SAFETY: test cleanup
+    // SAFETY: shut up zlint
     defer {
         _ = vm.pop() catch {};
         _ = vm.pop() catch {};
@@ -416,6 +367,5 @@ test "vm gc stress test allocates many objects" {
     triggerGc(&vm);
 
     _ = try vm.tables.get(table_ids.items[0]);
-    _ = try vm.tuples.get(tuple_ids.items[0]);
     try testing.expect(vm.strings.contains(string_ids.items[0]));
 }

@@ -80,10 +80,9 @@ int main(void) {
     return 1;
   }
 
-  // val is the table, table_id is value field
-  uint64_t tid = revo_string_id(val);
-  uint64_t x_atom = revo_intern_atom(vm, (uint64_t)(uintptr_t)"x", 1);
-  RevoData tval = revo_table_get(vm, tid, revo_atom_val(x_atom));
+  // val is the table, read its field by name
+  RevoData tval;
+  if (!revo_table_get_name(vm, val, (uint64_t)(uintptr_t)"x", 1, &tval)) return 1;
   printf("table.x = ");
   print_value(vm, tval);
 

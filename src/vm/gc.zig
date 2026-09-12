@@ -29,7 +29,6 @@ pub fn maybeCollectGarbage(self: *VM) void {
     const finalizer_pending = collectFinalizers(self);
 
     self.tables.sweep();
-    self.tuples.sweep();
     self.functions.sweep();
     self.strings.sweep();
 
@@ -47,7 +46,6 @@ pub fn maybeCollectGarbage(self: *VM) void {
 
     self.gc_pending = false;
     const live_bytes = self.tables.bytes() +
-        self.tuples.bytes() +
         self.functions.bytes() +
         self.strings.bytes();
 
@@ -59,6 +57,7 @@ fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
     var pending: ?std.ArrayList(revo.memory.TableID) = null;
     var to_remove: ?std.ArrayList(revo.memory.TableID) = null;
     var it = self.gc_finalizers.iterator();
+
     while (it.next()) |entry| {
         const id = entry.key_ptr.*;
         if (id >= self.tables.tables.items.len or self.tables.tables.items[id] == null) {
@@ -67,6 +66,7 @@ fn collectFinalizers(self: *VM) ?std.ArrayList(revo.memory.TableID) {
             to_remove.?.append(alloc, id) catch @panic("OOM in GC");
             continue;
         }
+
         if (self.tables.marks.isSet(id)) continue;
         if (pending == null) pending = std.ArrayList(revo.memory.TableID).initCapacity(alloc, 4) catch @panic(
             "OOM in GC",
@@ -90,24 +90,12 @@ pub fn processMarkStack(self: *VM) void {
                 if (id >= self.tables.tables.items.len) continue;
 
                 const table = self.tables.tables.items[id] orelse continue;
-                for (table.array.items) |entry| pushMark(self, entry);
-
-                var cur = table.hash.first;
-                while (cur != revo.table.NULL_ID) {
-                    pushMark(self, table.hash.buckets[cur].key);
-                    pushMark(self, table.hash.buckets[cur].val);
-                    cur = table.hash.buckets[cur].next;
+                var cur = table.cursor();
+                while (cur.nextEntry()) |entry| {
+                    pushMark(self, entry.key);
+                    pushMark(self, entry.value);
                 }
                 if (table.metatable) |mt|
-                    self.tables.mark(mt, self);
-            },
-            .tuple => |id| {
-                if (id >= self.tuples.tuples.items.len) continue;
-
-                const tuple = self.tuples.tuples.items[id] orelse continue;
-                for (tuple.items) |entry|
-                    pushMark(self, entry);
-                if (tuple.metatable) |mt|
                     self.tables.mark(mt, self);
             },
             .function => |id| {
@@ -189,7 +177,7 @@ pub inline fn markRoots(self: *VM) void {
 
 pub inline fn pushMark(self: *VM, data: revo.Data) void {
     switch (data.tag()) {
-        .string, .table, .tuple, .function => {
+        .string, .table, .function => {
             self.gc_mark_stack.append(self.runtime.alloc, .{ .data = data }) catch @panic("OOM in GC marking");
         },
         else => {},
@@ -198,10 +186,6 @@ pub inline fn pushMark(self: *VM, data: revo.Data) void {
 
 pub inline fn pushMarkTable(self: *VM, id: anytype) void {
     self.gc_mark_stack.append(self.runtime.alloc, .{ .table = id }) catch @panic("OOM in GC marking");
-}
-
-pub inline fn pushMarkTuple(self: *VM, id: anytype) void {
-    self.gc_mark_stack.append(self.runtime.alloc, .{ .tuple = id }) catch @panic("OOM in GC marking");
 }
 
 pub inline fn pushMarkFunction(self: *VM, id: anytype) void {
@@ -217,10 +201,6 @@ pub fn markData(self: *VM, data: revo.Data) void {
         .string => self.strings.mark(data.asString().?),
         .table => self.tables.mark(
             data.asTable().?,
-            self,
-        ),
-        .tuple => self.tuples.mark(
-            data.asTuple().?,
             self,
         ),
         .function => self.functions.mark(

@@ -107,7 +107,7 @@ const Parser = struct {
     /// ~ ident<T>:          "table<int>", "table<string, int>"
     /// ~ :atom (hash):      ":nil", ":ok", ":err"
     /// ~ fn(T) -> U:        "fn(int) -> bool"
-    /// ~ (T):               "(int | string)" (paren grouping), "(int, string)" (tuple)
+    /// ~ (T):               "(int | string)" (paren grouping)
     /// ~ {f: T, ...}:       "{ name: string, age: num }" (structural table)
     /// ~ {T, f: U, ...}:    "{ number, number, name: string }" (positional array entries)
     /// ~ !T / ?T:           "!int", "?int" (error union - prefix bang or kw_not)
@@ -160,21 +160,9 @@ const Parser = struct {
                 });
             },
             .lparen => {
-                const start = self.advance();
+                _ = self.advance();
                 const inner = try self.parseExpr();
-                if (self.match(.comma)) {
-                    var items = try std.ArrayList(*ast.TypeExpr).initCapacity(self.alloc, 4);
-                    errdefer items.deinit(self.alloc);
-                    try items.append(self.alloc, inner);
-                    while (!self.check(.rparen)) {
-                        try items.append(self.alloc, try self.parseExpr());
-                        if (!self.match(.comma)) break;
-                    }
-                    _ = try self.expect(.rparen);
-                    return try ast.allocTypeExpr(self.alloc, self.span(start), .{
-                        .tuple = try items.toOwnedSlice(self.alloc),
-                    });
-                }
+                if (self.match(.comma)) return error.UnexpectedToken;
                 _ = try self.expect(.rparen);
                 return inner;
             },
@@ -274,13 +262,6 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
         },
         // ":nil", ":ok" -> atom
         .atom => |name| return .{ .tag = .{ .atom = name } },
-        // "(int, string)" -> tuple(@[int, string])
-        .tuple => |items| {
-            var resolved = try std.ArrayList(TypeInfo).initCapacity(ctx.alloc, items.len);
-            errdefer resolved.deinit(ctx.alloc);
-            for (items) |item| try resolved.append(ctx.alloc, try evalTypeExpr(ctx, item));
-            return .{ .tag = .{ .tuple = try resolved.toOwnedSlice(ctx.alloc) } };
-        },
         // "int | :nil" -> union(@[{name="", types=@[int]}, {name="", types=@[:nil]}])
         // "number?" -> union_of(named("number"), atom(":nil")) from parseAtom
         .union_of => |variants| {
@@ -353,17 +334,15 @@ pub fn evalTypeExpr(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
             value.* = .{ .tag = .any };
             return types.makeTable(null, value, owned);
         },
-        // "!int" -> union(@[{name="", types=@[:ok, int]}, {name="", types=@[:err, any]}])
-        // the same shape the literal `(:ok, int) | (:err, any)` produces
+        // "!int" -> union(@[{name="", types=@[{:ok, int}]}, {name="", types=@[{:err, any}]}])
+        // the same shape the literal `{:ok, int} | {:err, any}` produces
         .error_union => |inner| {
             const t = try evalTypeExpr(ctx, inner);
-            const ok_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .tag = .{ .atom = ":ok" } }, t });
-            const err_types = try ctx.alloc.dupe(TypeInfo, &.{ .{ .tag = .{ .atom = ":err" } }, .{ .tag = .any } });
-            const variants = try ctx.alloc.dupe(UnionVariant, &.{
-                .{ .name = "", .types = ok_types },
-                .{ .name = "", .types = err_types },
-            });
-            return .{ .tag = .{ .@"union" = variants } };
+            var collected = try std.ArrayList(UnionVariant).initCapacity(ctx.alloc, 2);
+            errdefer collected.deinit(ctx.alloc);
+            try types.collectVariants(ctx.alloc, try makeResultTable(ctx, ":ok", t), &collected);
+            try types.collectVariants(ctx.alloc, try makeResultTable(ctx, ":err", .{ .tag = .any }), &collected);
+            return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(ctx.alloc) } };
         },
     }
 }
@@ -384,7 +363,7 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
             .function => try writer.writeAll("function"),
             // all these are spelled out so a future payload-carrying tag breaks
             // compilation here instead of just printing its tag name
-            .bool, .number, .string, .any, .never, .tuple, .@"union" => try writer.writeAll(@tagName(ti.tag)),
+            .bool, .number, .string, .any, .never, .@"union" => try writer.writeAll(@tagName(ti.tag)),
         }
         return;
     }
@@ -392,45 +371,18 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
         .type_var => |n| try writer.writeAll(n),
         // empty atom payload is the "any atom" sentinel
         .atom => |s| if (s.len == 0) try writer.writeAll("atom") else try writer.print(":{s}", .{ast.atomName(s)}),
-        // empty tuple is the "any tuple" sentinel
-        .tuple => |items| if (items.len == 0) try writer.writeAll("tuple") else {
-            try writer.writeByte('(');
-            for (items, 0..) |item, i| {
-                if (i > 0) try writer.writeAll(", ");
-                try printType(item, writer, opts);
-            }
-            try writer.writeByte(')');
-        },
         .@"union" => |variants| {
             // `T?`, for a 2-union ending in `:nil`
             if (variants.len == 2 and variants[1].types.len == 1 and variants[1].types[0].tag == .atom and
                 std.mem.eql(u8, ast.atomName(variants[1].types[0].tag.atom), "nil"))
             {
                 const first = variants[0].types;
-                if (first.len == 1) {
-                    try printType(first[0], writer, opts);
-                } else {
-                    try writer.writeByte('(');
-                    for (first, 0..) |item, i| {
-                        if (i > 0) try writer.writeAll(", ");
-                        try printType(item, writer, opts);
-                    }
-                    try writer.writeByte(')');
-                }
+                try printType(first[0], writer, opts);
 
                 try writer.writeByte('?');
             } else for (variants, 0..) |v, i| {
                 if (i > 0) try writer.writeAll(" | ");
-                if (v.types.len == 1) {
-                    try printType(v.types[0], writer, opts);
-                } else {
-                    try writer.writeByte('(');
-                    for (v.types, 0..) |item, j| {
-                        if (j > 0) try writer.writeAll(", ");
-                        try printType(item, writer, opts);
-                    }
-                    try writer.writeByte(')');
-                }
+                try printType(v.types[0], writer, opts);
             }
         },
         .table => |tbl| {
@@ -516,14 +468,6 @@ pub fn printTypeExpr(te: *const ast.TypeExpr, writer: *std.Io.Writer) !void {
         // atom payloads come both bare (`nil` from the main parser)
         // and colon-prefixed (`:nil` from the type parser)
         .atom => |name| try writer.print(":{s}", .{ast.atomName(name)}),
-        .tuple => |items| {
-            try writer.writeByte('(');
-            for (items, 0..) |item, i| {
-                if (i > 0) try writer.writeAll(", ");
-                try printTypeExpr(item, writer);
-            }
-            try writer.writeByte(')');
-        },
         .union_of => |variants| {
             // `T?` sugar, for a 2-union ending in `:nil`
             if (variants.len == 2 and variants[1].kind == .atom and
@@ -612,6 +556,17 @@ pub fn formatTypeOpts(alloc: std.mem.Allocator, ti: TypeInfo, opts: PrintOptions
     return try buf.toOwnedSlice();
 }
 
+/// one `{:tag, payload}` table, the same shape `{...}` literals infer:
+/// positional fields, tag atom in "0", payload in "1"
+fn makeResultTable(ctx: anytype, tag: []const u8, payload: TypeInfo) !TypeInfo {
+    const fields = try ctx.alloc.alloc(types.RecordField, 2);
+    fields[0] = .{ .name = "0", .field_type = .{ .tag = .{ .atom = tag } } };
+    fields[1] = .{ .name = "1", .field_type = payload };
+    const value = try ctx.alloc.create(TypeInfo);
+    value.* = .{ .tag = .any };
+    return types.makeTable(null, value, fields);
+}
+
 /// deep-copy a TypeExpr
 /// dupe every borrowed string (names borrow source text)
 ///     paired with freeTypeExpr
@@ -620,11 +575,6 @@ pub fn cloneTypeExpr(alloc: std.mem.Allocator, te: *const ast.TypeExpr) std.mem.
     const kind: ast.TypeExpr.Kind = switch (te.kind) {
         .named => |n| .{ .named = try alloc.dupe(u8, n) },
         .atom => |n| .{ .atom = try alloc.dupe(u8, n) },
-        .tuple => |items| blk: {
-            const owned = try alloc.alloc(*ast.TypeExpr, items.len);
-            for (items, owned) |item, *dst| dst.* = try cloneTypeExpr(alloc, item);
-            break :blk .{ .tuple = owned };
-        },
         .union_of => |variants| blk: {
             const owned = try alloc.alloc(*ast.TypeExpr, variants.len);
             for (variants, owned) |v, *dst| dst.* = try cloneTypeExpr(alloc, v);
@@ -675,10 +625,6 @@ pub fn freeTypeExpr(alloc: std.mem.Allocator, te: *ast.TypeExpr) void {
     switch (te.kind) {
         .named => |n| alloc.free(n),
         .atom => |n| alloc.free(n),
-        .tuple => |items| {
-            for (items) |item| freeTypeExpr(alloc, item);
-            alloc.free(items);
-        },
         .union_of => |variants| {
             for (variants) |v| freeTypeExpr(alloc, v);
             alloc.free(variants);
@@ -719,12 +665,10 @@ test "type serde roundtrips" {
         "{name: string}",
         "{}",
         "number?",
-        "(:ok, table) | (:err, any)",
         "fn() -> string",
         "fn(a: number) -> string",
         "fn(?a: number) -> string",
         "table<string, number>",
-        "(:ok, any) | (:err, any)",
         "{user: {name: string}}",
         "{:ok, any}",
         "{:ok, any} | {:err, any}",

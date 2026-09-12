@@ -10,7 +10,6 @@ const VM = vm.VM;
 const memory = vm.memory;
 const Data = memory.Data;
 const functions = vm.functions;
-const Tuple = vm.tuple.Tuple;
 const RevoBinding = functions.RevoBinding;
 const HostBinding = functions.HostBinding;
 const CFnPtr = functions.CFnPtr;
@@ -72,75 +71,119 @@ pub export fn revo_table_create(vm_ptr: *anyopaque) callconv(.c) Data {
     return Data.new.table(tid);
 }
 
-/// return the number of entries in a table (0 on failure)
-pub export fn revo_table_len(vm_ptr: *anyopaque, table_id: u64) callconv(.c) u64 {
+/// total entries (array part + keyed entries), 0 for non-tables
+pub export fn revo_table_len(vm_ptr: *anyopaque, table: Data) callconv(.c) u64 {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const tbl = v.tables.get(@intCast(table_id)) catch return 0;
+    const tid = table.asTable() orelse return 0;
+    const tbl = v.tables.get(tid) catch return 0;
     return @intCast(tbl.count());
 }
 
-/// look up a key in a table, returns nil if missing or on error
-pub export fn revo_table_get(vm_ptr: *anyopaque, table_id: u64, key: Data) callconv(.c) Data {
+/// array-part length, 0 for non-tables
+pub export fn revo_table_alen(vm_ptr: *anyopaque, table: Data) callconv(.c) u64 {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-
-    const tid: memory.TableID = @intCast(table_id);
-
-    const tbl = v.tables.get(tid) catch return nil_val;
-
-    if (tbl.get(key, v) catch return nil_val) |value|
-        return value;
-
-    return nil_val;
+    const tid = table.asTable() orelse return 0;
+    const tbl = v.tables.get(tid) catch return 0;
+    return @intCast(tbl.array.items.len);
 }
 
-/// delete a table entry, returns true if key existed
-pub export fn revo_table_remove(vm_ptr: *anyopaque, table_id: u64, key: Data) callconv(.c) bool {
+/// metatable-aware read; true and `out` set when present
+pub export fn revo_table_get(vm_ptr: *anyopaque, table: Data, key: Data, out: *Data) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const tid: memory.TableID = @intCast(table_id);
+    const tid = table.asTable() orelse return false;
+    const tbl = v.tables.get(tid) catch return false;
+    out.* = (tbl.get(key, v) catch return false) orelse return false;
+    return true;
+}
+
+/// metatable-aware write; false on bad table or allocation failure
+pub export fn revo_table_set(vm_ptr: *anyopaque, table: Data, key: Data, value: Data) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tid = table.asTable() orelse return false;
+    const tbl = v.tables.get(tid) catch return false;
+    tbl.put(tid, v, key, value) catch return false;
+    return true;
+}
+
+/// delete a table entry, returns true if the key existed
+pub export fn revo_table_remove(vm_ptr: *anyopaque, table: Data, key: Data) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const tid = table.asTable() orelse return false;
     const tbl = v.tables.get(tid) catch return false;
     return tbl.remove(key, v);
 }
 
-/// insert or update a table entry, silently ignores errors
-pub export fn revo_table_set(vm_ptr: *anyopaque, table_id: u64, key: Data, value: Data) callconv(.c) void {
+/// array-part read by index; false when out of range
+pub export fn revo_table_get_idx(vm_ptr: *anyopaque, table: Data, idx: u64, out: *Data) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-
-    const tid: memory.TableID = @intCast(table_id);
-
-    const tbl = v.tables.get(tid) catch return;
-    tbl.put(tid, v, key, value) catch {};
+    const tid = table.asTable() orelse return false;
+    out.* = v.arrayGet(tid, @intCast(idx)) orelse return false;
+    return true;
 }
 
-/// create a new tuple from an array of values, returns nil on failure
-pub export fn revo_tuple_create(vm_ptr: *anyopaque, count: u64, items: [*]const Data) callconv(.c) Data {
+/// append to the array part; false on bad table or allocation failure
+pub export fn revo_table_push(vm_ptr: *anyopaque, table: Data, value: Data) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const src = items[0..@as(usize, @intCast(count))];
-    var data_list = std.ArrayList(Data).initCapacity(v.runtime.alloc, src.len) catch
-        return nil_val;
-    defer data_list.deinit(v.runtime.alloc);
-    for (src) |item|
-        data_list.appendAssumeCapacity(item);
-    const tid = v.tuples.create(data_list.items) catch
-        return nil_val;
-    v.noteGCPressure(@sizeOf(Tuple) + @sizeOf(Data) * src.len);
-    return Data.new.tuple(tid);
+    const tid = table.asTable() orelse return false;
+    const tbl = v.tables.get(tid) catch return false;
+    tbl.push(value) catch return false;
+    return true;
 }
 
-/// get element at index from a tuple, nil if out of bounds or on error
-pub export fn revo_tuple_get(vm_ptr: *anyopaque, tuple_id: u64, index: u64) callconv(.c) Data {
+/// construct an array table from items, nil on failure
+pub export fn revo_table_from_items(vm_ptr: *anyopaque, count: u64, items: [*]const Data) callconv(.c) Data {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const tup = v.tuples.get(@intCast(tuple_id)) catch
-        return nil_val;
-    if (index >= tup.items.len)
-        return nil_val;
-    return tup.items[@intCast(index)];
+    return v.tableOfSlice(items[0..@as(usize, @intCast(count))]) catch nil_val;
 }
 
-/// return the number of elements in a tuple (0 on failure)
-pub export fn revo_tuple_len(vm_ptr: *anyopaque, tuple_id: u64) callconv(.c) u64 {
+/// name-keyed write (interns the name); false on bad table or failure
+pub export fn revo_table_set_name(vm_ptr: *anyopaque, table: Data, name_ptr: u64, name_len: usize, value: Data) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    const tup = v.tuples.get(@intCast(tuple_id)) catch return 0;
-    return @intCast(tup.items.len);
+    const tid = table.asTable() orelse return false;
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(name_ptr)));
+    v.putField(tid, ptr[0..name_len], value) catch return false;
+    return true;
+}
+
+/// name-keyed raw read; true and `out` set when present
+pub export fn revo_table_get_name(vm_ptr: *anyopaque, table: Data, name_ptr: u64, name_len: usize, out: *Data) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const ptr: [*]u8 = @ptrFromInt(@as(usize, @intCast(name_ptr)));
+    out.* = v.getField(table, ptr[0..name_len]) orelse return false;
+    return true;
+}
+
+/// `{:ok, payload}` constructor for host results, nil on failure
+pub export fn revo_ok(vm_ptr: *anyopaque, payload: Data) callconv(.c) Data {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.resultTable(.ok, payload) catch nil_val;
+}
+
+/// `{:err, payload}` constructor for host results, nil on failure
+pub export fn revo_err(vm_ptr: *anyopaque, payload: Data) callconv(.c) Data {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.resultTable(.err, payload) catch nil_val;
+}
+
+/// whether the value is an `{:ok, ...}` table
+pub export fn revo_is_ok(vm_ptr: *anyopaque, val: Data) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.isOkTable(val);
+}
+
+/// whether the value is an `{:err, ...}` table
+pub export fn revo_is_err(vm_ptr: *anyopaque, val: Data) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.isErrTable(val);
+}
+
+/// payload of an `{:ok, ...}` table; false otherwise
+pub export fn revo_ok_value(vm_ptr: *anyopaque, val: Data, out: *Data) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    const parts = v.resultParts(val) orelse return false;
+    if (parts.tag.asAtom() != revo.core_atoms.atomId(.ok)) return false;
+    out.* = parts.payload orelse return false;
+    return true;
 }
 
 /// call a revo function from c, returns false on type/resource error (max 16 args)

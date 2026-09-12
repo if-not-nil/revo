@@ -11,14 +11,11 @@ const type_serde = @import("../type_serde.zig");
 const ast = @import("../ast.zig");
 const Node = ast.Node;
 
-pub const LocalValueKind = enum { unknown, tuple_literal };
-
 pub const LocalVar = struct {
     name: []const u8,
     slot: LocalSlot,
     mutable: bool,
     initialized: bool,
-    kind: LocalValueKind = .unknown,
     type_info: ?types.TypeInfo = null,
     type_explicit: bool = false,
 };
@@ -228,12 +225,6 @@ pub fn markLocalInitialized(self: *Compiler, slot: LocalSlot) void {
     if (scanLocals(state.all_locals.items, slot)) |l| l.initialized = true;
 }
 
-pub fn markLocalValueKind(self: *Compiler, slot: LocalSlot, kind: LocalValueKind) void {
-    const state = currentFunctionState(self) orelse return;
-    if (scanLocals(state.locals.items, slot)) |l| l.kind = kind;
-    if (scanLocals(state.all_locals.items, slot)) |l| l.kind = kind;
-}
-
 pub fn setLocalType(self: *Compiler, slot: LocalSlot, type_info: ?types.TypeInfo) void {
     const state = currentFunctionState(self) orelse return;
     if (scanLocals(state.locals.items, slot)) |l| l.type_info = type_info;
@@ -380,25 +371,6 @@ fn resolveLocalMasked(self: *Compiler, name: []const u8) ?LocalVar {
         if (local.initialized and std.mem.eql(u8, local.name, name)) return local;
     }
     return null;
-}
-
-pub fn constTupleIndex(self: *Compiler, index: anytype) ?usize {
-    const key_num = switch (index.key.expr) {
-        .number => |n| n.value,
-        else => return null,
-    };
-    if (!std.math.isFinite(key_num) or @floor(key_num) != key_num or key_num < 0 or
-        key_num > @as(f64, @floatFromInt(std.math.maxInt(usize)))) return null;
-    const is_tuple = switch (index.object.expr) {
-        .ident => |name| blk: {
-            const l = resolveLocalVar(self, name) orelse break :blk false;
-            break :blk l.kind == .tuple_literal;
-        },
-        .tuple => true,
-        else => false,
-    };
-    if (!is_tuple) return null;
-    return @as(usize, @intFromFloat(key_num));
 }
 
 pub fn addUpvalue(self: *Compiler, fn_idx: usize, spec: UpvalueSpec) !revo.UpvalueID {

@@ -22,7 +22,7 @@ test "rng doesnt output 0" do
   const rng: Rng = { state = time.monotonic_ns(), next = rng_next }
   for i in 0..100 do
     if not rng:next(1000) != 0
-      print("got 0 on ", i) and return (:err, :UhOh)
+      print("got 0 on ", i) and return {:err, :UhOh}
   end
 end
 
@@ -62,7 +62,7 @@ fn chain_train(self: Chain, corpus: string) do
         :replace("?", " ? ")
         :split(" ")
 
-    let (w1, w2) = (NOWORD, NOWORD)
+    let {w1, w2} = {NOWORD, NOWORD}
     let next_is_start = :true
 
     for w in all_w do
@@ -70,9 +70,9 @@ fn chain_train(self: Chain, corpus: string) do
         # idk when this happens
       end else do
         # keep every seen prefix so take() can jump to a new spot later
-        self.starts:push((w1, w2))
+        self.starts:push({w1, w2})
         if next_is_start do
-          self.sent_starts:push((w1, w2))
+          self.sent_starts:push({w1, w2})
         end
 
         self:add(pref(w1, w2), w)
@@ -84,9 +84,9 @@ fn chain_train(self: Chain, corpus: string) do
     end
 
     # close the chain with a terminal word so dead ends are real, not silent
-    self.starts:push((w1, w2))
+    self.starts:push({w1, w2})
     if next_is_start do
-      self.sent_starts:push((w1, w2))
+      self.sent_starts:push({w1, w2})
     end
     self:add(pref(w1, w2), NOWORD)
 end

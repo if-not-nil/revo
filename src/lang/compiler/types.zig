@@ -40,7 +40,6 @@ pub const TypeInfo = struct {
         number,
         string,
         atom: []const u8,
-        tuple: []const TypeInfo,
         @"union": []const UnionVariant,
         table: struct {
             key: ?*const TypeInfo,
@@ -60,11 +59,6 @@ pub const TypeInfo = struct {
             .number => other.tag == .number,
             .string => other.tag == .string,
             .atom => |a| if (other.tag == .atom) std.mem.eql(u8, ast.atomName(a), ast.atomName(other.tag.atom)) else false,
-            .tuple => |ts| if (other.tag == .tuple) blk: {
-                if (ts.len != other.tag.tuple.len) break :blk false;
-                for (ts, other.tag.tuple) |a, b| if (!eql(a, b)) break :blk false;
-                break :blk true;
-            } else false,
             .@"union" => |us| if (other.tag == .@"union") blk: {
                 if (us.len != other.tag.@"union".len) break :blk false;
                 for (us, other.tag.@"union") |a, b| {
@@ -84,7 +78,7 @@ pub const TypeInfo = struct {
                     } else break :blk false;
                 } else if (o.key != null) break :blk false;
 
-                // fields compare syntactically, order-sensitive like tuples
+                // fields compare syntactically, order-sensitive
                 if (ti.fields) |fs| {
                     const os = o.fields orelse break :blk false;
                     if (fs.len != os.len) break :blk false;
@@ -169,11 +163,6 @@ pub fn clone(ti: TypeInfo, alloc: std.mem.Allocator) !TypeInfo {
         .bool, .number, .string, .any, .never => ti,
         .atom => |s| .{ .tag = .{ .atom = try alloc.dupe(u8, s) } },
         .type_var => |s| .{ .tag = .{ .type_var = try alloc.dupe(u8, s) } },
-        .tuple => |items| {
-            const owned = try alloc.alloc(TypeInfo, items.len);
-            for (items, 0..) |item, i| owned[i] = try clone(item, alloc);
-            return .{ .tag = .{ .tuple = owned } };
-        },
         .@"union" => |variants| {
             const owned = try alloc.alloc(UnionVariant, variants.len);
             for (variants, 0..) |v, i| {
@@ -242,10 +231,6 @@ pub fn deinitType(ti: *TypeInfo, alloc: std.mem.Allocator) void {
     switch (ti.tag) {
         .bool, .number, .string, .any, .never => {},
         .atom, .type_var => |s| if (s.len > 0) alloc.free(s),
-        .tuple => |items| {
-            for (items) |*item| deinitType(@constCast(item), alloc);
-            alloc.free(items);
-        },
         .@"union" => |variants| {
             for (variants) |*v| {
                 alloc.free(v.name);
@@ -322,13 +307,6 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
         }
         return true;
     }
-    // empty tuple (.len == 0) is a sentinel for "any tuple"
-    if (to.tag == .tuple and from.tag == .tuple) {
-        if (to.tag.tuple.len == 0 or from.tag.tuple.len == 0) return true;
-        if (to.tag.tuple.len != from.tag.tuple.len) return false;
-        for (to.tag.tuple, from.tag.tuple) |tt, ff| if (!canCoerce(ff, tt)) return false;
-        return true;
-    }
     // empty atom (.atom == "") is a sentinel for "any atom"
     if (to.tag == .atom and from.tag == .atom) {
         if (to.tag.atom.len == 0 or from.tag.atom.len == 0) return true;
@@ -364,24 +342,12 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
 
 fn unionVariantAccepts(variant: UnionVariant, value: TypeInfo) bool {
     if (variant.types.len == 1) return canCoerce(value, variant.types[0]);
-    if (value.tag != .tuple) return false;
-    if (value.tag.tuple.len != variant.types.len) return false;
-    for (variant.types, value.tag.tuple) |expected, actual| {
-        if (actual.tag == .number and expected.tag == .number) continue;
-        if (!canCoerce(actual, expected)) return false;
-    }
-    return true;
+    return false;
 }
 
 fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
     if (variant.types.len == 1) return canCoerce(variant.types[0], target);
-    if (target.tag != .tuple) return false;
-    if (target.tag.tuple.len != variant.types.len) return false;
-    for (variant.types, target.tag.tuple) |source, expected| {
-        if (source.tag == .number and expected.tag == .number) continue;
-        if (!canCoerce(source, expected)) return false;
-    }
-    return true;
+    return false;
 }
 
 pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
@@ -445,8 +411,8 @@ fn isOkTag(name: []const u8) bool {
     return std.mem.eql(u8, name, ":ok") or std.mem.eql(u8, name, "ok");
 }
 
-/// tag of one union variant, tuple-style `(:ok, T)` or table-style `{:ok, T}`
-///     : table tags live in positional field "0", payload in "1", "2", ...
+/// tag of one union variant, table-style `{:ok, T}`
+///     : tags live in positional field "0", payload in "1", "2", ...
 pub fn unionVariantTagEql(variant: UnionVariant, tag: []const u8) bool {
     const pattern_tag = if (tag.len > 0 and tag[0] == ':') tag[1..] else tag;
     if (variant.types.len == 0) return false;
@@ -465,10 +431,8 @@ pub fn unionVariantTagEql(variant: UnionVariant, tag: []const u8) bool {
     return false;
 }
 
-/// payload types after the tag
-///   : tuple tail
-///     , or leading numeric table fields past "0"
-///         - stops at the first non-positional field
+/// payload types after the tag: leading numeric table fields past "0"
+///     - stops at the first non-positional field
 pub fn appendUnionVariantPayload(alloc: std.mem.Allocator, variant: UnionVariant, out: *std.ArrayList(TypeInfo)) !void {
     if (variant.types.len == 0) return;
     if (variant.types[0].tag == .atom) {
@@ -491,15 +455,8 @@ pub fn appendUnionVariantPayload(alloc: std.mem.Allocator, variant: UnionVariant
     }
 }
 
-/// `(:ok, T) | (:err, any)` unions
-///     (both the `!T` sugar and the literal form),
-/// `(:ok, T)` / `(:err, E)` tagged tuples,
-///     and the same shapes as tables
-///         (`{:ok, T} | {:err, E}`)
-///
-/// now that tables replace tuples
-///
-/// the shapes `?` and `orelse` unwrap at runtime
+/// `{:ok, T} | {:err, any}` unions (both the `!T` sugar and the literal form)
+///     : the shapes `?` and `orelse` unwrap at runtime
 pub fn isResultType(ti: TypeInfo) bool {
     return switch (ti.tag) {
         .@"union" => |us| blk: {
@@ -507,10 +464,6 @@ pub fn isResultType(ti: TypeInfo) bool {
                 if (unionVariantTagEql(v, ":ok") or unionVariantTagEql(v, ":err")) break :blk true;
             }
             break :blk false;
-        },
-        .tuple => |items| items.len >= 1 and items[0].tag == .atom and blk: {
-            const at = ast.atomName(items[0].tag.atom);
-            break :blk isResultTag(at);
         },
         .table => |tbl| blk: {
             const fields = tbl.fields orelse break :blk false;
@@ -522,21 +475,14 @@ pub fn isResultType(ti: TypeInfo) bool {
 }
 
 ///
-/// unwrap the `:ok` payload from a `(:ok, T) | (:err, any)` union
-///
-/// or a `(:ok, T)` tagged tuple
-///     , and the `{:ok, T}` table equivalents
-/// ; mirrors the runtime
-///     , which yields only the first payload element
+/// unwrap the `:ok` payload from a `{:ok, T} | {:err, any}` union
+///     or a `{:ok, T}` table
+/// ; mirrors the runtime, which yields only the first payload element
 pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
     return switch (ti.tag) {
         .@"union" => |variants| blk: {
             for (variants) |v| {
                 if (!unionVariantTagEql(v, ":ok")) continue;
-                if (v.types.len > 0 and v.types[0].tag == .atom) {
-                    if (v.types.len >= 2) break :blk v.types[1];
-                    continue;
-                }
                 if (v.types.len > 0 and v.types[0].tag == .table) {
                     const fields = v.types[0].tag.table.fields orelse continue;
                     if (fields.len >= 2 and std.mem.eql(u8, fields[1].name, "1")) break :blk fields[1].field_type;
@@ -544,12 +490,6 @@ pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
                 }
             }
             break :blk .{ .tag = .any };
-        },
-        .tuple => |items| blk: {
-            if (items.len < 2 or items[0].tag != .atom) break :blk .{ .tag = .any };
-            const at = ast.atomName(items[0].tag.atom);
-            if (!isOkTag(at)) break :blk .{ .tag = .any };
-            break :blk items[1];
         },
         .table => |tbl| blk: {
             const fields = tbl.fields orelse break :blk .{ .tag = .any };
@@ -565,19 +505,6 @@ pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
 pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.ArrayList(UnionVariant)) !void {
     switch (ti.tag) {
         .@"union" => |us| for (us) |u| try variants.append(alloc, u),
-        .tuple => |types| {
-            if (types.len == 0) {
-                // empty tuple is the "any tuple"
-                // keep it as a single type
-                // so it stays a matchable element inside a union
-                var one = try std.ArrayList(TypeInfo).initCapacity(alloc, 1);
-                errdefer one.deinit(alloc);
-                try one.append(alloc, .{ .tag = .{ .tuple = types } });
-                try variants.append(alloc, .{ .name = "", .types = try one.toOwnedSlice(alloc) });
-                return;
-            }
-            try variants.append(alloc, .{ .name = "", .types = types });
-        },
         else => {
             var one = try std.ArrayList(TypeInfo).initCapacity(alloc, 1);
             errdefer one.deinit(alloc);
@@ -595,7 +522,6 @@ pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(Typ
     .{ "bool", TypeInfo{ .tag = .bool } },
     .{ "any", TypeInfo{ .tag = .any } },
     .{ "nil", TypeInfo{ .tag = .{ .atom = ":nil" } } },
-    .{ "tuple", TypeInfo{ .tag = .{ .tuple = &.{} } } }, // empty tuple is the "any tuple" sentinel
     .{ "table", TABLE_GENERIC },
     .{ "function", TypeInfo{ .tag = .{ .function = &ANY_FN_SIG } } },
     .{ "atom", TypeInfo{ .tag = .{ .atom = "" } } }, // empty atom payload is the "any atom" sentinel
@@ -629,7 +555,6 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
             if (v.else_expr) |e| inferExprType(ctx, e) else null,
         ),
 
-        .tuple => |items| inferTupleType(ctx, items),
         .table => |entries| inferTableType(ctx, entries),
         .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args, call.implicit_self),
         .field => |field| ctx.inferFieldType(field.object, field.name),
@@ -646,7 +571,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .try_expr => |inner| blk: {
             const it = inferExprType(ctx, inner);
             break :blk switch (it.tag) {
-                .@"union", .tuple, .table => okTypeFrom(it),
+                .@"union", .table => okTypeFrom(it),
                 else => it,
             };
         },
@@ -655,7 +580,7 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .import_stmt, .test_block, .test_suite, .macro_expr, .proc_macro, .quasiquote => .{ .tag = .any },
         .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
         .range_literal, .slice_literal => .{ .tag = .number },
-        .assign_expr, .compound_assign, .decl, .binding, .tuple_pattern, .table_pattern, .ascribed, .type_alias => .{ .tag = .any },
+        .assign_expr, .compound_assign, .decl, .binding, .table_pattern, .ascribed, .type_alias => .{ .tag = .any },
     };
 }
 
@@ -742,35 +667,14 @@ fn mergeInferredType(current: TypeInfo, next: TypeInfo) TypeInfo {
     return .{ .tag = .any };
 }
 
-pub fn inferTupleType(ctx: anytype, items: []const *ast.Node) TypeInfo {
-    if (items.len == 0) return .{ .tag = .{ .tuple = &.{} } };
-    const types = ctx.alloc.alloc(TypeInfo, items.len) catch return .{ .tag = .any };
-    for (items, types) |item, *dst| dst.* = inferExprType(ctx, item);
-    return .{ .tag = .{ .tuple = types } };
-}
-
 pub fn inferIndexType(ctx: anytype, object: *const ast.Node, key: *const ast.Node) TypeInfo {
     if (key.expr == .range_literal or key.expr == .slice_literal) {
         return switch (inferExprType(ctx, object).tag) {
             .string => .{ .tag = .string },
-            .tuple => |items| .{ .tag = .{ .tuple = items } },
             else => .{ .tag = .any },
         };
     }
     return switch (inferExprType(ctx, object).tag) {
-        .tuple => |items| if (key.expr == .number) blk: {
-            const key_num = key.expr.number.value;
-            if (std.math.isFinite(key_num) and @floor(key_num) == key_num and key_num >= 0) {
-                const idx: usize = @intFromFloat(key_num);
-                if (object.expr == .tuple) {
-                    const tuple_items = object.expr.tuple;
-                    if (idx < tuple_items.len) break :blk inferExprType(ctx, tuple_items[idx]);
-                } else if (idx < items.len) {
-                    break :blk items[idx];
-                }
-            }
-            break :blk .{ .tag = .any };
-        } else .{ .tag = .any },
         .string => .{ .tag = .string },
         else => .{ .tag = .any },
     };
@@ -782,8 +686,8 @@ pub fn inferBlockResultType(ctx: anytype, exprs: []const *ast.Node) TypeInfo {
 }
 
 /// walk arg types against param types and bind each type_var found inside a
-/// param to the concrete type at the same position, e.g. `self: (:err, T)`
-/// against `(err, string)` binds T -> string. best-effort: first binding per
+/// param to the concrete type at the same position, e.g. `self: {:err, T}`
+/// against `{:err, string}` binds T -> string. best-effort: first binding per
 /// name wins, mismatched shapes are skipped
 /// subst is any type with `put(name: []const u8, t: TypeInfo)`
 pub fn bindTypeParams(subst: anytype, params: []const TypeInfo, arg_types: []const TypeInfo) anyerror!void {
@@ -794,11 +698,6 @@ pub fn bindTypeParams(subst: anytype, params: []const TypeInfo, arg_types: []con
 fn bindTypeParam(subst: anytype, param: TypeInfo, arg: TypeInfo) anyerror!void {
     switch (param.tag) {
         .type_var => |name| if (arg.tag != .any) try subst.put(name, arg),
-        .tuple => |items| {
-            if (arg.tag != .tuple) return;
-            if (arg.tag.tuple.len != items.len) return;
-            for (items, arg.tag.tuple) |p, a| try bindTypeParam(subst, p, a);
-        },
         .table => |tbl| {
             if (arg.tag != .table) return;
             try bindTypeParam(subst, tbl.value.*, arg.tag.table.value.*);
@@ -841,11 +740,6 @@ fn bindTypeParam(subst: anytype, param: TypeInfo, arg: TypeInfo) anyerror!void {
 pub fn substituteTypeParams(alloc: std.mem.Allocator, ti: TypeInfo, subst: anytype) !TypeInfo {
     return switch (ti.tag) {
         .type_var => |name| subst.get(name) orelse .{ .tag = .any },
-        .tuple => |items| blk: {
-            const new_items = try alloc.alloc(TypeInfo, items.len);
-            for (items, new_items) |item, *dst| dst.* = try substituteTypeParams(alloc, item, subst);
-            break :blk .{ .tag = .{ .tuple = new_items } };
-        },
         .function => |fsig| blk: {
             const new_params = try alloc.alloc(TypeInfo, fsig.params.len);
             for (fsig.params, new_params) |p, *np| np.* = try substituteTypeParams(alloc, p, subst);
@@ -924,14 +818,8 @@ test "types: binary op inference - comparison" {
     try std.testing.expect(cmp2.eql(.{ .tag = .bool }));
 }
 
-test "types: empty tuple/atom sentinel coercion" {
+test "types: empty atom sentinel coercion" {
     const types = revo.lang.compiler.types;
-    const empty_tuple: types.TypeInfo = .{ .tag = .{ .tuple = &.{} } };
-    const int_tuple: types.TypeInfo = .{ .tag = .{ .tuple = &.{.{ .tag = .number }} } };
-    try std.testing.expect(types.canCoerce(empty_tuple, int_tuple));
-    try std.testing.expect(types.canCoerce(int_tuple, empty_tuple));
-    try std.testing.expect(types.canCoerce(empty_tuple, empty_tuple));
-
     const empty_atom: types.TypeInfo = .{ .tag = .{ .atom = "" } };
     const named_atom: types.TypeInfo = .{ .tag = .{ .atom = ":foo" } };
     try std.testing.expect(types.canCoerce(empty_atom, named_atom));
@@ -1548,30 +1436,6 @@ test "if/else typed branches unify to string" {
 }
 
 //
-// tuple type inference
-//
-test "tuple type inference and access" {
-    try t.topNumber(
-        \\ let t = (1, "hi", 3.5)
-        \\ t[0] + t[2]
-    , 4.5);
-}
-
-test "tuple type with different types" {
-    try t.topNumber(
-        \\ let t = (10, 20, 30)
-        \\ t[0] + t[1] + t[2]
-    , 60);
-}
-
-test "nested tuple type" {
-    try t.topNumber(
-        \\ let t = ((1, 2), (3, 4))
-        \\ t[0][0] + t[1][1]
-    , 5);
-}
-
-//
 // string indexing
 //
 test "string indexing returns string" {
@@ -1594,14 +1458,6 @@ test "stepped string slicing" {
         \\ s[5..-1..1]
     , "fedc");
 }
-
-test "tuple slicing returns a tuple" {
-    try t.topNumber(
-        \\ let t = (10, 20, 30, 40)
-        \\ t[1..3][1]
-    , 30);
-}
-
 //
 // open-bound slicing
 //
@@ -1625,56 +1481,18 @@ test "string slice open both [..]" {
         \\ s[..]
     , "hello");
 }
-
-test "tuple slice open start [..n]" {
-    try t.topNumber(
-        \\ let t = (10, 20, 30, 40)
-        \\ t[..3][1]
-    , 20);
-}
-
-test "tuple slice open end [n..]" {
-    try t.topNumber(
-        \\ let t = (10, 20, 30, 40)
-        \\ t[2..][0]
-    , 30);
-}
-
-test "tuple slice open both [..]" {
-    try t.topNumber(
-        \\ let t = (10, 20, 30, 40)
-        \\ len(t[..])
-    , 4);
-}
-
 test "string slice open step [n..step..m]" {
     try t.topString(
         \\ let s: string = "abcdef"
         \\ s[0..2..5]
     , "ace");
 }
-
-test "tuple slice open negative step [n..-step..m]" {
-    try t.topNumber(
-        \\ let t = (1, 2, 3, 4, 5)
-        \\ t[4..-2..0][0]
-    , 5);
-}
-
 test "string slice empty result" {
     try t.topString(
         \\ let s: string = "abc"
         \\ s[2..2]
     , "");
 }
-
-test "tuple slice empty result" {
-    try t.topNumber(
-        \\ let t = (1, 2, 3)
-        \\ len(t[2..2])
-    , 0);
-}
-
 //
 // any type accepts everything
 //
@@ -1880,13 +1698,6 @@ test "dynamic callee validates argument types" {
         \\ f("hello")
     , .ParseError);
 }
-
-test "tuple pattern binding respects type annotation" {
-    try t.expectCompileError(
-        \\ const tup: string = (1, 2)
-    , .ParseError);
-}
-
 test "for loop expression produces num type" {
     try t.topNumber(
         \\ fn f() -> num do
@@ -1899,25 +1710,15 @@ test "for loop expression produces num type" {
 test "type alias gets unaliased" {
     try t.topTrue(
         \\ type Als =
-        \\       (:aa, num)
-        \\     | (:bb, num)
-        \\ 
-        \\ let x: Als = (:aa, 55)
-        \\ let y: Als = (:bb, 100.1)
-        \\ 
+        \\       {:aa, num}
+        \\     | {:bb, num}
+        \\
+        \\ let x: Als = {:aa, 55}
+        \\ let y: Als = {:bb, 100.1}
+        \\
         \\ x[1] + y[1] == 155.1
     );
 }
-
-test "tuple type annotation" {
-    try t.topTrue(
-        \\ let x: (:aa, num) | (:bb, num) = (:aa, 55)
-        \\ let y: (:aa, num) | (:bb, num) = (:bb, 100.1)
-        \\ 
-        \\ x[1] + y[1] == 155.1
-    );
-}
-
 test "comp block infers num from literal" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
@@ -1954,11 +1755,11 @@ test "never arms don't poison match result type" {
     // the panic arm is `never`: the match result is the `:ok` payload (num),
     // so `?` on it is rejected as a non-result (it would pass as `.any`)
     try t.expectCompileError(
-        \\ type Res = (:ok, num) | (:err, string)
-        \\ let x: Res = (:ok, 42)
+        \\ type Res = {:ok, num} | {:err, string}
+        \\ let x: Res = {:ok, 42}
         \\ let r = match x
-        \\ | (:ok, v) => v
-        \\ | (:err, e) => panic(e)
+        \\ | {:ok, v} => v
+        \\ | {:err, e} => panic(e)
         \\ r?
     , .ParseError);
 }
@@ -1971,11 +1772,11 @@ test "match narrowing works for call subjects" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ type Res = (:ok, num) | (:err, string)
-        \\ fn g() -> Res do (:ok, 42) end
+        \\ type Res = {:ok, num} | {:err, string}
+        \\ fn g() -> Res do {:ok, 42} end
         \\ match g()
-        \\ | (:ok, v) => v + 1
-        \\ | (:err, _) => 0
+        \\ | {:ok, v} => v + 1
+        \\ | {:err, _} => 0
         ,
     }, .{});
     try std.testing.expect(built == .ok);
@@ -1990,7 +1791,6 @@ test "match narrowing works for call subjects" {
 }
 
 test "match narrowing enables specialized add_int from table union payload" {
-    // same as the tuple version but with table-result unions
     // `v` narrows to num so `v + 1` emits add_int
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
@@ -2160,39 +1960,6 @@ test "substituteTypeParams unknown type var becomes any" {
     try std.testing.expect(result.eql(.{ .tag = .any }));
 }
 
-test "substituteTypeParams tuple with type var" {
-    const types = revo.lang.compiler.types;
-    const alloc = std.testing.allocator;
-    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
-    defer subst.deinit();
-    try subst.put("T", .{ .tag = .number });
-
-    const input = types.TypeInfo{ .tag = .{ .tuple = &.{ types.TypeInfo{ .tag = .{ .type_var = "T" } }, .{ .tag = .string } } } };
-    const result = try types.substituteTypeParams(alloc, input, subst);
-    try std.testing.expect(result.tag == .tuple);
-    try std.testing.expect(result.tag.tuple.len == 2);
-    try std.testing.expect(result.tag.tuple[0].eql(.{ .tag = .number }));
-    try std.testing.expect(result.tag.tuple[1].eql(.{ .tag = .string }));
-    alloc.free(result.tag.tuple);
-}
-
-test "substituteTypeParams multiple type vars" {
-    const types = revo.lang.compiler.types;
-    const alloc = std.testing.allocator;
-    var subst = std.StringHashMap(types.TypeInfo).init(alloc);
-    defer subst.deinit();
-    try subst.put("T", .{ .tag = .number });
-    try subst.put("U", .{ .tag = .string });
-
-    const input = types.TypeInfo{ .tag = .{ .tuple = &.{ types.TypeInfo{ .tag = .{ .type_var = "T" } }, types.TypeInfo{ .tag = .{ .type_var = "U" } } } } };
-    const result = try types.substituteTypeParams(alloc, input, subst);
-    try std.testing.expect(result.tag == .tuple);
-    try std.testing.expect(result.tag.tuple.len == 2);
-    try std.testing.expect(result.tag.tuple[0].eql(.{ .tag = .number }));
-    try std.testing.expect(result.tag.tuple[1].eql(.{ .tag = .string }));
-    alloc.free(result.tag.tuple);
-}
-
 test "substituteTypeParams function sig with type var" {
     const types = revo.lang.compiler.types;
     const alloc = std.testing.allocator;
@@ -2254,13 +2021,13 @@ test "generics identity fn with string compiles and runs" {
     defer vm.runtime.alloc.free(built.ok.spans);
 }
 
-test "generics compound return type (:ok, T) propagates inner type" {
+test "generics compound return type {:ok, T} propagates inner type" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ fn wrap[T](x: T) -> (:ok, T) (:ok, x)
+        \\ fn wrap[T](x: T) -> {:ok, T} {:ok, x}
         \\ let r = wrap(42)
         \\ r[1] + 1
         ,
@@ -2270,13 +2037,13 @@ test "generics compound return type (:ok, T) propagates inner type" {
     defer vm.runtime.alloc.free(built.ok.spans);
 }
 
-test "generics multiple type params with tuple return compile" {
+test "generics multiple type params with table return compile" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ fn pair[T, U](a: T, b: U) -> (T, U)
+        \\ fn pair[T, U](a: T, b: U) -> {T, U}
         \\ pair(1, "hi")
         ,
     }, .{});
@@ -2409,7 +2176,7 @@ test "stdlib sigs: module field calls resolve to spec sigs" {
 test "stdlib sigs: module result flows through match" {
     try t.topAtom(
         \\ let r = fs.open("/definitely/not/a/real/path_xyz")
-        \\ match r | (:ok, f) => :found | (:err, e) => e
+        \\ match r | {:ok, f} => :found | {:err, e} => e
     , "FileNotFound");
 }
 
@@ -2423,19 +2190,9 @@ test "stdlib sigs: local binding shadows stdlib module" {
         \\ fs.exists?("/tmp")
     , .ParseError);
 }
-
-test "stdlib sigs: try unwraps tagged tuples" {
-    try t.topNumber("(:ok, 5)? + 1", 6);
-    try t.topNumber(
-        \\ fn res() (:ok, 5)
-        \\ res()? + 1
-    , 6);
-    try t.topTrue("let b: bool = fs.exists?(\"/tmp\")");
-}
-
 test "stdlib sigs: orelse unwraps results" {
     try t.topTrue("fs.exists?(\"/tmp\")");
-    try t.topNumber("(:err, \"boom\") orelse 5", 5);
+    try t.topNumber("{:err, \"boom\"} orelse 5", 5);
 }
 
 test "stdlib sigs: try rejects non-result unions" {
@@ -2450,8 +2207,8 @@ test "stdlib sigs: match narrows call-subject payloads" {
     // bool, so the match result is bool (not a result) and `?` is rejected
     try t.expectCompileError(
         \\ (match fs.open("/tmp")
-        \\ | (:ok, v) => v
-        \\ | (:err, e) => panic(e))?
+        \\ | {:ok, v} => v
+        \\ | {:err, e} => panic(e))?
     , .ParseError);
 }
 
@@ -2464,17 +2221,21 @@ test "eu.rv: result types flow end to end" {
     );
     try t.topAtom(
         \\ let r = fs.open("/definitely/not/a/real/path_xyz")
-        \\ match r | (:err, e) => e | _ => :found
+        \\ match r | {:err, e} => e | _ => :found
     , "FileNotFound");
+    try t.topAtom(
+        \\ let x: {:ok, table} | {:err, any} = fs.open("/tmp")
+        \\ match x | {:ok, t} => :found | {:err, e} => e
+    , "found");
 }
 
 test "error-union sugar and the literal form are the same union" {
-    // `!table` and `(:ok, table) | (:err, any)` are structurally identical, so
+    // `!table` and `{:ok, table} | {:err, any}` are structurally identical, so
     // a value typed with one can be bound to a slot typed with the other
     try t.topAtom(
-        \\ let x: (:ok, table) | (:err, any) = fs.open("/tmp")
+        \\ let x: {:ok, table} | {:err, any} = {:ok, {}}
         \\ let y: !table = x
-        \\ match y | (:ok, t) => :found | (:err, e) => e
+        \\ match y | {:ok, t} => :found | {:err, e} => e
     , "found");
 }
 
@@ -2572,7 +2333,7 @@ test "manifest dotted macros rescope under the import name" {
         \\  let a = iter:next()
         \\  let b = iter:next()
         \\  let c = iter:next()
-        \\  {(:binary, :add, (:binary, :add, a, b), c)}
+        \\  {{:binary, :add, {:binary, :add, a, b}, c}}
         \\end
         ,
     });

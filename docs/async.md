@@ -289,12 +289,8 @@ pub fn poll(backend: *async_backend.AsyncBackend, vm_ptr: *anyopaque) anyerror!b
             revo.Data.new.num(@floatFromInt(completion.bytes));
         
         try vm.sched.wakeFiber(
-            vm.runtime.alloc,
             completion.job_ptr.fiber_id,
-            revo.Data.new.tuple(try vm.tuples.create(&[_]revo.Data{
-                .{ .atom = @intFromEnum(revo.core_atoms.ok) },
-                result_data,
-            }))
+            try vm.resultTable(.ok, result_data),
         );
         
         vm.runtime.alloc.destroy(completion.job_ptr);

@@ -8,7 +8,6 @@ pub const StringID = usize;
 pub const AtomID = usize;
 pub const FunctionID = usize;
 pub const TableID = usize;
-pub const TupleID = usize;
 
 pub const Type = enum(u4) {
     // stored tag nibble is bits 51-48; real values must have bit 51 set
@@ -19,7 +18,6 @@ pub const Type = enum(u4) {
     atom = 9,
     function = 10,
     table = 11,
-    tuple = 12,
     foreign = 13,
     // latter numbers reserved for subtyping/opt
     //   (lua likes for threads to be their own types
@@ -74,9 +72,6 @@ pub const Data = extern struct {
         pub inline fn table(id: TableID) Data {
             return Data.boxed(.table, id);
         }
-        pub inline fn tuple(id: TupleID) Data {
-            return Data.boxed(.tuple, id);
-        }
         pub inline fn foreign(ptr: ?*anyopaque) Data {
             return Data.boxed(.foreign, @intFromPtr(ptr));
         }
@@ -120,9 +115,6 @@ pub const Data = extern struct {
     }
     pub inline fn isTable(self: Data) bool {
         return self.tag() == .table;
-    }
-    pub inline fn isTuple(self: Data) bool {
-        return self.tag() == .tuple;
     }
     pub inline fn isForeign(self: Data) bool {
         return self.tag() == .foreign;
@@ -176,11 +168,7 @@ pub const Data = extern struct {
             return @intCast(self.bits & PAYLOAD_MASK);
         return null;
     }
-    pub inline fn asTuple(self: Data) ?TupleID {
-        if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.tuple))
-            return @intCast(self.bits & PAYLOAD_MASK);
-        return null;
-    }
+
     pub fn asForeign(self: Data) ?*anyopaque {
         if ((self.bits & BOX_MASK) == BOX_TAG and ((self.bits >> TAG_SHIFT) & TAG_MASK) == @intFromEnum(Type.foreign))
             return @ptrFromInt(@as(usize, @intCast(self.bits & PAYLOAD_MASK)));
@@ -209,7 +197,7 @@ pub const Data = extern struct {
     /// hash by value semantics, matching compare.fastEq
     ///
     /// ~ numbers/atoms by bits
-    /// ~ strings and tuples by content
+    /// ~ strings by content
     /// ~ strings with the same content but different interner ids
     ///   (e.g. a concatenated key vs a literal) must hash alike
     ///   , otherwise equal keys land in different probe chains and lookup
@@ -222,16 +210,6 @@ pub const Data = extern struct {
                 var h = std.hash.Wyhash.init(0);
                 h.update(&[_]u8{@intCast(@intFromEnum(self.tag()))});
                 h.update(vm.stringValue(self.asString().?));
-                return h.final();
-            },
-            .tuple => {
-                const tuple = vm.tuples.get(self.asTuple().?) catch return self.bits;
-                var h = std.hash.Wyhash.init(0);
-                h.update(&[_]u8{@intCast(@intFromEnum(self.tag()))});
-                for (tuple.items) |item| {
-                    const item_hash = hash(item, vm);
-                    h.update(std.mem.asBytes(&item_hash));
-                }
                 return h.final();
             },
             else => {},

@@ -1,4 +1,6 @@
-//! shared machinery for the GC object pools (tables, tuples, functions, upvalues)
+//!
+//! welcome to the shared module
+//! for the gc object pools (tables, functions, upvalues)
 //!
 //! each pool is an append-only ArrayList whose slots never move, so ids stay stable
 //! freed slots are reused through a free list sweeping
@@ -6,6 +8,7 @@
 //! workloads that churn garbage grow that watermark forever even though the
 //! live set stays small. so every pool threads its live slots through a
 //! singly-linked list and sweep walks only that list: O(live) per collection
+//!
 
 const std = @import("std");
 

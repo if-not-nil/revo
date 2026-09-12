@@ -19,7 +19,7 @@ pub declare set_meta = fn(value: any, meta: table|:nil) -> any
 #* returns type of value as atom *#
 pub declare type = fn(value: any) -> atom
 
-#* returns type of value as atom: nil, num, string, atom, function, table, tuple, foreign *#
+#* returns type of value as atom: nil, num, string, atom, function, table, foreign *#
 pub declare typeof = fn(value: any) -> atom
 
 #* used in tests, returns value or :err *#
@@ -40,17 +40,17 @@ pub declare set_debug = fn(flags: table) -> :ok
 #* returns debug info as a table *#
 pub declare debug = fn() -> table
 
-#* unwraps result tuple, panics if not :ok *#
-pub declare unwrap = fn(result: tuple) -> any
+#* unwraps result, panics if not :ok *#
+pub declare unwrap = fn(result: any) -> any
 
 #* creates a new channel with optional buffer size *#
-pub declare chan = fn(?capacity: num...) -> tuple
+pub declare chan = fn(?capacity: num...) -> {:chan, num}
 
 #* sends value to channel *#
-pub declare send = fn(chan: tuple, value: any) -> :ok
+pub declare send = fn(chan: {:chan, num}, value: any) -> :ok
 
 #* receives value from channel, parks if empty *#
-pub declare recv = fn(chan: tuple) -> any
+pub declare recv = fn(chan: {:chan, num}) -> any
 
 #* sleeps current fiber for given milliseconds *#
 pub declare sleep = fn(ms: num) -> parked

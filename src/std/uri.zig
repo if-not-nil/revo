@@ -32,16 +32,16 @@ pub const Impl = struct {
     pub fn encode(vm: *VM, self: Ts.table) !HostResult {
         var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
         defer out.deinit();
-        const table = try vm.tables.get(@intFromEnum(self));
+        const val = Data.new.table(@intFromEnum(self));
 
-        try writePart(table, "scheme", null, ":", &out.writer, vm);
-        try writeAuthority(table, &out.writer, vm);
-        try writePart(table, "user", null, "@", &out.writer, vm);
-        try writePart(table, "host", null, null, &out.writer, vm);
-        try writePort(table, &out.writer, vm);
-        try writePart(table, "path", null, null, &out.writer, vm);
-        try writeQuery(table, &out.writer, vm);
-        try writePart(table, "fragment", "#", null, &out.writer, vm);
+        try writePart(val, "scheme", null, ":", &out.writer, vm);
+        try writeAuthority(val, &out.writer, vm);
+        try writePart(val, "user", null, "@", &out.writer, vm);
+        try writePart(val, "host", null, null, &out.writer, vm);
+        try writePort(val, &out.writer, vm);
+        try writePart(val, "path", null, null, &out.writer, vm);
+        try writeQuery(val, &out.writer, vm);
+        try writePart(val, "fragment", "#", null, &out.writer, vm);
 
         const slice = try out.toOwnedSlice();
         const data = try vm.adoptDataString(slice);
@@ -51,20 +51,18 @@ pub const Impl = struct {
 
 pub const impls: []const api.Impl = root.impls(Impl).val;
 
-fn writePart(table: *Table, name: []const u8, prefix: ?[]const u8, postfix: ?[]const u8, w: *std.Io.Writer, vm: *VM) !void {
-    const key = try vm.internAtom(name);
-    if (table.getRawAtom(key, vm)) |part| {
-        if (part.asString()) |val| {
+fn writePart(val: Data, name: []const u8, prefix: ?[]const u8, postfix: ?[]const u8, w: *std.Io.Writer, vm: *VM) !void {
+    if (vm.getField(val, name)) |part| {
+        if (part.asString()) |sid| {
             if (prefix) |pre| try w.writeAll(pre);
-            try w.writeAll(vm.stringValue(val));
+            try w.writeAll(vm.stringValue(sid));
             if (postfix) |post| try w.writeAll(post);
         }
     }
 }
 
-fn writePort(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
-    const key = try vm.internAtom("port");
-    if (table.getRawAtom(key, vm)) |port| {
+fn writePort(val: Data, w: *std.Io.Writer, vm: *VM) !void {
+    if (vm.getField(val, "port")) |port| {
         if (port.asNum()) |num| {
             try w.writeAll(":");
             try w.print("{d}", .{num});
@@ -73,17 +71,14 @@ fn writePort(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
 }
 
 /// write `//` if a user or host exist to indicate the start of the authority
-fn writeAuthority(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
-    const user_id = try vm.internAtom("user");
-    const host_id = try vm.internAtom("host");
-
-    if (table.getRawAtom(user_id, vm) != null or table.getRawAtom(host_id, vm) != null) {
+fn writeAuthority(val: Data, w: *std.Io.Writer, vm: *VM) !void {
+    if (vm.getField(val, "user") != null or vm.getField(val, "host") != null) {
         try w.writeAll("//");
     }
 }
 
-fn writeQuery(table: *Table, w: *std.Io.Writer, vm: *VM) !void {
-    if (table.getRawAtom(try vm.internAtom("query"), vm)) |query| {
+fn writeQuery(val: Data, w: *std.Io.Writer, vm: *VM) !void {
+    if (vm.getField(val, "query")) |query| {
         if (query.asTable()) |query_id| {
             const query_table = try vm.tables.get(query_id);
             try w.writeAll("?");
@@ -115,7 +110,7 @@ fn writeHashQuery(table: *Table, w: *std.Io.Writer, first: *bool, vm: *VM) !void
     var it = table.hash.orderedIterator();
     while (it.next()) |param| {
         if (param.key.asAtom()) |key| {
-            if (param.val.asTable()) |param_id| {
+            if (param.value.asTable()) |param_id| {
                 if (vm.tables.get(param_id)) |param_table| {
                     for (param_table.array.items) |item| {
                         if (!first.*) try w.writeAll("&");
@@ -135,9 +130,9 @@ fn writeHashQuery(table: *Table, w: *std.Io.Writer, first: *bool, vm: *VM) !void
                 try w.writeAll(vm.stringValue(key));
                 try w.writeAll("=");
 
-                if (param.val.asStr()) |val| {
+                if (param.value.asStr()) |val| {
                     try w.writeAll(vm.stringValue(val));
-                } else if (param.val.asNum()) |val| {
+                } else if (param.value.asNum()) |val| {
                     try w.print("{d}", .{val});
                 }
                 first.* = false;
@@ -147,8 +142,7 @@ fn writeHashQuery(table: *Table, w: *std.Io.Writer, first: *bool, vm: *VM) !void
 }
 
 fn parseScheme(uri: *const Uri, root_id: usize, vm: *VM) !void {
-    var root_table = try vm.tables.get(root_id);
-    try root_table.putRawAtom(try vm.internAtom("scheme"), try vm.ownDataString(uri.scheme), vm);
+    try vm.putField(root_id, "scheme", try vm.ownDataString(uri.scheme));
 }
 
 fn parseParam(param: []const u8, query_id: usize, vm: *VM) !void {
@@ -193,25 +187,20 @@ fn parseQuery(uri: *const Uri, root_id: usize, vm: *VM) !void {
             const param = params.next().?;
             try parseParam(param, table_id, vm);
         }
-        var root_table = try vm.tables.get(root_id);
-        try root_table.putRawAtom(try vm.internAtom("query"), Data.new.table(table_id), vm);
+        try vm.putField(root_id, "query", Data.new.table(table_id));
     }
 }
 
 fn parsePort(uri: *const Uri, root_id: usize, vm: *VM) !void {
     if (uri.port) |port| {
-        const port_data = Data.new.num(port);
-        var root_table = try vm.tables.get(root_id);
-        try root_table.putRawAtom(try vm.internAtom("port"), port_data, vm);
+        try vm.putField(root_id, "port", Data.new.num(port));
     }
 }
 
 fn parseComponent(component: ?Component, name: []const u8, root_id: usize, vm: *VM) !void {
     if (component) |c| {
-        const key = try vm.internAtom(name);
         const value = try vm.ownDataString(c.percent_encoded);
-        var root_table = try vm.tables.get(root_id);
-        try root_table.putRawAtom(key, value, vm);
+        try vm.putField(root_id, name, value);
     }
 }
 

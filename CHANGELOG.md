@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 the table version `┬─┬ノ( º _ ºノ)`
 
-everything is gone now, most breaking change yet
+tuples and structs are gone now, most breaking change yet
 
 ### Added
 
@@ -76,7 +76,6 @@ everything is gone now, most breaking change yet
   `{:ok, num} | {:err, string}` binds `v: num`
 
   everything takes them
-  tuple patterns dont do it, they are gonna be gone soon
 
 - table destructuring!
 
@@ -90,14 +89,18 @@ everything is gone now, most breaking change yet
   , so you can expect binds to work just as well:
 
   ```ruby
-  let t = { 1, { 10 } }
-  let { a: number, { b } } = t
+  let t = {1, {10}}
+  let {a: number, {b}} = t
 
   a + b
   # => 11
   ```
 
 - std:
+  - `stats` module -- build a table for statistics
+  - `frame` module -- dataframe-like structure
+  - table methods: `get` with fallback, `empty?`, `update`, `deep_copy`,
+    `slice`; `add` is gone, use `merge`
   - `hash(any) -> num`
   - `fs`:
     - `fs.open(path, mode?)`: mode is `"r"` (default, opens existing), `"w"`
@@ -108,6 +111,11 @@ everything is gone now, most breaking change yet
     - `file.stat` / `fs.stat` take `follow?` (`:false` leaves symlinks alone, replacing `lstat`)
     - `fs.exists?` returns plain `bool` instead of `!bool`
     - `fs.touch(path)`, `fs.copy(src, dst)`
+
+- c table api reworked around table values instead of ids:
+  `get_idx`, `push`, `from_items`, name-keyed get/set, `revo_ok`/`revo_err`
+  constructors with `is_ok`/`is_err`/`ok_value` checks; lookups report
+  presence through the return value, `len`/`alen` split made explicit
 
 ### Removed
 
@@ -136,6 +144,8 @@ everything is gone now, most breaking change yet
   `.d.rv` manifest just like the normal `import "raylib.so"`
 - lsp signatures show generics and optional params:
   `fn id[T](v: T) -> T`, `f(a: num, b?: num)` in hover and signature help
+- `revo -e` no longer runs piped stdin as a program first, stdin stays available
+  for `input()`, so `echo hi | revo -e 'input()?'` runs the inline code
 
 ## [0.1.2] - 2026-09-05
 

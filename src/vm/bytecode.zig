@@ -76,16 +76,8 @@ fn serializeData(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, item
         },
         .function => try writeIntLE(buffer, allocator, u64, item.asFunction().?),
         .table => try writeIntLE(buffer, allocator, u64, item.asTable().?),
-        .tuple => try serializeTuple(buffer, allocator, vm, item.asTuple().?),
         .foreign => unreachable,
     }
-}
-
-fn serializeTuple(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, tid: memory.TupleID) anyerror!void {
-    const tuple = try vm.tuples.get(tid);
-
-    try writeIntLE(buffer, allocator, u32, @intCast(tuple.items.len));
-    for (tuple.items) |item| try serializeData(buffer, allocator, vm, item);
 }
 
 //
@@ -161,7 +153,7 @@ pub fn serialize(vm: *VM, artifact: Artifact, allocator: Allocator) ![]u8 {
 //
 
 /// read a single Data value from the byte stream
-fn readDataValue(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) anyerror!memory.Data {
+fn readDataValue(vm: *VM, reader: *std.Io.Reader) anyerror!memory.Data {
     const tag = (try reader.takeArray(1))[0];
     return switch (tag) {
         @intFromEnum(memory.Type.number) => blk: {
@@ -187,25 +179,11 @@ fn readDataValue(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) anyerror
             const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
             break :blk memory.Data.new.table(@intCast(tid));
         },
-        @intFromEnum(memory.Type.tuple) => try deserializeTuple(vm, reader, allocator),
         else => blk: {
             _ = try reader.takeArray(8); // skip u64 payload
             break :blk memory.Data.new.nil();
         },
     };
-}
-
-/// read a tuple value from the byte stream
-fn deserializeTuple(vm: *VM, reader: *std.Io.Reader, allocator: Allocator) anyerror!memory.Data {
-    const items_len = std.mem.littleToNative(u32, std.mem.readInt(u32, try reader.takeArray(4), .little));
-    const items = try allocator.alloc(memory.Data, items_len);
-    errdefer allocator.free(items);
-
-    for (items) |*item| item.* = try readDataValue(vm, reader, allocator);
-
-    const tid = try vm.tuples.create(items);
-    allocator.free(items); // tuples.create copies
-    return memory.Data.new.tuple(tid);
 }
 
 // load bytecode from a binary blob, populating vm constants and prototypes
@@ -245,7 +223,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
 
     // consts
     for (0..constants_count) |_| {
-        try vm.constants.append(allocator, try readDataValue(vm, &reader, allocator));
+        try vm.constants.append(allocator, try readDataValue(vm, &reader));
     }
 
     // prototypes

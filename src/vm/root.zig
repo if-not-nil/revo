@@ -24,7 +24,6 @@ pub const isFalse = @import("memory.zig").isFalse;
 pub const Scheduler = @import("scheduler.zig").Scheduler;
 pub const table = @import("table.zig");
 pub const tests = @import("tests.zig");
-pub const tuple = @import("tuple.zig");
 pub const VM = @import("VM.zig").VM;
 
 // re-exports from root module (source of truth)
@@ -41,5 +40,4 @@ test {
     _ = @import("opcode.zig");
     _ = @import("table.zig");
     _ = @import("tests.zig");
-    _ = @import("tuple.zig");
 }

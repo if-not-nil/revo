@@ -12,7 +12,6 @@ x for done,
 - [x] ambient type declarations
   - [x] maybe via ambient `.d.rv` declaration files that are not parse-only without side-effects?
 - [x] predictable type inference and typechecker
-  - [x] needed to optimize bytecode generation (e.g., distinguish `table_get` vs `tuple_get`)
   - [x] needed for zerocost comptime type-checking (e.g., picking the right loop iterator)
   - [x] struct layouts now comptime
 
@@ -42,9 +41,9 @@ x for done,
     #*
     > double(n: positive number) -> n * 2
     >> double(2)
-    (:ok, 4)
+    {:ok, 4}
     >> double("hi")
-    (:err, "arg 0 is not a positive number")
+    {:err, "arg 0 is not a positive number"}
     *#
     fn double(n: number) match n
     | x when x > 0 and number?(x) ok(x*2)
@@ -207,8 +206,8 @@ build(fn(b) do
   b:packages({
       {"@web", version: "0.1.2^"}
   })
-  b:command("run", "run the server", (:Exec, "src/main.rv"))
-  b:command("build", "build the server", (:Cmd, do
+  b:command("run", "run the server", {:Exec, "src/main.rv"})
+  b:command("build", "build the server", {:Cmd, do
     b:ensure_dir("out")
     b:sync("static", "out/static")
     b:compile({
@@ -234,7 +233,7 @@ build(fn(b) do
   b:packages({
       {"@web", version: "0.1.2^"}
   })
-  b:command("manifest", "build the manifest", (:Cmd, do
+  b:command("manifest", "build the manifest", {:Cmd, do
     b:build_manifest("./manifest.ini")
   end))
 end)
