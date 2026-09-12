@@ -379,7 +379,7 @@ pub const Compiler = struct {
         var result_reg: Register = 0;
 
         switch (op) {
-            .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .pow, .pow_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
+            .add, .sub, .mul, .div, .mod, .concat, .band, .bor, .bxor, .shl, .shr, .int_div, .pow, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int, .@"and", .@"or" => {
                 std.debug.assert(d >= 2);
                 result_reg = try toRegister(d - 2);
                 d -= 1;
@@ -387,7 +387,7 @@ pub const Compiler = struct {
                 const lhs = try self.pop();
                 _ = try self.record(op, &.{ .{ .inst = lhs }, .{ .inst = rhs } }, true, result_reg, 0);
             },
-            .negate, .not, .negate_int => {
+            .negate, .not => {
                 std.debug.assert(d > 0);
                 result_reg = try toRegister(d - 1);
                 const opnd = try self.pop();

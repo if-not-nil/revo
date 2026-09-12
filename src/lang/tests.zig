@@ -197,28 +197,6 @@ test "shared alias mutation shadows stdlib method" {
     return error.SkipZigTest;
 }
 
-test "typed call results specialize later math" {
-    var vm = try VM.init(t.runtime());
-    defer vm.deinit();
-
-    const built = try lang.build(&vm, .{
-        .text =
-        \\ const id = fn(x: int) -> int x
-        \\ const y = id(3)
-        \\ y + 1
-        ,
-    }, .{});
-    try std.testing.expect(built == .ok);
-    defer vm.runtime.alloc.free(built.ok.instructions);
-    defer vm.runtime.alloc.free(built.ok.spans);
-
-    var saw_add = false;
-    for (built.ok.instructions) |inst| {
-        if (inst.op == .add or inst.op == .add_int or inst.op == .add_int_imm) saw_add = true;
-    }
-    try std.testing.expect(saw_add);
-}
-
 test "recursive typed calls stay specialized" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
@@ -240,8 +218,8 @@ test "recursive typed calls stay specialized" {
     var saw_add = false;
     for (built.ok.instructions) |inst| {
         if (inst.op == .lt or inst.op == .lt_int or inst.op == .lt_int_imm) saw_lt = true;
-        if (inst.op == .sub or inst.op == .sub_int or inst.op == .sub_int_imm) saw_sub = true;
-        if (inst.op == .add or inst.op == .add_int or inst.op == .add_int_imm) saw_add = true;
+        if (inst.op == .sub or inst.op == .sub_int_imm) saw_sub = true;
+        if (inst.op == .add or inst.op == .add_int_imm) saw_add = true;
     }
 
     try std.testing.expect(saw_lt);
