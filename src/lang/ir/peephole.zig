@@ -70,7 +70,7 @@ pub fn peepholeIr(self: *Compiler) !void {
             .store_local, .bind_local => eliminateSelfLoad(i, insts, live, is_target),
             .table_set_atom => eliminateFieldRefetch(i, insts, live, is_target),
             .table_get_atom => reuseObjectLoad(i, insts, live, is_target),
-            .add, .sub, .mul, .div, .mod, .int_div, .band, .bor, .bxor, .shl, .shr, .add_int, .sub_int, .mul_int, .mod_int, .div_int, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => _ = try foldIdentity(self, i, insts, live),
+            .add, .sub, .mul, .div, .mod, .int_div, .band, .bor, .bxor, .shl, .shr, .add_int_imm, .sub_int_imm, .mul_int_imm, .band_int_imm, .lt_int_imm => _ = try foldIdentity(self, i, insts, live),
             .jump => {
                 if (inst.op_arg == i + 1) live[i] = false;
             },
@@ -607,23 +607,22 @@ fn constInt(self: *Compiler, inst: *const ir.IrInst) ?i64 {
 
 fn commutative(op: Opcode) bool {
     return switch (op) {
-        .add, .mul, .band, .bor, .bxor, .add_int, .mul_int, .band_int, .bor_int, .bxor_int => true,
+        .add, .mul, .band, .bor, .bxor => true,
         else => false,
     };
 }
 
 fn identityWith(op: Opcode, c: i64) bool {
     return switch (op) {
-        .add, .add_int, .add_int_imm, .sub, .sub_int, .sub_int_imm, .bor_int, .bxor_int, .shl_int, .shr_int => c == 0,
-        .mul, .mul_int, .mul_int_imm, .div, .div_int, .int_div => c == 1,
+        .add, .add_int_imm, .sub, .sub_int_imm => c == 0,
+        .mul, .mul_int_imm, .div, .int_div => c == 1,
         else => false,
     };
 }
 
 fn annihilatorWith(op: Opcode, c: i64) bool {
     return switch (op) {
-        .mul_int, .mul_int_imm, .band_int, .band_int_imm => c == 0,
-        .mod_int => c == 1,
+        .mul_int_imm, .band_int_imm => c == 0,
         else => false,
     };
 }
@@ -688,7 +687,7 @@ test "peephole: add zero folds away" {
     defer vm.runtime.alloc.free(built.ok.spans);
 
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add or inst.op == .add_int or inst.op == .move) return error.TestUnexpectedResult;
+        if (inst.op == .add or inst.op == .move) return error.TestUnexpectedResult;
     }
 }
 

@@ -22,10 +22,10 @@ pub fn foldIr(self: *Compiler) !void {
 
 fn tryFoldInst(self: *Compiler, inst: *ir.IrInst) !bool {
     switch (inst.opcode) {
-        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int, .mod_int, .pow, .pow_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .div_int, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
+        .add, .sub, .mul, .div, .mod, .concat, .pow, .band, .bor, .bxor, .shl, .shr, .int_div, .eq, .neq, .lt, .gt, .lte, .gte, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => {
             return tryFoldBinary(self, inst);
         },
-        .negate, .not, .negate_int => {
+        .negate, .not => {
             return tryFoldUnary(self, inst);
         },
         else => return false,
@@ -91,22 +91,22 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
             else => false,
         };
         const is_int = switch (inst.opcode) {
-            .add_int, .sub_int, .mul_int, .mod_int, .div_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => true,
+            .band, .bor, .bxor, .shl, .shr, .int_div, .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int => true,
             else => false,
         };
 
         // bitwise folds only on integral values; `//` folds for floats too
         // (floor), no fold on div-by-zero or non-finite results
         const is_int_only = switch (inst.opcode) {
-            .band, .bor, .bxor, .shl, .shr, .band_int, .bor_int, .bxor_int, .shl_int, .shr_int => true,
+            .band, .bor, .bxor, .shl, .shr => true,
             else => false,
         };
         const is_floor_div = switch (inst.opcode) {
-            .int_div, .div_int => true,
+            .int_div => true,
             else => false,
         };
         const is_pow = switch (inst.opcode) {
-            .pow, .pow_int => true,
+            .pow => true,
             else => false,
         };
         if (is_int_only or is_floor_div or is_pow) {
@@ -114,15 +114,15 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
                 const li = revo.memory.numToI64(ln) orelse return false;
                 const ri = revo.memory.numToI64(rn) orelse return false;
                 const raw: f64 = switch (inst.opcode) {
-                    .band, .band_int => @floatFromInt(li & ri),
-                    .bor, .bor_int => @floatFromInt(li | ri),
-                    .bxor, .bxor_int => @floatFromInt(li ^ ri),
-                    .shl, .shl_int => blk: {
+                    .band => @floatFromInt(li & ri),
+                    .bor => @floatFromInt(li | ri),
+                    .bxor => @floatFromInt(li ^ ri),
+                    .shl => blk: {
                         if (ri < 0 or ri > 63) break :blk std.math.nan(f64);
                         const shifted: i64 = @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri)));
                         break :blk @floatFromInt(shifted);
                     },
-                    .shr, .shr_int => blk: {
+                    .shr => blk: {
                         if (ri < 0 or ri > 63) break :blk std.math.nan(f64);
                         break :blk @floatFromInt(li >> @as(u6, @intCast(ri)));
                     },
@@ -158,9 +158,9 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
         }
 
         const raw: f64 = switch (inst.opcode) {
-            .add, .add_int => ln + rn,
-            .sub, .sub_int => ln - rn,
-            .mul, .mul_int => ln * rn,
+            .add => ln + rn,
+            .sub => ln - rn,
+            .mul => ln * rn,
             .div => if (rn == 0.0) return false else ln / rn,
             // mirror the vm's .mod: i32-range integers mod via i64 @mod
             // (sign of divisor), everything else fmod (sign of dividend)
@@ -173,12 +173,6 @@ fn tryFoldBinary(self: *Compiler, inst: *ir.IrInst) !bool {
                     ri.? >= std.math.minInt(i32) and ri.? <= std.math.maxInt(i32))
                     break :blk @floatFromInt(@mod(li.?, ri.?));
                 break :blk @mod(ln, rn);
-            },
-            .mod_int => blk: {
-                if (rn == 0.0) return false;
-                const li = revo.memory.numToI64(ln) orelse return false;
-                const ri = revo.memory.numToI64(rn) orelse return false;
-                break :blk @floatFromInt(@mod(li, ri));
             },
             .eq, .eq_int => if (ln == rn) 1.0 else 0.0,
             .neq, .neq_int => if (ln != rn) 1.0 else 0.0,
@@ -231,7 +225,7 @@ fn tryFoldUnary(self: *Compiler, inst: *ir.IrInst) !bool {
     const n = val.asNum().?;
     const is_not = inst.opcode == .not;
     const raw: f64 = switch (inst.opcode) {
-        .negate, .negate_int => -n,
+        .negate => -n,
         .not => if (n == 0.0) 1.0 else 0.0,
         else => return false,
     };
@@ -240,16 +234,7 @@ fn tryFoldUnary(self: *Compiler, inst: *ir.IrInst) !bool {
         try rewriteToConst(self, inst, Data.new.boolean(n == 0.0));
     } else {
         if (!std.math.isFinite(raw)) return false;
-        const is_int = inst.opcode == .negate_int;
-        if (is_int) {
-            if (@floor(raw) != raw) return false;
-            const min: f64 = @floatFromInt(std.math.minInt(i64));
-            const max: f64 = @floatFromInt(std.math.maxInt(i64));
-            if (raw < min or raw > max) return false;
-            try rewriteToConst(self, inst, Data.new.num(@as(i64, @intFromFloat(raw))));
-        } else {
-            try rewriteToConst(self, inst, Data.new.num(raw));
-        }
+        try rewriteToConst(self, inst, Data.new.num(raw));
     }
     return true;
 }

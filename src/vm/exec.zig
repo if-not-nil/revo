@@ -392,87 +392,6 @@ inline fn execFiberDispatch(
                 .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
             );
         },
-        .mod_int => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
-            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
-            if (ri == 0) return self.evalFailure(error.DivisionByZero);
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@mod(li, ri)))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        inline .band_int, .bor_int, .bxor_int => |op| {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
-            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
-            const result: i64 = switch (op) {
-                .band_int => li & ri,
-                .bor_int => li | ri,
-                else => li ^ ri,
-            };
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(result))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        inline .shl_int, .shr_int => |op| {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
-            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
-            if (ri < 0 or ri > 63) return self.fail(
-                error.ShiftAmountOutOfRange,
-                "shift amount {d} out of range",
-                .{ri},
-            );
-
-            const shifted: i64 = switch (op) {
-                .shl_int => @bitCast(@as(u64, @bitCast(li)) << @as(u6, @intCast(ri))),
-                else => li >> @as(u6, @intCast(ri)),
-            };
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(shifted))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        .div_int => {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
-            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
-            if (ri == 0) return self.evalFailure(error.DivisionByZero);
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(@divFloor(li, ri)))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
         .negate => {
             const v = regRead(regs, base, instr.b);
             if (v.asNum()) |n| {
@@ -483,45 +402,8 @@ inline fn execFiberDispatch(
             }
             return self.fail(error.IncompatibleTypes, "cannot negate {s}", .{revo.std_lib.typeof(v, self)});
         },
-        .negate_int => {
-            const v = regRead(regs, base, instr.b);
-            if (debug_assert_types) std.debug.assert(v.isNumber());
-            const v_int: i64 = revo.memory.numToI64(@as(f64, @bitCast(v.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(v, self)});
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(-v_int))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        inline .add_int, .sub_int, .mul_int => |op| {
-            const lhs = regRead(regs, base, instr.b);
-            const rhs = regRead(regs, base, instr.c);
-            if (debug_assert_types) {
-                std.debug.assert(lhs.isNumber());
-                std.debug.assert(rhs.isNumber());
-            }
-            const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(lhs, self)});
-            const ri: i64 = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.std_lib.typeof(rhs, self)});
-            const result: i64 = switch (op) {
-                .add_int => li + ri,
-                .sub_int => li - ri,
-                else => li * ri,
-            };
-            regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(result))));
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
         .pow => {
             if (try execPow(self, regs, base, instr)) |failure| return failure;
-
-            if (!fetchNext(fiber, &instr)) break :dispatch;
-            continue :dispatch instr.op;
-        },
-        .pow_int => {
-            if (try execPowInt(self, regs, base, instr)) |failure| return failure;
 
             if (!fetchNext(fiber, &instr)) break :dispatch;
             continue :dispatch instr.op;
@@ -1399,32 +1281,6 @@ noinline fn execPow(self: *VM, regs: []Data, base: usize, instr: Instruction) VM
         "cannot exponentiate {s} by {s}",
         .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
     );
-}
-
-noinline fn execPowInt(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {
-    const lhs = regRead(regs, base, instr.b);
-    const rhs = regRead(regs, base, instr.c);
-    if (debug_assert_types) {
-        std.debug.assert(lhs.isNumber());
-        std.debug.assert(rhs.isNumber());
-    }
-    const li = revo.memory.numToI64(@as(f64, @bitCast(lhs.bits)));
-    const ri = revo.memory.numToI64(@as(f64, @bitCast(rhs.bits)));
-    if (li != null and ri != null and ri.? >= 0) {
-        regWrite(regs, base, instr.a, Data.new.num(@as(f64, @floatFromInt(revo.memory.ipow(li.?, ri.?)))));
-    } else {
-        const ln: f64 = @bitCast(lhs.bits);
-        const rn: f64 = @bitCast(rhs.bits);
-        const result = std.math.pow(f64, ln, rn);
-        if (std.math.isNan(result)) return self.fail(
-            error.IncompatibleTypes,
-            "cannot exponentiate {s} by {s}",
-            .{ revo.std_lib.typeof(lhs, self), revo.std_lib.typeof(rhs, self) },
-        );
-
-        regWrite(regs, base, instr.a, Data.new.num(result));
-    }
-    return null;
 }
 
 noinline fn execPowFloat(self: *VM, regs: []Data, base: usize, instr: Instruction) VM.EvalError!?VM.EvalFailure {

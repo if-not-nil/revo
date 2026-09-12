@@ -1162,7 +1162,7 @@ test "binary float literal + float emits add" {
     try std.testing.expect(saw_add);
 }
 
-test "negate num emits negate_int" {
+test "negate num emits negate" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1733,11 +1733,11 @@ test "comp block infers num from literal" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "never collapses in if and orelse inference" {
@@ -1766,7 +1766,7 @@ test "never arms don't poison match result type" {
 
 test "match narrowing works for call subjects" {
     // the subject is a call, not an ident: `v` still narrows to the payload
-    // type (from the fn's declared return) and `v + 1` emits add_int
+    // type (from the fn's declared return) and `v + 1` emits add_int_imm
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1783,15 +1783,15 @@ test "match narrowing works for call subjects" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
-test "match narrowing enables specialized add_int from table union payload" {
-    // `v` narrows to num so `v + 1` emits add_int
+test "match narrowing enables specialized add_int_imm from table union payload" {
+    // `v` narrows to num so `v + 1` emits add_int_imm
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1808,16 +1808,16 @@ test "match narrowing enables specialized add_int from table union payload" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "match ascriptions narrow to the annotated type" {
     // `v: num` narrows even with an `any` subject
-    //   ; so `v + 1` emits add_int
+    //   ; so `v + 1` emits add_int_imm
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1833,11 +1833,11 @@ test "match ascriptions narrow to the annotated type" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "return type propagation: const binding with annotated fn" {
@@ -1855,11 +1855,11 @@ test "return type propagation: const binding with annotated fn" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "return type propagation: fn five() 5" {
@@ -1877,11 +1877,11 @@ test "return type propagation: fn five() 5" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "annotated function return type propagates to caller via pointer" {
@@ -1899,11 +1899,11 @@ test "annotated function return type propagates to caller via pointer" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 //
@@ -1984,7 +1984,7 @@ test "substituteTypeParams function sig with type var" {
     alloc.destroy(result.tag.function);
 }
 
-test "generics identity fn enables add_int" {
+test "generics identity fn enables add_int_imm" {
     var vm = try VM.init(testRuntime());
     defer vm.deinit();
 
@@ -1999,11 +1999,11 @@ test "generics identity fn enables add_int" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "generics identity fn with string compiles and runs" {
@@ -2082,11 +2082,11 @@ test "generics repeated type param works" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "explicit call-site type args make[num]() resolves return type" {
@@ -2121,11 +2121,11 @@ test "stdlib sigs: method return types reach the compiler" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "stdlib sigs: global return types reach the compiler" {
@@ -2272,11 +2272,11 @@ test "declare fn return type reaches the compiler" {
     defer vm.runtime.alloc.free(built.ok.instructions);
     defer vm.runtime.alloc.free(built.ok.spans);
 
-    var saw_add_int = false;
+    var saw_add_imm = false;
     for (built.ok.instructions) |inst| {
-        if (inst.op == .add_int or inst.op == .add_int_imm) saw_add_int = true;
+        if (inst.op == .add_int_imm) saw_add_imm = true;
     }
-    try std.testing.expect(saw_add_int);
+    try std.testing.expect(saw_add_imm);
 }
 
 test "declare rejects duplicate names" {

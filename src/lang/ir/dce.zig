@@ -64,7 +64,7 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
 
         .halt, .ret, .jump_if_false, .jump_if_true, .jump_err,
         .store_global, .store_global_const, .store_upval,
-        .store_local, .bind_local, .negate, .not, .negate_int,
+        .store_local, .bind_local, .negate, .not,
         .join, .add_int_imm, .sub_int_imm, .mul_int_imm,
         .band_int_imm, .lt_int_imm, .unwrap_result => {
             out[0] = r;
@@ -80,10 +80,9 @@ pub fn readRegs(inst: *const ir.IrInst, out: []Register) usize {
             return 1;
         },
 
-        .add, .sub, .mul, .div, .mod, .concat, .add_int, .sub_int, .mul_int,
-        .mod_int, .band, .bor, .bxor, .shl, .shr, .int_div, .band_int,
-        .bor_int, .bxor_int, .shl_int, .shr_int, .div_int,
-        .pow, .pow_int, .eq, .neq, .lt, .gt, .lte, .gte,
+        .add, .sub, .mul, .div, .mod, .concat,
+        .band, .bor, .bxor, .shl, .shr, .int_div,
+        .pow, .eq, .neq, .lt, .gt, .lte, .gte,
         .eq_int, .neq_int, .lt_int, .gt_int, .lte_int, .gte_int,
         .@"and", .@"or", .table_get,
         .table_set_atom => {
@@ -635,7 +634,7 @@ test "dce: folded constants and dead operands are both removed" {
 
     for (built.ok.instructions) |inst| {
         switch (inst.op) {
-            .add, .mul, .pow, .pow_int => return error.TestUnexpectedResult,
+            .add, .mul, .pow => return error.TestUnexpectedResult,
             else => {},
         }
     }

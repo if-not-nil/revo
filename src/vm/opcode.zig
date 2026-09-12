@@ -29,26 +29,12 @@ pub const Opcode = enum(u8) {
     shr, // "R[a] <- R[b] >> R[c] (int operands)"
     int_div, // "R[a] <- R[b] // R[c] (floor int division)"
     negate, // "R[a] <- -R[b]"
-    // typed unary
-    negate_int, // "R[a] <- -(int)R[b]"
-    // typed arith
-    add_int, // "R[a] <- (int)R[b] + (int)R[c]"
-    sub_int, // "R[a] <- (int)R[b] - (int)R[c]"
-    mul_int, // "R[a] <- (int)R[b] * (int)R[c]"
-    mod_int, // "R[a] <- (int)R[b] % (int)R[c]"
-    band_int, // "R[a] <- (int)R[b] & (int)R[c]"
-    bor_int, // "R[a] <- (int)R[b] | (int)R[c]"
-    bxor_int, // "R[a] <- (int)R[b] ^ (int)R[c]"
-    shl_int, // "R[a] <- (int)R[b] << (int)R[c] (wraps)"
-    shr_int, // "R[a] <- (int)R[b] >> (int)R[c]"
-    div_int, // "R[a] <- (int)R[b] // (int)R[c] (floor)"
     // typed arith with an immediate operand (bx = constant)
     add_int_imm, // "R[a] <- (int)R[b] + bx"
     sub_int_imm, // "R[a] <- (int)R[b] - bx"
     mul_int_imm, // "R[a] <- (int)R[b] * bx"
     band_int_imm, // "R[a] <- (int)R[b] & bx"
     pow, // "R[a] <- R[b] ^ R[c] (int if both integral, else float)"
-    pow_int, // "R[a] <- (int)R[b] ^ (int)R[c] (wraps; negative exp gives float)"
     /// "R[a] <- R[b] == R[c]"
     eq,
     neq, // "R[a] <- R[b] != R[c]"
