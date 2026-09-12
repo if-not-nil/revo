@@ -897,8 +897,11 @@ fn detachClosureForFiber(self: *VM, closure_id: mem.FunctionID) !mem.FunctionID 
         .host, .c_function => return closure_id,
     };
 
-    if (closure.sharable_upvalues) return closure_id;
-
+    // always snapshot
+    // : sharing the parent's open upvalues would let later
+    //   writes to the same register slot
+    //     (next loop iteration, scope reuse)
+    //   leak into the child fiber
     var detached = try std.ArrayList(root.functions.UpvalueID).initCapacity(
         self.runtime.alloc,
         closure.upvalues.len,
@@ -928,7 +931,13 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
     self.host_call_depth += 1;
     defer self.host_call_depth -= 1;
 
-    const fiber = self.currentFiber();
+    // running the callee can spawn fibers
+    //   , which appends to the fibers array and may realloc it
+    // . any cached fiber pointer dangles after
+    //   that, so track the fiber by id
+    //     and re-fetch after each nested run
+    const fiber_id = self.sched.current_fiber;
+    var fiber = self.currentFiber();
     const initial_frame_depth = fiber.frames.items.len;
     const initial_pc = fiber.pc;
     const initial_slot_len = fiber.registers_len;
@@ -991,6 +1000,7 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
     const argc: opcode.Register = @intCast(argc_usize);
 
     self.callRegister(.{ .op = .call, .a = call_reg, .b = argc, .c = call_reg }) catch |e| {
+        fiber = &self.sched.fibers.items[fiber_id];
         if (e == error.Parked) {
             self.rerouteParked(fiber, base, caller_frame_depth, result_reg);
             return e;
@@ -999,8 +1009,10 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
         return e;
     };
 
+    fiber = &self.sched.fibers.items[fiber_id];
     if (fiber.frames.items.len > caller_frame_depth) {
         const exec_result = vm_exec.execFiberUntilDepth(self, caller_frame_depth) catch |e| {
+            fiber = &self.sched.fibers.items[fiber_id];
             if (e == error.Parked) {
                 self.rerouteParked(fiber, base, caller_frame_depth, result_reg);
                 return e;
@@ -1011,6 +1023,7 @@ pub fn callFunctionParts(self: *VM, callee: Data, maybe_first: ?Data, args: []co
         if (exec_result) |_| return error.Panic;
     }
 
+    fiber = &self.sched.fibers.items[fiber_id];
     const result = fiber.registers[callee_slot];
     fiber.registers_len = callee_slot;
     return result;
@@ -1247,7 +1260,22 @@ fn callNonClosureFunction(
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
             try self.ensureAbsoluteSlot(args_end);
-            const args = fiber.registers[args_start..args_end];
+            // copy
+            // : host funcs call back into nested calls that append
+            //   to these same regs
+            //   and may realloc the buffer mid-execution
+            var stack_buf: [16]Data = undefined;
+            var heap_buf: ?[]Data = null;
+            defer if (heap_buf) |h| self.runtime.alloc.free(h);
+            const args: []const Data = if (argc <= stack_buf.len) blk: {
+                @memcpy(stack_buf[0..argc], fiber.registers[args_start..args_end]);
+                break :blk stack_buf[0..argc];
+            } else blk: {
+                const h = try self.runtime.alloc.alloc(Data, argc);
+                heap_buf = h;
+                @memcpy(h, fiber.registers[args_start..args_end]);
+                break :blk h;
+            };
 
             const total = if (f.total_arity > 0) f.total_arity else f.arity;
             if ((!f.variadic and (argc < f.arity or argc > total)) or
@@ -1420,7 +1448,7 @@ pub fn callRegister(
     self: *VM,
     instr: Instruction,
 ) EvalError!void {
-    const fiber = self.currentFiber();
+    var fiber = self.currentFiber();
     const base = fiber.top_base;
     const callee_slot = base + instr.a;
     const argc: usize = instr.b;
@@ -1557,16 +1585,38 @@ pub fn callRegister(
             Data.new.atom(revo.core_atoms.atomId(.__call)),
             null,
         )) |field| {
+            // resolveField could run __index user code
+            // , which may spawn and realloc the fibers array
+            fiber = self.currentFiber();
             const args_start = callee_slot + 1;
             const args_end = args_start + argc;
+
             try self.ensureAbsoluteSlot(args_end);
             const args = fiber.registers[args_start..args_end];
+            // copy
+            //   the nested call appends to these same registers and
+            //   may realloc the buffer args points into mid-copy
+            var stack_buf: [16]Data = undefined;
+            var heap_buf: ?[]Data = null;
+            defer if (heap_buf) |h| self.runtime.alloc.free(h);
+
+            const owned_args: []const Data = if (argc <= stack_buf.len) blk: {
+                @memcpy(stack_buf[0..argc], args);
+                break :blk stack_buf[0..argc];
+            } else blk: {
+                const h = try self.runtime.alloc.alloc(Data, argc);
+                heap_buf = h;
+                @memcpy(h, args);
+                break :blk h;
+            };
+
             const result = try self.callFunctionParts(
                 field.value,
                 callee,
-                args,
+                owned_args,
                 instr.c,
             );
+
             try self.ensureAbsoluteSlot(base + instr.c);
             try self.writeRegisterFast(
                 base,
@@ -1754,10 +1804,7 @@ pub inline fn spawnRegister(
             revo.Data.new.core(.missing);
     }
 
-    const child_closure_id = if (closure.sharable_upvalues)
-        closure_id
-    else
-        try self.detachClosureForFiber(closure_id);
+    const child_closure_id = try self.detachClosureForFiber(closure_id);
     try child.frames.append(self.runtime.alloc, .{
         .return_addr = @intCast(child.program.len),
         .base = 0,

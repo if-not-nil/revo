@@ -483,6 +483,26 @@ test "sleep join values are preserved per handle" {
     , 20);
 }
 
+test "spawn and join nest inside iterator maps" {
+    try t.topNumber(
+        \\ const pmap = fn(collection, func)
+        \\   (collection |> to_iter)
+        \\   :map(fn(x) spawn fn() func(x))
+        \\   :map(fn(x) join x):collect()
+        \\ const r = pmap({10, 20, 30}, fn(x) x * 2)
+        \\ r[0] + r[1] + r[2]
+    , 120);
+}
+
+test "spawn snapshots loop iteration values" {
+    try t.topNumber(
+        \\ let hs = {}
+        \\ for i in 0..5 do hs:push(spawn fn() i) end
+        \\ const r = (hs |> to_iter):map(fn(h) join h):collect()
+        \\ r[0] + r[1] + r[2] + r[3] + r[4]
+    , 10);
+}
+
 test "compiles unary operators and atom equality" {
     try t.topAtom("not :false", "true");
     try t.topAtom("not :true", "false");
