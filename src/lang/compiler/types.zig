@@ -562,9 +562,9 @@ pub fn inferExprType(ctx: anytype, node: *const ast.Node) TypeInfo {
         .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params, fn_expr.doc),
         .block => |exprs| inferBlockResultType(ctx, exprs),
         .return_expr => .{ .tag = .any },
-        .loop_expr => |v| inferExprType(ctx, v.body),
-        .for_loop => |v| inferExprType(ctx, v.body),
-        .while_loop => |v| inferExprType(ctx, v.body),
+        .loop_expr => |v| if (v.label == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
+        .for_loop => |v| if (v.label == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
+        .while_loop => |v| if (v.label == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
         .break_expr => |b| if (b.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
         .continue_expr => |c| if (c.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
         .labeled_block => |lb| inferExprType(ctx, lb.body),
@@ -1698,10 +1698,18 @@ test "dynamic callee validates argument types" {
         \\ f("hello")
     , .ParseError);
 }
-test "for loop expression produces num type" {
+test "for loop expression produces loop atom" {
+    try t.topAtom(
+        \\ fn f() do
+        \\   for i in 0..5 do i end
+        \\ end
+        \\ f()
+    , "loop");
     try t.topNumber(
         \\ fn f() -> num do
-        \\   for i in 0..5 do i end
+        \\   for/l i in 0..5 do
+        \\     if i == 4 break/l(i)
+        \\   end
         \\ end
         \\ f()
     , 4);

@@ -522,11 +522,17 @@ test "dce regression tests" {
 
     // the same loop but the break value is consumed, so its move must live
     try t.topNumber(
+        \\let r = loop/l do
+        \\  break/l 42
+        \\end
+        \\r
+    , 42);
+    try t.topAtom(
         \\let r = loop do
         \\  break 42
         \\end
         \\r
-    , 42);
+    , "loop");
 
     // a function whose dead leading arithmetic is eliminated, with a
     // conditional jump inside that must still reach the right branches

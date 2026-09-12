@@ -66,7 +66,7 @@ pub fn compileWhile(
     const exit_jump = try self.jump(.jump_if_false);
     try self.compile(body, true);
 
-    try normalizeLoopResult(self);
+    try self.regRelease();
     try self.emit(.jump, loop_start);
 
     self.patchJump(exit_jump);
@@ -171,7 +171,7 @@ pub fn compileRangeLoopBody(
 
     const loop_check: ProgramCounter = @intCast(self.irLen());
 
-    // drain the LoopScope result load_nil that used to feed jump_if_false
+    // drain the LoopScope result load that used to feed jump_if_false
     _ = try self.pop();
 
     if (value_slot) |slot| {
@@ -192,7 +192,7 @@ pub fn compileRangeLoopBody(
 
     try self.compile(body, true);
 
-    try normalizeLoopResult(self);
+    try self.regRelease();
 
     // L_check: bottom-tested range check with fused backbranch
     const check_idx: ProgramCounter = @intCast(self.irLen());
@@ -296,7 +296,7 @@ pub fn compileFor(
 
     try self.compile(body, true);
 
-    try normalizeLoopResult(self);
+    try self.regRelease();
 
     // idx += 1
     try self.emit(.load_local, idx_slot);
@@ -1141,6 +1141,16 @@ pub fn compileBreak(self: *Compiler, expr: *const Node, value: ?*const Node, lab
 
         return self.fail(.UnsupportedSyntax, expr, msg);
     };
+
+    if (label == null) {
+        if (value) |v| {
+            try self.compile(v, true);
+            try self.regRelease();
+        }
+        const jump_idx = try self.jump(.jump);
+        try frame.break_jumps.append(self.alloc, jump_idx);
+        return;
+    }
 
     if (value) |v| try self.compile(v, true) else try self.pushNil();
 

@@ -126,10 +126,13 @@ fn control_flow() do
   const sum = iter.reduce({0,1,2,3,4}, fn(a,b) a + b, 0)
   print(sum)
 
-  # loop creates an infinite loop - break returns a value
-  const loop_result = loop do
-    if :true break(42)
+  # loop creates an infinite loop!
+	# break/l returns a value, unlabeled is always :loop
+  const loop_result = loop/l do
+    if :true
+			break/l 42
   end
+
   print(loop_result)
 end
 

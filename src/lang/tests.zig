@@ -1136,50 +1136,60 @@ test "recursion works across top-level local and capturing closures" {
 test "loops thread state and break with a single value" {
     try t.topNumber(
         \\ let x = 0
-        \\ const result = loop do
+        \\ const result = loop/l do
         \\     if x < 10
         \\         x = x + 1
         \\     else
-        \\         break(x)
+        \\         break/l(x)
         \\ end
         \\ result
     , 10);
     try t.topNumber(
         \\ const scale = 2
         \\ let v = 1
-        \\ loop do
+        \\ loop/l do
         \\     if v < 10
         \\         v = v * scale
         \\     else
-        \\         break(v)
+        \\         break/l(v)
         \\ end
     , 16);
+    try t.topAtom(
+        \\ loop do
+        \\     break(:nil)
+        \\ end
+    , "loop");
 }
 
 test "loop breaks with explicit value" {
     try t.topNumber(
-        \\ loop do
-        \\     break(42)
+        \\ loop/l do
+        \\     break/l(42)
         \\ end
     , 42);
     try t.topNumber(
         \\ let i = 1
-        \\ loop do
+        \\ loop/l do
         \\     if i == 1
-        \\         break(99)
+        \\         break/l(99)
         \\     else
-        \\         break(i)
+        \\         break/l(i)
         \\ end
     , 99);
     try t.topNumber(
         \\ let i = 0
-        \\ loop do
+        \\ loop/l do
         \\   if i < 2
         \\     i = i + 1
         \\   else
-        \\     break(i)
+        \\     break/l(i)
         \\ end
     , 2);
+    try t.topAtom(
+        \\ loop do
+        \\   break(42)
+        \\ end
+    , "loop");
 }
 
 test "indexed table iteration gets value and index" {
@@ -1248,11 +1258,16 @@ test "for loop with range literal and variable end" {
 }
 
 test "for loop with range produces loop result" {
-    try t.topNumber(
+    try t.topAtom(
         \\ for i in 0..3 do
         \\     i + 10
         \\ end
-    , 12);
+    , "loop");
+    try t.topNumber(
+        \\ for/l i in 0..3 do
+        \\     if i == 1 break/l(i + 10)
+        \\ end
+    , 11);
 }
 
 test "while loop via while <cond> do <expr> end" {
@@ -1293,13 +1308,20 @@ test "continue in loop" {
     try t.topNumber(
         \\ let i = 0
         \\ let result = 0
-        \\ loop do
+        \\ loop/l do
         \\   i += 1
-        \\   if i > 5 break(result)
+        \\   if i > 5 break/l(result)
         \\   if i % 2 == 0 continue
         \\   result += i
         \\ end
     , 9);
+    try t.topAtom(
+        \\ let i = 0
+        \\ loop do
+        \\   i += 1
+        \\   if i > 5 break(i)
+        \\ end
+    , "loop");
 }
 
 test "continue in while" {
@@ -1350,15 +1372,26 @@ test "break in for loops" {
     , 10);
 
     try t.topNumber(
+        \\ for/l i in 0..10 do
+        \\     if i == 7 break/l(i)
+        \\ end
+    , 7);
+    try t.topAtom(
         \\ for i in 0..10 do
         \\     if i == 7 break(i)
         \\ end
-    , 7);
+    , "loop");
     try t.topAtom(
         \\ const x = for i in 0..5 do
         \\   break :nil
         \\ end
         \\ x
+    , "loop");
+    try t.topAtom(
+        \\ const y = for/l i in 0..5 do
+        \\   break/l :nil
+        \\ end
+        \\ y
     , "nil");
 }
 
@@ -1375,22 +1408,27 @@ test "break in while loops" {
     , 10);
     try t.topNumber(
         \\ let i = 0
+        \\ while/l i < 10 do
+        \\     if i == 7 break/l(i)
+        \\     i = i + 1
+        \\ end
+    , 7);
+    try t.topAtom(
+        \\ let i = 0
         \\ while i < 10 do
         \\     if i == 7 break(i)
         \\     i = i + 1
         \\ end
-    , 7);
+    , "loop");
 }
 
 test "while body result is loop value after iterations" {
-    try t.topNumber(
+    try t.topAtom(
         \\ let a = 0
-        \\ let x = while do
+        \\ while a < 3 do
         \\     a += 1
-        \\     a < 3
-        \\ end a
-        \\ x
-    , 2);
+        \\ end
+    , "loop");
 }
 
 test "loop with locals inside does not corrupt loop result" {
@@ -1399,14 +1437,21 @@ test "loop with locals inside does not corrupt loop result" {
         \\ let b = 1
         \\ let c = 2
         \\ let d = 3
-        \\ const x = loop do
+        \\ const x = loop/l do
         \\     let e = 4
         \\     let f = 5
         \\     let g = 6
-        \\     break(42)
+        \\     break/l(42)
         \\ end
         \\ x
     , 42);
+    try t.topAtom(
+        \\ const y = loop do
+        \\     let e = 4
+        \\     break(42)
+        \\ end
+        \\ y
+    , "loop");
 }
 
 test "for range with preceding locals and body locals" {
@@ -1417,23 +1462,23 @@ test "for range with preceding locals and body locals" {
         \\ let d = 3
         \\ let e = 4
         \\ let f = 5
-        \\ const x = for i in 0..3 do
+        \\ const x = for/l i in 0..3 do
         \\     let g = 6
         \\     let h = 7
-        \\     break(42)
+        \\     break/l(42)
         \\ end
         \\ x
     , 42);
 }
 
 test "for range with two params and preceding locals" {
-    try t.topNumber(
+    try t.topAtom(
         \\ let a = 0
         \\ const x = for i, idx in 0..3 do
         \\     i + idx
         \\ end
         \\ x
-    , 5);
+    , "loop");
 }
 
 test "triple-quoted multiline strings compile and evaluate" {
@@ -1609,13 +1654,22 @@ test "function return value destructuring" {
 test "basic loop with break" {
     try t.topNumber(
         \\ let a = 1
+        \\ loop/l do
+        \\     if a < 5
+        \\         a = a + 1
+        \\     else
+        \\         break/l(a)
+        \\ end
+    , 5);
+    try t.topAtom(
+        \\ let a = 1
         \\ loop do
         \\     if a < 5
         \\         a = a + 1
         \\     else
         \\         break(a)
         \\ end
-    , 5);
+    , "loop");
 }
 
 test "import caches modules and reuses the same table" {
@@ -1968,16 +2022,25 @@ test "multiple closures share same upvalue cell" {
 test "loop threading with guards" {
     try t.topNumber(
         \\ let x = 0
-        \\ loop do
+        \\ loop/l do
         \\     if x < 10
         \\         x = x + 1
         \\     else
-        \\         break(x)
+        \\         break/l(x)
         \\ end
     , 10);
 }
 test "big loop doesnt crash" {
     try t.topNumber(
+        \\ let x = 1
+        \\ loop/l do
+        \\     if x < 1000
+        \\         x = x + 1
+        \\     else
+        \\         break/l(x)
+        \\ end
+    , 1000);
+    try t.topAtom(
         \\ let x = 1
         \\ loop do
         \\     if x < 1000
@@ -1985,7 +2048,7 @@ test "big loop doesnt crash" {
         \\     else
         \\         break(x)
         \\ end
-    , 1000);
+    , "loop");
 }
 
 test "if expressions" {

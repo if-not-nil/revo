@@ -125,6 +125,21 @@ tuples and structs are gone now, most breaking change yet
 
 ### Changed
 
+- loops (`loop`, `while`, `for`) always evaluate to `:loop` unless explicitly broken out of (`break/l(v)`)
+
+  we needed this because body values no longer thread through;\
+  `for i in 0..3 do i end` is `:loop`, not `2`
+
+  ```ruby
+  const r = loop/l do
+    break/l(42)
+  end
+  # => 42
+
+  for i in 0..3 do i end
+  # => :loop
+  ```
+
 - compound ops (`a -= 1`, `b += 2`, `c ^= 3`) are real now and will not call the lhs twice
 - type-to-string rendering is unified
 - rendered types use spaces

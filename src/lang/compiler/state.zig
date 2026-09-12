@@ -96,7 +96,8 @@ pub fn LoopScope(comptime T: type) type {
             compiler.in_loop_depth += 1;
             const result_reg = try pushRegister(compiler);
             try compiler.spans.append(compiler.alloc, compiler.active_span);
-            try compiler.recordLoad(.load_nil, result_reg, 0);
+            const loop_idx = try compiler.vm.addConstant(revo.Data.new.core(.loop));
+            try compiler.recordLoad(.load_const, result_reg, loop_idx);
             try compiler.loop_stack.append(compiler.alloc, .{
                 .label = label,
                 .continue_target = 0,

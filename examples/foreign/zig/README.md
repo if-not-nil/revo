@@ -33,8 +33,9 @@ native extensions export functions that match the `HostFn` signature:
 `(args: []const Data, vm: *VM) anyerror!HostResult`
 
 in it, are:
+
 - actual error handling via `anyerror!HostResult`
-    this means you can use `try` anywhere and return any
+  this means you can use `try` anywhere and return any
 - arity & type checking by vm (you don't always have to do it manually, just setting up a .d.rv will typecheck at compile-time)
 - access to the actual full revo `*VM` (for string interning, table ops, etc.)
 
@@ -63,6 +64,7 @@ pub export const revo_native_bindings = [_]HostBinding{
 ### returning values
 
 **just values**
+
 ```zig
 // success
 return HostResult.data(Data.new.num(42));
