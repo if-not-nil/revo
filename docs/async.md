@@ -2,7 +2,7 @@
 title: 'the async runtime'
 ---
 
-# async runtime
+## async runtime
 
 revo runs fibers cooperatively. when a fiber hits i/o, it goes on to do more important things than waiting,
 on other fibers. the scheduler picks another ready fiber. when i/o completes, the fiber wakes up
@@ -11,7 +11,7 @@ it's important to me that your async code looks blocking but isn't, because it m
 
 this lets you spawn hundreds of fibers without threads, callbacks or other nasty things
 
-## fibers
+### fibers
 
 a fiber is just a lightweight task the scheduler managws. you spawn them like this:
 
@@ -40,7 +40,7 @@ spawn server()
 
 when `s:send()` would block, that fiber parks. the scheduler runs server fiber instead. once data is ready, the client fiber resumes with the result
 
-# concurrent networking for dummies
+## concurrent networking for dummies
 
 run it, open another terminal, type `nc localhost 6767` and you'll have yourself a shell
 you can then open infinity more terminals and run the same command and have them be handled at once
@@ -107,17 +107,20 @@ while accepted < 3 do
 end
 ```
 
-## the scheduler
+### the scheduler
+
 the coolest thing here is that async ops operate on generic tokens. that means, you can plug in
 any backend, as long as it returns the right results
 
 the scehduler, `src/vm/scheduler.zig`,
+
 - tracks fiber state (ready, waiting, running)
 - maintains the runqueue
 - tracks which fibers are waiting on i/o
 
 the key type is `WaitEntry`:
-```
+
+```text
 `fiber_id`:
     which fiber to wake
 `wait_id`:
@@ -132,7 +135,7 @@ the key type is `WaitEntry`:
     cleanup
 ```
 
-## i/o polling
+### i/o polling
 
 `pollIoWaiters()` in `src/std/net.zig` uses `std.posix.poll()` on posix. when a file descriptor is ready:
 
@@ -152,7 +155,7 @@ fn onRecvReady(vm: *VM, waiter: *Scheduler.WaitEntry, events: i16) !Scheduler.Io
 }
 ```
 
-## the async backend
+### the async backend
 
 optional. lets you offload blocking syscalls to worker threads so the main thread never blocks
 
@@ -180,7 +183,7 @@ pub const AsyncJob = struct {
 
 the default backend (`src/runtime/async_backend_posix.zig`) spins up worker threads. job goes to a thread, thread does the syscall, writes completion to a pipe, main thread polls it and wakes up the fiber
 
-## socket:send(data)
+### socket:send(data)
 
 ```revo
 const socket = (net.connect("example.com", 80))?
@@ -195,7 +198,7 @@ const result = socket:send("hello")?
 - sends bytes, updates offset if needed
 - when all sent, wakes fiber with `(:ok, bytes_sent)`
 
-## socket:recv(opts)
+### socket:recv(opts)
 
 ```revo
 const socket = (net.connect("example.com", 80))?
@@ -210,7 +213,7 @@ const msg = socket:recv({ max_bytes = 1024 })?
 - for `read_line`: keeps buffering in `stream.pending` until delimiter
 - for `read_all`: keeps buffering until close
 
-## socket:accept()
+### socket:accept()
 
 ```revo
 const listener = (net.listen(8080))?
@@ -224,7 +227,7 @@ const client = listener:accept()?
 - wraps socket in `SocketEntry`
 - wakes fiber with `(:ok, new_socket_table)`
 
-# writing a custom backend
+## writing a custom backend
 
 you need:
 
@@ -232,7 +235,7 @@ you need:
 - four functions (submit, poll, cancel, shutdown)
 - register in VM
 
-## state
+### state
 
 ```zig
 // src/runtime/async_backend_custom.zig
@@ -252,7 +255,7 @@ const CompletionRecord = struct {
 };
 ```
 
-## submit
+### submit
 
 queue a job. you own it after this
 
@@ -266,7 +269,7 @@ pub fn submit(backend: *async_backend.AsyncBackend, vm_ptr: *anyopaque, job: *as
 }
 ```
 
-## poll
+### poll
 
 check for completions. wake fibers
 
@@ -301,7 +304,7 @@ pub fn poll(backend: *async_backend.AsyncBackend, vm_ptr: *anyopaque) anyerror!b
 }
 ```
 
-## cancel
+### cancel
 
 remove a job from the queue before it runs
 
@@ -315,7 +318,7 @@ pub fn cancel(backend: *async_backend.AsyncBackend, ticket: async_backend.AsyncT
 }
 ```
 
-## shutdown
+### shutdown
 
 clean up. optional, but do it anyway
 
@@ -329,7 +332,7 @@ pub fn shutdown(backend: *async_backend.AsyncBackend, alloc: std.mem.Allocator) 
 }
 ```
 
-## register
+### register
 
 in VM init:
 
@@ -351,7 +354,7 @@ vm.runtime.async_backend = async_backend.AsyncBackend{
 };
 ```
 
-# extending to other i/o
+## extending to other i/o
 
 to add file async or timers:
 
@@ -378,13 +381,13 @@ if (vm.runtime.async_backend) |backend| {
 }
 ```
 
-# performance
+## performance
 
 poll runs with zero timeout per scheduler cycle. if you need more throughput, replace the one-thread-per-job default with a thread pool
 
 recv buffers in `stream.pending` to handle partial reads. watch your allocation overhead. fibers allocate stack, so memory bounds your fiber count, not file descriptors
 
-# gotchas
+## gotchas
 
 - allocate tokens yourself if you submit jobs directly
   when you submit a job directly to the backend without going thru the socket layer, the job is yours to manage, so allocate the token & free it when done

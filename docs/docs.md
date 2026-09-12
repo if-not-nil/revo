@@ -23,26 +23,26 @@ title: 'docs'
 
 - [more](#more)
 - [types](#types)
-   * [type annotations](#type-annotations)
-   * [type aliases](#type-aliases)
-   * [union types](#union-types)
-   * [coercion](#coercion)
-   * [type narrowing](#type-narrowing)
-   * [runtime type predicates](#runtime-type-predicates)
-   * [structural types](#structural-types)
-   * [table methods](#table-methods)
-   * [? suffix convention](#suffix-convention)
-   * [foreign](#foreign)
+  - [type annotations](#type-annotations)
+  - [type aliases](#type-aliases)
+  - [union types](#union-types)
+  - [coercion](#coercion)
+  - [type narrowing](#type-narrowing)
+  - [runtime type predicates](#runtime-type-predicates)
+  - [structural types](#structural-types)
+  - [table methods](#table-methods)
+  - [? suffix convention](#suffix-convention)
+  - [foreign](#foreign)
 - [operators](#operators)
 - [control flow](#control-flow)
-   * [if/else](#ifelse)
-   * [loops](#loops)
-   * [match](#match)
+  - [if/else](#ifelse)
+  - [loops](#loops)
+  - [match](#match)
 - [pipe operator](#pipe-operator)
 - [iteration](#iteration)
 - [errors](#errors)
-   * [the ? operator](#the-operator)
-   * [orelse](#orelse)
+  - [the ? operator](#the-operator)
+  - [orelse](#orelse)
 - [test blocks](#test-blocks)
 - [builtins](#builtins)
 - [fibers and channels](#fibers-and-channels)
@@ -50,13 +50,15 @@ title: 'docs'
 - [modules](#modules)
 - [doc comments](#doc-comments)
 - [advanced](#advanced)
-   * [comptime](#comptime)
-   * [macros](#macros)
-   * [metatables](#metatables)
+  - [comptime](#comptime)
+  - [macros](#macros)
+  - [metatables](#metatables)
+
 </div>
   <div style="margin-left: 2ch; flex:1; min-width:250px;">
 
 **revo in 1 minute**
+
 ```revo
 # bindings
 let a = 10
@@ -122,6 +124,7 @@ let v = do/b
     break/b(x * 2)
 end
 ```
+
 </div>
 </div>
 
@@ -130,7 +133,8 @@ end
 to get help on any function, just go over to [./std](./std)
 
 you can also point `:h` in the repl at any documented declaration
-```
+
+```text
 rεvo > #* just returns 5 *#
      > global hi = fn() 5
 hi()/0
@@ -143,11 +147,13 @@ prints values to stdout with space separator
 ```
 
 the fundamental types are:
+
 - numbers - `1, 1.0, -0.14`
 - tables - `{1, 7}, {k = "v", [1 + 4] = "8"}`
-    they have an array part and a hashmap part, and are used to represent any other data structure
-    that is not already a fundamental type (like strings). there are [some builtin methods](./std.md#table)
-    anything that contains more than one item and has to be mutable should be a table.
+  they have an array part and a hashmap part, and are used to represent any other data structure
+  that is not already a fundamental type (like strings). there are [some builtin methods](./std.md#table)
+  anything that contains more than one item and has to be mutable should be a table.
+
     ```revo
     let arr = {1, 5, 3}
     let hashmap = {k = "v"}
@@ -177,20 +183,21 @@ the fundamental types are:
     const you: User = { name = "you", age = 123, get_age = get_age }
     print(you:get_age())
     ```
-    they are always passed by reference, never copied unless you manually `{1,2,3}:copy()`
+
+  they are always passed by reference, never copied unless you manually `{1,2,3}:copy()`
 - atoms (a.k.a. symbols, sigils)
-    only to be used to compare against other atoms
+  only to be used to compare against other atoms
 
-    are the way to express nil, true, and false
+  are the way to express nil, true, and false
 
-    they are not to be created at runtime. very useful to express tagged unions with tables
+  they are not to be created at runtime. very useful to express tagged unions with tables
 
-    only `:false`, `0`, and `:nil` are falsey - everything else (including `""` and `{{}}`) is truthy
+  only `:false`, `0`, and `:nil` are falsey - everything else (including `""` and `{{}}`) is truthy
 
-    for this reason, the language does not have exceptions/errors and uses
-    {:err, :ErrorName} and {:ok, value} together with pattern matching, `?`, `orelse`, `:unwrap()`,
-    and `ok?!`/`err?!` to handle errors. toplevel `?` panics instead of returning silently. there are
-    helpers to check these:
+  for this reason, the language does not have exceptions/errors and uses
+  {:err, :ErrorName} and {:ok, value} together with pattern matching, `?`, `orelse`, `:unwrap()`,
+  and `ok?!`/`err?!` to handle errors. toplevel `?` panics instead of returning silently. there are
+  helpers to check these:
 
     ```revo
     ok?!({:ok, 42})      # :true
@@ -199,14 +206,15 @@ the fundamental types are:
     {:err, :bad}?      # panics at toplevel
     {:err, :bad} orelse 0
     ```
+
 - functions
-    a function is very simple. it (technically) is just one expression, to which you can give parameters
+  a function is very simple. it (technically) is just one expression, to which you can give parameters
 
-    the syntax only requires for one expression. so how do you make it a real [procedure](https://stackoverflow.com/a/721107)?
+  the syntax only requires for one expression. so how do you make it a real [procedure](https://stackoverflow.com/a/721107)?
 
-    `do 1 2 3 end` allows for grouping multiple expressions together. it normally evaluates
-    to just what the last expression was, and for `do 1 2 3 end`, it's 3. you can, however,
-    `do 1 return 2 3 end`, which returns early with 2!
+  `do 1 2 3 end` allows for grouping multiple expressions together. it normally evaluates
+  to just what the last expression was, and for `do 1 2 3 end`, it's 3. you can, however,
+  `do 1 return 2 3 end`, which returns early with 2!
 
     ```revo
     # these two are equivalent
@@ -223,21 +231,23 @@ the fundamental types are:
         | {:some, v} => v + b
         | {:none}    => :none
     ```
-    
-    parameters can be marked optional with `?`. when omitted, they default to `:no`:
+
+  parameters can be marked optional with `?`. when omitted, they default to `:no`:
+
     ```revo
     fn greet(name, ?greeting) greeting or "hello"
 
     greet("alice", "hi")  # "hi"
     greet("bob")          # "hello"  (greeting is :no, `or` goes off)
     ```
-    
-    it is always first-class, no matter how it may appear
 
-    it also captures values from the outer scope, like most modern languages
+  it is always first-class, no matter how it may appear
 
-    closures capture outer values by reference, so mutations are visible
-    to all closures sharing that variable:
+  it also captures values from the outer scope, like most modern languages
+
+  closures capture outer values by reference, so mutations are visible
+  to all closures sharing that variable:
+
     ```revo
     fn make_counter() do
       let x = 0
@@ -260,9 +270,10 @@ the fundamental types are:
     iter.map("hello", fn(c) c:upper())
     ```
 
-    also, every function really is a function and never just a procedure.
-    all expressions return something, it's just that sometimes the result is not going to be of
-    much use to you
+  also, every function really is a function and never just a procedure.
+  all expressions return something, it's just that sometimes the result is not going to be of
+  much use to you
+
     ```revo
     let b = {4} # {4}
     b[0] # 4
@@ -273,18 +284,23 @@ the fundamental types are:
     ```
 
 - strings - `"string"`
-    they're just like any other strings. double-quoted strings process escape sequences, while
-    single-quoted strings are completely literal (no escape processing):
+  they're just like any other strings. double-quoted strings process escape sequences, while
+  single-quoted strings are completely literal (no escape processing):
+
     ```revo
     "hello\nworld" # newline
     'hello\nworld' # literal backslash-n
     ```
-    backtick strings `` ` `` are for macro patterns; they're parsed as raw text with
-    capture placeholders:
+
+  backtick strings `` ` `` are for macro patterns; they're parsed as raw text with
+  capture placeholders:
+
     ```revo
     macro unless! `(%cond:expr %body:expr)` `if %cond :nil else %body`
     ```
-    you can also use the `"string":method()` methods:
+
+  you can also use the `"string":method()` methods:
+
     ```revo
     "hello":upper()           # "HELLO"
     "  hi  ":trim()           # "hi"
@@ -303,10 +319,12 @@ the fundamental types are:
     "hello" ~ " world"        # concatenation
     "ha" * 3                  # "hahaha"
     ```
-    found in the [std docs](./std.md#string)
+
+  found in the [std docs](./std.md#string)
 - tables (array part)
-    sequences with 0-based indexing, useful for error handling and
-    storing data you know the shape of.
+  sequences with 0-based indexing, useful for error handling and
+  storing data you know the shape of.
+
     ```revo
     const t = {1, 2, 3}
     t[0] # 1
@@ -322,12 +340,12 @@ the fundamental types are:
     print(vx + vy) # 20
     ```
 
-# types
+## types
 
 the compiler infers types, tracks them, and uses them to pick fast paths.
 they fall back to `any` when inference fails.
 
-## type annotations
+### type annotations
 
 bindings and function parameters can carry type annotations:
 
@@ -375,7 +393,7 @@ let t1: {number, number, name: string} = {1, 2, name = "me"}
 let bad: {number, number, name: string} = {1, 2}
 ```
 
-## type aliases
+### type aliases
 
 `type` creates a local name for a type expression:
 
@@ -411,7 +429,7 @@ error: type name `MyInt` used as a value
 t x = MyInt
 ```
 
-## ambient declarations
+### ambient declarations
 
 `declare` names something the host provides
 
@@ -445,7 +463,7 @@ declare lamp = fn(volume: number, label: string) -> bool
 `declare` is top-level only, once per name, order-sensitive like `const`, and
 rejects value rebinding of the name.
 
-### `.d.rv` declaration files
+#### `.d.rv` declaration files
 
 a `.d.rv` file holds only `pub declare`s and `pub type`s
 importing one is compile-time only,
@@ -475,7 +493,7 @@ and the standard library itself is driven by them - `src/std/iface/*.d.rv`
 are the single source of truth that the runtime registration, compile-time
 typing, and the [generated reference](./std) all read from
 
-## union types
+### union types
 
 unions model tagged values. each variant is either an atom alone or an atom with a payload:
 
@@ -492,7 +510,7 @@ fn area(s: Shape) -> number
       | {:point}           => 0
 ```
 
-## coercion
+### coercion
 
 assigning a value to a typed binding coerces automatically when safe:
 
@@ -508,7 +526,7 @@ const m: int = 3.14      # float -> int, error
 - atom matching a union's atom-only variant
 - function types: contravariant in params, covariant in return
 
-## type narrowing
+### type narrowing
 
 type predicates in `if` conditions narrow the type within the branch:
 
@@ -522,7 +540,7 @@ else
 
 supported predicates: `number?`, `string?`, `table?`, `atom?`, `function?`, `foreign?`
 
-## runtime type predicates
+### runtime type predicates
 
 built-in checks that narrow types at runtime:
 
@@ -546,7 +564,7 @@ type({{}})       # :table
 type({1, 2})   # :table
 ```
 
-## structural types
+### structural types
 
 tables carry fields and closures; structural types describe their shape:
 
@@ -565,7 +583,7 @@ let p: Point = { x = 0, y = 0 }
 p.y = 12
 ```
 
-## table methods
+### table methods
 
 methods are closures stored in the table and receive `self` as the first
 argument. method fields go in the type too, so colon calls resolve to
@@ -584,7 +602,7 @@ c:inc(5)
 print(c.n) # 5
 ```
 
-## `?` suffix convention
+### `?` suffix convention
 
 functions whose name ends with `?` must return bool:
 
@@ -596,7 +614,7 @@ fn is_ok?() do :ok end
 fn is_ok?() -> bool do :true end
 ```
 
-## foreign
+### foreign
 
 `foreign` wraps a raw pointer as a value:
 
@@ -607,9 +625,10 @@ foreign?(42)         # check at runtime
 
 foreign values compare by pointer identity and have no destructor; the caller manages the pointer's lifetime
 
-# operators
+## operators
 
 standard arithmetic and comparison work as you'd expect:
+
 ```revo
 1 + 2 * 3  # 7
 10 / 2     # 5
@@ -624,6 +643,7 @@ standard arithmetic and comparison work as you'd expect:
 integer division with `//` floors toward negative infinity, like python. it works on floats too
 (`x // y` is `floor(x / y)`), returning an int when both operands are integral and a float otherwise
 bitwise operators are spelled as words and, like python, reject non-integral operands at runtime:
+
 ```revo
 5 // 2    # 2
 -5 // 2   # -3
@@ -648,6 +668,7 @@ rather than `(1 + 2) band 3`. `shl`/`shr` wrap on overflow; shift amounts outsid
 `^` is exponentiation, like python's `**`. it's right-associative and binds tighter than multiplication and
 unary minus (`-2 ^ 2` is `-(2 ^ 2)` == -4). integral base with non-negative integral exponent stays an
 integer (wrapping); anything else gives a float (`2 ^ -1` == 0.5):
+
 ```revo
 2 ^ 3     # 8
 2 ^ 3 ^ 2 # 512, right-assoc
@@ -663,6 +684,7 @@ is a runtime error, not nan
 
 `and`/`or` preserve value semantics rather than collapsing to booleans, which makes them useful
 for default values and short-circuit guards:
+
 ```revo
 1 and 2    # 2
 0 or 9     # 9
@@ -673,6 +695,7 @@ not :false # :true
 
 assignment operators exist and work as you'd expect. since assignment is an expression, it
 returns the rhs:
+
 ```revo
 let a = 41
 a += 1 # 42
@@ -683,6 +706,7 @@ let y = (x = 0) # y is 0 (x was reassigned)
 ```
 
 `~` concatenates values into strings!!! polymorphic with fast paths for strings and numbers:
+
 ```revo
 "hello" ~ " world"   # "hello world"
 42 ~ " is the " ~ "answer" # "42 is the answer"
@@ -692,6 +716,7 @@ let y = (x = 0) # y is 0 (x was reassigned)
 ```
 
 custom types can opt in via `__tostring`:
+
 ```revo
 const t = set_meta({x = 5}, {
     __tostring = fn(self) "custom",
@@ -699,11 +724,12 @@ const t = set_meta({x = 5}, {
 t ~ "!"  # "custom!"
 ```
 
-# control flow
+## control flow
 
-## if/else
+### if/else
 
 `if` is an expression and returns the value of whichever branch was taken:
+
 ```revo
 const a = if 1 == 1
     5
@@ -712,7 +738,7 @@ else
 print(a) # 5
 ```
 
-## loops
+### loops
 
 `loop` creates a loop block. a loop always evaluates to `:nil`; `break` exits it, `continue` skips to the next iteration
 
@@ -750,7 +776,7 @@ end
 print(odds) # 9 (1 + 3 + 5)
 ```
 
-### labeled loops
+#### labeled loops
 
 loops and do-blocks can carry a label (like `loop/a`, `for/a`, `while/a`, `do/a`). `break/a` exits the named block with the value you give it; `continue/a` restarts the named loop. a labeled block only produces a value when it is exited with a labeled break; otherwise it evaluates to `:nil`:
 
@@ -783,7 +809,7 @@ end
 print(v) # 42
 ```
 
-### while and for
+#### while and for
 
 ```revo
 let y = 0
@@ -811,9 +837,10 @@ for i in 10..-2.. do
 end # 10, 8, 6, 4, 2
 ```
 
-## match
+### match
 
 match arms are expressions. wildcards and guards let you cover complex cases cleanly:
+
 ```revo
 let x = 1
 const r = match x
@@ -836,8 +863,10 @@ match safe_div(10, 0)
     | {:err, e} => print(fmt("error: %v", e))
 ```
 
-# pipe operator
+## pipe operator
+
 pipe passes a value as the first argument to the next expression:
+
 ```revo
 fn double(x) x * 2
 fn and_one(x) x + 1
@@ -872,7 +901,8 @@ let x: Foo = { age = 10, display = fn(self) fmt("a %d-yr old", self.age) }
 x |> _:display() |> print
 ```
 
-they apply to most of the language, since everything will likely return something useful 
+they apply to most of the language, since everything will likely return something useful
+
 ```revo
 const res = (2 + 2)
   |> assert_eq(4) 
@@ -882,6 +912,7 @@ const res = (2 + 2)
 ```
 
 pipes pair well with `?`, `orelse`, and `match` for error handling:
+
 ```revo
 const n = number("41") orelse 0
 n |> fn(x) x + 1 |> assert_eq(42)
@@ -891,12 +922,13 @@ match number("nope")
   | {:err, _} => 0
 ```
 
-# iteration
+## iteration
 
 all collection functions live under the `iter` module. transforms (`iter.map`, `iter.filter`,
 `iter.take`, ...) return lazy iterators; call `iter.collect` (or `iter.collect_string`,
 `iter.collect_string`) to materialize them into a value. terminal ops (`iter.reduce`,
 `iter.each`, `iter.find`, `iter.all?`, `iter.any?`, `iter.count`, `iter.sum`) run eagerly:
+
 ```revo
 iter.collect(iter.map({1, 2, 3}, fn(x) x * 2))   # {2, 4, 6}
 iter.collect_string(iter.filter("hello", fn(c) c != "l")) # "heo"
@@ -907,7 +939,7 @@ iter.all?({1,2,3}, fn(x) x > 0)                 # :true
 iter.any?({1,2,3}, fn(x) x > 2)                 # :true
 ```
 
-# slicing
+## slicing
 
 `[start..end]` extracts a contiguous portion of a string or table.
 `[start..step..end]` adds a step to skip elements. any bound can be omitted.
@@ -928,7 +960,7 @@ t[4..-2..0]      # {5, 3, 1}  (negative step)
 t[2..2]          # {{}}  (empty)
 ```
 
-# errors
+## errors
 
 revo does not have exceptions and tries to crash only in extreme scenarios
 
@@ -939,8 +971,10 @@ if a function may error, it's likely to return either
 
 see examples/errors.rv for full examples
 
-# propagation: `?` and `orelse`
+## propagation: `?` and `orelse`
+
 revo has two operators for error handling: `?` for early return and `orelse` for defaults
+
 ```revo
 fn load_config(path) do
 	const f = fs.open(path)? # has to succeed
@@ -949,7 +983,7 @@ fn load_config(path) do
 end
 ```
 
-## the ? operator
+### the ? operator
 
 `?` propagates errors up the call stack. if an expression is an error (`{:err, ...}`), the function returns immediately with that error. otherwise, the value is unwrapped. at toplevel, the error panics instead of returning silently.
 
@@ -976,7 +1010,7 @@ end
 
 the toplevel is implicitly a function, so returning an error from it panics too
 
-## test blocks
+### test blocks
 
 `test "name" do ... end` defines a small test body that only runs when you pass `--test`
 it uses the same module scope as the rest of the file, so it can call local helpers directly
@@ -1016,7 +1050,7 @@ assert(x == :nil)
 
 if a test body hits `?` on an error, it behaves like the rest of the language and panics at top-level
 
-## orelse
+### orelse
 
 `orelse` assigns a default value when an expression is nil, undef, or an error
 
@@ -1030,7 +1064,7 @@ const t = {a = 1}
 const w = t.b orelse 0                 # w = 0, missing keys are :undef
 ```
 
-# builtins
+## builtins
 
 revo ships a small set of helpful globals without imports:
 
@@ -1120,11 +1154,12 @@ print("hello", :world, 42)
 revo.eval("print(1 + 2)") # 3
 ```
 
-# fibers and channels
+## fibers and channels
 
 fibers are cooperative (not preemptive). the main fiber runs first and the run queue is FIFO.
 `spawn` takes a function call expression and runs it in a new fiber. `join` blocks until it's done
 and returns the result:
+
 ```revo
 let add = fn(a, b) a + b
 const h = spawn add(39, 3)
@@ -1133,6 +1168,7 @@ join(h) # 42
 
 channels coordinate fibers. unbuffered channels (`chan(0)`) block the sender until a receiver
 is ready. buffered channels block only when full:
+
 ```revo
 # unbuffered
 const ch = chan(0)
@@ -1149,17 +1185,19 @@ recv(bch) + recv(bch) # 42
 
 `yield` suspends the current fiber and pushes it back to the run queue. `sleep(ms)` parks it
 without blocking other fibers:
+
 ```revo
 do yield end
 sleep(100)
 ```
 
-# stdlib modules
+## stdlib modules
 
 revo ships a small set of helpful globals without imports: essentials like `print`, `read`, `cwd`,
 and `revo.eval`, plus a few module-style namespaces
 
 `fs` - file and directory access:
+
 ```revo
 let f = fs.open("./README.md"):unwrap()
 let data = f:read()
@@ -1182,12 +1220,14 @@ fs.exists?("~/")  # paths starting with ~/ expand to home
 ```
 
 `json` - encode and decode json:
+
 ```revo
 json.encode(("a", "b", "c")):unwrap()  # ["a","b","c"]
 json.decode('{"a":1}'):unwrap().a    # 1
 ```
 
 `math` - numeric helpers:
+
 ```revo
 math.abs(-3)      # 3
 math.floor(3.7)   # 3
@@ -1202,6 +1242,7 @@ math.pi           # 3.141592653589793
 ```
 
 `time` - wall-clock and monotonic time:
+
 ```revo
 time.now()              # current time in ms
 time.now_ns()           # current time in ns
@@ -1212,6 +1253,7 @@ time.sleep(100)
 ```
 
 `net` - tcp sockets:
+
 ```revo
 # server
 const listener = (net.listen(8080))?
@@ -1233,12 +1275,14 @@ other fibers while the kernel finishes the handshake.
 `os` - system access (read from stdin, etc.)
 
 `system` - run a subprocess and return its output:
+
 ```revo
 system({"echo", "hello"}) # ("hello\n", "")
 ```
 
 strings interpolate expressions with `#{{}}`. normal interpolation uses display formatting;
 use `:?` for debug formatting or `:p` for pretty formatting:
+
 ```revo
 const name = "world"
 "hello #{name}!"
@@ -1247,6 +1291,7 @@ const name = "world"
 ```
 
 `fmt` remains useful for dynamic format strings:
+
 ```revo
 fmt("hello %s", :world)   # hello world
 fmt("hello %d", "world")  # hello "world"
@@ -1254,11 +1299,12 @@ fmt("hello %p", :world)   # hello "world" (this one has colors)
 ```
 
 `debug` - inspect the current vm state:
+
 ```revo
 debug()  # table with fiber_id, pc, stack, frames, and register info
 ```
 
-# modules
+## modules
 
 import resolves a string path to a table of public declarations
 
@@ -1314,7 +1360,7 @@ macros.repeat!(print("hi")) # macro extracted at preload time
 **wrapModule**
 `module_scope = true` wraps root ast with exports:
 
-```
+```text
 |# source                  |# after wrapModule
 |1 pub const x = 1         |1 const @exports = {{}}
 |1 pub fn add(a, b) a + b  |2 const x = 1
@@ -1360,9 +1406,10 @@ native `import()` fn at `std/root.zig`
 ```revo
 import "sqlite3" # loads sqlite3.dylib if resolution finds it
 ```
+
 </details>
 
-# doc comments
+## doc comments
 
 names and types carry most of the documentation. for the rest there's
 `#* ... *#`:
@@ -1400,7 +1447,7 @@ const width = 80
 
 extract docs with `revo doc script.rv`:
 
-```
+```text
 # docs for script.rv
 
 - add/2
@@ -1411,13 +1458,14 @@ the stdlib runs on the same comments: `src/std/iface/*.d.rv` is the single
 source of truth behind runtime registration, compile-time typing, and the
 [generated reference]({{< ref "std" >}})
 
-# advanced
+## advanced
 
-## comptime
+### comptime
 
 `comp` evaluates an expression at compile time and replaces it with the constant result in the
 bytecode. compile time happens both when executing a script directly and when running
 `revo build in.rv out.rvo`:
+
 ```revo
 const LIMIT = comp (1024 * 1024)
 print(comp ("prefix_" ~ "suffix")) # prefix_suffix
@@ -1425,7 +1473,7 @@ print(comp (1 < 2))                # :true
 print(comp (1 + 2))                # only runs at compilation time
 ```
 
-## macro
+### macro
 
 macros are compile-time code transformers. they can rewrite syntax into any
 other syntax, letting you extend the language without runtime cost. there are
@@ -1437,7 +1485,7 @@ they are also how you implement variable-argument functions
 
 {{< ref "pub const Expr" >}}
 
-### pattern macros (macro!)
+#### pattern macros (macro!)
 
 pattern macros match a template and produce a replacement. they use backtick
 patterns with typed captures:
@@ -1448,6 +1496,7 @@ unless!(5 < 0, :positive) # :positive
 ```
 
 capture types:
+
 ```rs
 `%e:expr`  - any expression
 `%n:ident` - an identifier
@@ -1460,18 +1509,20 @@ repetition groups match sequences:
 macro sum_all! `(%first:expr %REST(%item:expr)*)` `%first %REST(+ %item)`
 sum_all!(10, 15, 17) # 42
 ```
+
 ```rs
 `%GROUP(...)*` - zero or more
 `%GROUP(...)+` - one or more
 `%GROUP(...)?` - optional
 ```
 
-### procedural macros (proc!)
+#### procedural macros (proc!)
 
 proc macros run arbitrary revo code at compile time. they receive an iterator
 of ast nodes and return a new ast node:
 
 {{< ref "pub fn parseProc(" >}}
+
 ```revo
 proc add3!(iter) do
   let a = iter:next()
@@ -1485,13 +1536,14 @@ print(add3!(10, 20, 12)) # 42
 
 the iterator methods:
 {{< ref "pub fn MacroIter" >}}
+
 - `iter:next()` - consume and return the next ast node
 - `iter:next_of(:type)` - next node, asserted to be a specific type
 - `iter:peek()` - look ahead without consuming
 
 the return value is always a table wrapping a single ast node: `{node}`
 
-### ast data format
+#### ast data format
 
 the ast is encoded as tagged tables -- the same format everywhere (proc macros,
 quasiquoting, and revo.parse)
@@ -1531,7 +1583,7 @@ what!(10, "hello", :world)
 
 the `%?` format specifier prints the debug representation of any value
 
-### quasiquoting (`` ` ``)
+#### quasiquoting (`` ` ``)
 
 backtick-quoted expressions build ast data at runtime. `%name` splices in a
 variable's value:
@@ -1544,6 +1596,7 @@ r == {:call, {:ident, "f"}, {20, 22}, :false, {}} # :true
 ```
 
 numbers and atoms quote directly:
+
 ```revo
 let r = `42`
 r == {:number, 42} # :true
@@ -1553,6 +1606,7 @@ r == {:hash, "hello"} # :true
 ```
 
 tables nest:
+
 ```revo
 let v = 42
 let r = `{key = %v}`
@@ -1560,6 +1614,7 @@ r == {:table, {{{:ident, "key"}, :false, {:number, 42}}}}
 ```
 
 combined with a proc macro:
+
 ```revo
 proc unless!(iter) do
   let cond = iter:next()
@@ -1568,12 +1623,13 @@ proc unless!(iter) do
 end
 ```
 
-### gensym
+#### gensym
 
 `gensym()` gives you a unique interned string each call. use it to generate
 fresh names that won't clash with user code:
 
 {{< ref "pub fn gensym(" >}}
+
 ```revo
 const a = gensym()
 const b = gensym()
@@ -1584,6 +1640,7 @@ essential for macro hygiene! create a gensym'd variable inside a quasiquote
 to avoid capture:
 
 {{< ref "var gensym_counter" >}}
+
 ```revo
 proc swap!(iter) do
   let tmp = gensym()
@@ -1600,7 +1657,7 @@ swap!(x, y)
 print(x, y) # 2, 1
 ```
 
-### preloaded macros
+#### preloaded macros
 
 these live in `src/std/iface/root.d.rv` and merge into every build;
   stdlib groups can add more (`pub macro uri.shout! ...`), called qualified:
@@ -1613,9 +1670,10 @@ some?!({:some, 42})        # :true
 print!("hello %v", :world) # printf-style: prints "hello :world"
 ```
 
-## metatables
+### metatables
 
 metatables let you customize table behavior via metamethods. set one with `set_meta`:
+
 ```revo
 const mt = {
     __tostring = fn(self) "MyObj",
@@ -1632,6 +1690,7 @@ t.missing # 0
 
 plain table fields always resolve before `__index` is called. metatable fields (like methods)
 resolve before `__index` too, which is how `obj:method()` works without any extra magic:
+
 ```revo
 const mt = {get_x = fn(self) self.x}
 const t = set_meta({x = 12}, mt)

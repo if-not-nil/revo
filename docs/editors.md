@@ -137,6 +137,7 @@ ln -sf "$DIR/tree-sitter-revo/queries" ~/.config/helix/runtime/queries/revo
 ```
 
 then put this in your `languages.toml`:
+
 ```toml
 [[language]]
 name = "revo"

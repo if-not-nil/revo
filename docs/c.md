@@ -3,10 +3,11 @@ title: two-way c interop
 ---
 
 <div style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
-  
+
 <div style="flex:1; min-width:250px;">
 
-# two-way c<->revo interop
+## two-way c<->revo interop
+
 [docs](docs/basics) | [codeberg](https://codeberg.org/lung/revo) | [github (mirror)](https://github.com/if-not-nil/revo) | [license](#license)
 
 > c is the only language that has everything a computer can do implemented in it
@@ -51,7 +52,7 @@ functions, always in sync with what the library actually exports.
 {{< ref "src/c/ffi.zig" >}}
 {{< ref "src/c/bindings.zig" >}}
 
-## build
+### build
 
 ```bash
 zig build lib
@@ -66,7 +67,7 @@ you get a static library and an auto-generated header:
 
 the `extern struct`s in `erevo.zig` dictate are the ones you get in your C code
 
-## vm lifecycle
+### vm lifecycle
 
 ```c
 #include "revo.h"
@@ -81,7 +82,7 @@ erevo_vm_destroy(vm);
 
 `ErevoVM` is an opaque handle
 
-## compile and run
+### compile and run
 
 ```c
 ErevoProgram *prog = erevo_compile(vm, "main.rv", "1 + 2");
@@ -109,7 +110,7 @@ erevo_program_destroy(prog);
 
 `erevo_run` writes the result value through the optional `result` pointer
 
-## errors
+### errors
 
 ```c
 const char *msg = erevo_vm_last_error(vm);
@@ -118,7 +119,7 @@ const char *msg = erevo_vm_last_error(vm);
 returns a null-terminated string, valid until the next api call on the
 same vm
 
-## value type
+### value type
 
 all values are a single nanboxed `uint64_t`:
 
@@ -184,7 +185,7 @@ this means you don't have to intern them manually
 
 {{< ref "pub const RevoAtom" >}}
 
-## foreign
+### foreign
 
 this is how you trade data between c and revo
 
@@ -198,7 +199,7 @@ void *p = revo_foreign_ptr(v);         // unwrap, null if not foreign
 {{< ref "pub fn revo_foreign_new(" >}}
 {{< ref "pub fn revo_foreign_ptr(" >}}
 
-## strings
+### strings
 
 strings are interned! every unique string has a stable `uint64_t` id
 
@@ -222,7 +223,7 @@ uint64_t len = revo_string_length(vm, sid);
 {{< ref "pub fn revo_intern(" >}}
 {{< ref "pub fn revo_string_data(" >}}
 
-## calling revo functions from c
+### calling revo functions from c
 
 ```c
 RevoData fn_val;             // get from eval, global, etc.
@@ -235,7 +236,7 @@ int ok = revo_call(vm, fn_val, 2, args, &result);
 returns 0 if the value wasn't callable or the call threw. max 16 args.
 {{< ref "pub fn revo_call(" >}}
 
-## globals
+### globals
 
 ```c
 revo_setglobal(vm, (uint64_t)(uintptr_t)"name", 4, revo_num(42.0));
@@ -250,7 +251,7 @@ missing keys return `:nil`
 {{< ref "pub fn revo_getglobal(" >}}
 {{< ref "pub fn revo_setglobal(" >}}
 
-## tables
+### tables
 
 functions take the table value itself, lookups report presence
 through the return value so missing keys are distinct from nil values:
@@ -280,7 +281,7 @@ uint64_t a = revo_table_alen(vm, arr); // array part only
 {{< ref "pub fn revo_table_set(" >}}
 {{< ref "pub fn revo_table_get(" >}}
 
-## results
+### results
 
 host functions answer with `{:ok, v}` / `{:err, e}` tables:
 
@@ -300,7 +301,7 @@ if (revo_is_ok(vm, val)) {
 {{< ref "pub fn revo_ok(" >}}
 {{< ref "pub fn revo_is_ok(" >}}
 
-## writing c extensions
+### writing c extensions
 
 extensions are shared libraries that export a `revo_bindings` array.
 every c function follows this signature:
@@ -404,7 +405,7 @@ cc -shared -fPIC -o extension.so extension.c -I/path/to/zig-out/include
 cc -shared -fPIC -o extension.dylib extension.c -I/path/to/zig-out/include
 ```
 
-### best practices
+#### best practices
 
 - validate arguments manually (functions are variadic for now)
 - always set `*out`, even for nil
