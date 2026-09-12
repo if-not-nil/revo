@@ -196,15 +196,19 @@ pub const Table = struct {
             status: enum(u8) { empty, occupied } = .empty,
             key: Data = Data.new.nil(),
             value: Data = Data.new.nil(),
-            // cached key hash
-            // ~ computed once at insertion
-            // ~ grow() and remove()'s backward-shift repair both
-            //   need each stored key's hash again later
-            //   reading it here avoids rehashing string
-            //   content they already hashed once
-            hash: u64 = 0,
+            // cached low 32 bits of key hash
+            //   every indexing site already truncates to u32,
+            //   so the upper half we dont need it
+            //
+            // no prev link
+            //   insertion order walks forward only, removes
+            //   find the predecessor with a scan (theyre cold)
+            hash: u32 = 0,
             next: u32 = NULL_ID,
-            prev: u32 = NULL_ID,
+
+            comptime {
+                if (@sizeOf(Table.HashPart.Bucket) != 32) @compileError("buckets arent 32 bits");
+            }
         };
 
         fn deinit(self: *HashPart, alloc: std.mem.Allocator) void {
@@ -255,9 +259,8 @@ pub const Table = struct {
             self.buckets[idx] = .{
                 .status = .occupied,
                 .key = key,
-                .hash = kh,
+                .hash = @truncate(kh),
                 .next = NULL_ID,
-                .prev = self.last,
             };
 
             if (self.last != NULL_ID) self.buckets[self.last].next = idx;
@@ -287,7 +290,7 @@ pub const Table = struct {
 
             while (cur != NULL_ID) {
                 const old = &self.buckets[cur];
-                var ni: u32 = @truncate(old.hash & (new_len - 1));
+                var ni: u32 = old.hash & (new_len - 1);
                 while (new_buckets[ni].status == .occupied)
                     ni = (ni + 1) & (new_len - 1);
 
@@ -297,7 +300,6 @@ pub const Table = struct {
                     .value = old.value,
                     .hash = old.hash,
                     .next = NULL_ID,
-                    .prev = new_last,
                 };
                 if (new_last != NULL_ID) new_buckets[new_last].next = ni;
                 new_first = if (new_first == NULL_ID) ni else new_first;
@@ -315,11 +317,26 @@ pub const Table = struct {
             const idx = self.lookup(key, vm) orelse return null;
             const mask: u32 = @intCast(self.buckets.len - 1);
 
-            // unlink from insertion-order list
-            if (self.buckets[idx].prev != NULL_ID) self.buckets[self.buckets[idx].prev].next = self.buckets[idx].next;
-            if (self.buckets[idx].prev == NULL_ID) self.first = self.buckets[idx].next;
-            if (self.buckets[idx].next != NULL_ID) self.buckets[self.buckets[idx].next].prev = self.buckets[idx].prev;
-            if (self.buckets[idx].next == NULL_ID) self.last = self.buckets[idx].prev;
+            // unlink from insertion order list with a forward scan for the predecessor
+            //
+            // removes are cold
+            // the per-bucket prev link is not worth 4 bytes on every bucket
+            const next = self.buckets[idx].next;
+            var pred: ?u32 = null;
+            if (self.first != idx) {
+                var cur = self.first;
+                while (cur != NULL_ID and self.buckets[cur].next != idx)
+                    cur = self.buckets[cur].next;
+
+                if (cur != NULL_ID) pred = cur;
+            }
+
+            if (pred) |p| {
+                self.buckets[p].next = next;
+            } else {
+                self.first = next;
+            }
+            if (self.last == idx) self.last = pred orelse NULL_ID;
 
             self.buckets[idx].status = .empty;
             self.count -= 1;
@@ -328,7 +345,8 @@ pub const Table = struct {
             var hole = idx;
             var probe = (hole + 1) & mask;
             while (self.buckets[probe].status == .occupied) : (probe = (probe + 1) & mask) {
-                const natural: u32 = @truncate(self.buckets[probe].hash & mask);
+                const natural: u32 = self.buckets[probe].hash & mask;
+
                 const in_range = if (hole < probe)
                     natural > hole and natural <= probe
                 else
@@ -336,9 +354,17 @@ pub const Table = struct {
                 if (in_range) continue;
 
                 self.buckets[hole] = self.buckets[probe];
-                if (self.buckets[hole].prev != NULL_ID) self.buckets[self.buckets[hole].prev].next = hole;
-                if (self.buckets[hole].prev == NULL_ID) self.first = hole;
-                if (self.buckets[hole].next != NULL_ID) self.buckets[self.buckets[hole].next].prev = hole;
+                // the moved entry keeps its list position
+                // patch whichever neighbor pointed at its old slot
+                //   (successors need nothing, singly-linked forward)
+                if (self.first == probe) {
+                    self.first = hole;
+                } else {
+                    var p = self.first;
+                    while (p != NULL_ID and self.buckets[p].next != probe)
+                        p = self.buckets[p].next;
+                    if (p != NULL_ID) self.buckets[p].next = hole;
+                }
                 if (self.buckets[hole].next == NULL_ID) self.last = hole;
                 self.buckets[probe].status = .empty;
                 hole = probe;
@@ -897,17 +923,20 @@ test "cursor walks inline then heap then hash in order" {
     defer vm.deinit();
     var table = Table.init();
     defer table.deinit(std.testing.allocator);
+
     for ([_]f64{ 1, 2, 3, 4, 5, 6 }) |n|
         try table.push(std.testing.allocator, Data.new.num(n));
     try table.putRaw(Data.new.atom(try vm.internAtom("k")), Data.new.num(99), &vm);
 
     var cur = table.cursor();
-    var expect: f64 = 1;
+    const expect = [_]f64{ 1, 2, 3, 4, 5, 6, 99 };
+    var i: usize = 0;
     while (cur.nextValue()) |v| {
-        if (expect <= 6) try std.testing.expectEqual(Data.new.num(expect), v);
-        expect += 1;
+        try std.testing.expectEqual(Data.new.num(expect[i]), v);
+        i += 1;
     }
-    try std.testing.expectEqual(@as(f64, 8), expect);
+
+    try std.testing.expectEqual(expect.len, i);
 }
 
 test "insert and orderedRemove work across the inline boundary" {
@@ -940,6 +969,36 @@ test "appendSlice bulk-fills without a growth chain" {
     try table.array.appendSlice(std.testing.allocator, &vals);
     try std.testing.expectEqual(@as(usize, 6), table.array.items.len);
     try std.testing.expectEqual(Data.new.num(6), table.array.items[5]);
+}
+
+test "remove keeps probe chains and insertion order intact" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
+    var table = Table.init();
+    defer table.deinit(std.testing.allocator);
+    const keys = [_][]const u8{ "k1", "k2", "k3", "k4", "k5", "k6" };
+    for (keys, 0..) |k, i|
+        try table.putRawAtom(try vm.internAtom(k), Data.new.num(@as(f64, @floatFromInt(i + 1))), &vm);
+
+    try std.testing.expect(table.remove(Data.new.atom(try vm.internAtom("k2")), &vm));
+    try std.testing.expect(table.remove(Data.new.atom(try vm.internAtom("k5")), &vm));
+    try std.testing.expect(!table.remove(Data.new.atom(try vm.internAtom("k2")), &vm));
+
+    for ([_][]const u8{ "k1", "k3", "k4", "k6" }, [_]f64{ 1, 3, 4, 6 }) |k, n| {
+        const got = table.getRawAtom(try vm.internAtom(k), &vm) orelse return error.TestUnexpectedResult;
+        try std.testing.expectEqual(Data.new.num(n), got);
+    }
+
+    var cur = table.cursor();
+    const expect = [_]Data{
+        Data.new.num(1), Data.new.num(3), Data.new.num(4), Data.new.num(6),
+    };
+    var i: usize = 0;
+    while (cur.nextValue()) |v| {
+        try std.testing.expectEqual(expect[i], v);
+        i += 1;
+    }
+    try std.testing.expectEqual(expect.len, i);
 }
 
 //
