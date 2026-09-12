@@ -115,8 +115,8 @@ const RunningStats = struct {
 
     // callers to surface a proper HostResult error instead of panicking
     // when the table contains a non-numeric element
-    fn pushTableData(self: *RunningStats, data: *std.ArrayList(Data)) !void {
-        for (data.items) |value| {
+    fn pushTableData(self: *RunningStats, data: []const Data) !void {
+        for (data) |value| {
             const num = value.asNum() orelse return error.NonNumericValue;
             try self.pushEle(num);
         }
@@ -253,10 +253,10 @@ const RunningRegress = struct { // An accumulator for regression calculations.
         }
     }
 
-    fn pushTableData(self: *RunningRegress, x_data: *std.ArrayList(Data), y_data: *std.ArrayList(Data)) !void {
-        for (x_data.items, 0..) |value, idx| {
+    fn pushTableData(self: *RunningRegress, x_data: []const Data, y_data: []const Data) !void {
+        for (x_data, 0..) |value, idx| {
             const x_num = value.asNum() orelse return error.NonNumericValue;
-            const y_num = y_data.items[idx].asNum() orelse return error.NonNumericValue;
+            const y_num = y_data[idx].asNum() orelse return error.NonNumericValue;
             try self.pushEles(x_num, y_num);
         }
     }
@@ -328,7 +328,7 @@ pub const Impl = struct {
 
         var runningStats: RunningStats = RunningStats.init(vm.runtime.alloc);
         errdefer runningStats.deinit();
-        try runningStats.pushTableData(&table.array);
+        try runningStats.pushTableData(table.array.items);
         return runningStats;
     }
 
@@ -576,7 +576,7 @@ pub const Impl = struct {
 
         var runningRegress: RunningRegress = RunningRegress.init(vm.runtime.alloc);
         errdefer runningRegress.deinit();
-        try runningRegress.pushTableData(&table_1.array, &table_2.array);
+        try runningRegress.pushTableData(table_1.array.items, table_2.array.items);
         return runningRegress;
     }
 

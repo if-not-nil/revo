@@ -378,7 +378,7 @@ pub const Table = struct {
     };
 
     alloc: std.mem.Allocator,
-    array: std.ArrayList(Data),
+    array: SmallArray,
     hash: HashPart,
     metatable: ?memory.TableID = null,
 
@@ -394,6 +394,93 @@ pub const Table = struct {
         self.array.deinit(self.alloc);
         self.hash.deinit(self.alloc);
     }
+
+    /// array part with a few inline slots
+    ///
+    /// : small tables never touch the heap for sequential integer keys
+    /// `.items` stays a valid contiguous slice on both backings
+    /// , so readers never branch; only growth transitions
+    const ARRAY_INLINE = 4;
+
+    const SmallArray = struct {
+        items: []Data = &.{},
+        capacity: usize = 0,
+        inline_buf: [ARRAY_INLINE]Data,
+
+        // safety:
+        // inline slots are only read below items.len, which extends
+        // past a slot only after that slot is written (append/insert) or
+        // bulk-copied from a valid source (grow/appendSlice)
+        pub const empty: SmallArray = .{ .items = &.{}, .capacity = 0, .inline_buf = undefined };
+
+        fn isInline(self: *const SmallArray) bool {
+            return self.capacity != 0 and @intFromPtr(self.items.ptr) == @intFromPtr(&self.inline_buf);
+        }
+
+        pub fn ensureTotalCapacity(self: *SmallArray, alloc: std.mem.Allocator, new_capacity: usize) !void {
+            if (new_capacity <= self.capacity) return;
+            if (self.capacity == 0) {
+                // fresh
+                // the inline slots cover the first ARRAY_INLINE for free
+                self.items = self.inline_buf[0..0];
+                self.capacity = ARRAY_INLINE;
+                if (new_capacity <= self.capacity) return;
+            }
+            // standard doubling continues from 4, same curve as before
+            const better = @max(new_capacity, self.capacity * 2);
+
+            if (self.isInline()) {
+                const grown = try alloc.alloc(Data, better);
+                @memcpy(grown[0..self.items.len], self.items);
+                self.items = grown[0..self.items.len];
+                self.capacity = better;
+            } else {
+                const grown = try alloc.realloc(self.items.ptr[0..self.capacity], better);
+                self.items = grown[0..self.items.len];
+                self.capacity = better;
+            }
+        }
+
+        pub fn append(self: *SmallArray, alloc: std.mem.Allocator, val: Data) !void {
+            try self.ensureTotalCapacity(alloc, self.items.len + 1);
+            self.items.len += 1;
+            self.items[self.items.len - 1] = val;
+        }
+
+        pub fn appendSlice(self: *SmallArray, alloc: std.mem.Allocator, items: []const Data) !void {
+            try self.ensureTotalCapacity(alloc, self.items.len + items.len);
+            const at = self.items.len;
+            self.items.len += items.len;
+            @memcpy(self.items[at..], items);
+        }
+
+        pub fn insert(self: *SmallArray, alloc: std.mem.Allocator, idx: usize, val: Data) !void {
+            try self.ensureTotalCapacity(alloc, self.items.len + 1);
+            self.items.len += 1;
+            std.mem.copyBackwards(Data, self.items[idx + 1 ..], self.items[idx .. self.items.len - 1]);
+            self.items[idx] = val;
+        }
+
+        pub fn orderedRemove(self: *SmallArray, idx: usize) Data {
+            const val = self.items[idx];
+            std.mem.copyForwards(Data, self.items[idx .. self.items.len - 1], self.items[idx + 1 ..]);
+            self.items.len -= 1;
+            return val;
+        }
+
+        pub fn clearRetainingCapacity(self: *SmallArray) void {
+            self.items.len = 0;
+        }
+
+        pub fn deinit(self: *SmallArray, alloc: std.mem.Allocator) void {
+            if (self.capacity == 0 or self.isInline()) {
+                self.* = .empty;
+                return;
+            }
+            alloc.free(self.items.ptr[0..self.capacity]);
+            self.* = .empty;
+        }
+    };
 
     fn integerArrayIndex(key: Data) ?usize {
         // numToI64 rejects +-inf, nan, and out-of-i64-range values, so only
@@ -774,6 +861,89 @@ test "putRaw: integer key > len in empty table goes to hash" {
     try table.putRaw(Data.new.num(1), Data.new.num(20), &vm);
     try std.testing.expectEqual(@as(usize, 2), table.array.items.len);
     try std.testing.expectEqual(Data.new.num(20), table.array.items[1]);
+}
+
+//
+// inline array part
+//
+
+test "array fills inline slots before touching the heap" {
+    var table = Table.init(std.testing.allocator);
+    defer table.deinit();
+    try std.testing.expectEqual(@as(usize, 0), table.array.capacity);
+
+    try table.push(Data.new.num(10));
+    try table.push(Data.new.num(20));
+    try table.push(Data.new.num(30));
+    try table.push(Data.new.num(40));
+    try std.testing.expectEqual(@as(usize, 4), table.array.items.len);
+    try std.testing.expectEqual(@as(usize, 4), table.array.capacity);
+    try std.testing.expectEqual(Data.new.num(10), table.array.items[0]);
+    try std.testing.expectEqual(Data.new.num(40), table.array.items[3]);
+}
+
+test "fifth array element spills inline contents to the heap intact" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
+    var table = Table.init(std.testing.allocator);
+    defer table.deinit();
+    for ([_]f64{ 10, 20, 30, 40, 50, 60 }) |n|
+        try table.push(Data.new.num(n));
+
+    try std.testing.expectEqual(@as(usize, 6), table.array.items.len);
+    try std.testing.expect(table.array.capacity >= 6);
+    for ([_]f64{ 10, 20, 30, 40, 50, 60 }, 0..) |n, i|
+        try std.testing.expectEqual(Data.new.num(n), table.getRaw(Data.new.num(@as(f64, @floatFromInt(i))), &vm).?);
+}
+
+test "cursor walks inline then heap then hash in order" {
+    var vm = try revo.VM.init(testing.runtime());
+    defer vm.deinit();
+    var table = Table.init(std.testing.allocator);
+    defer table.deinit();
+    for ([_]f64{ 1, 2, 3, 4, 5, 6 }) |n|
+        try table.push(Data.new.num(n));
+    try table.putRaw(Data.new.atom(try vm.internAtom("k")), Data.new.num(99), &vm);
+
+    var cur = table.cursor();
+    var expect: f64 = 1;
+    while (cur.nextValue()) |v| {
+        if (expect <= 6) try std.testing.expectEqual(Data.new.num(expect), v);
+        expect += 1;
+    }
+    try std.testing.expectEqual(@as(f64, 8), expect);
+}
+
+test "insert and orderedRemove work across the inline boundary" {
+    var table = Table.init(std.testing.allocator);
+    defer table.deinit();
+    for ([_]f64{ 1, 2, 3, 4 }) |n|
+        try table.push(Data.new.num(n));
+
+    try table.array.insert(std.testing.allocator, 4, Data.new.num(5));
+    try std.testing.expectEqual(@as(usize, 5), table.array.items.len);
+    try std.testing.expectEqual(Data.new.num(5), table.array.items[4]);
+
+    try table.array.insert(std.testing.allocator, 0, Data.new.num(0));
+    try std.testing.expectEqual(@as(usize, 6), table.array.items.len);
+    try std.testing.expectEqual(Data.new.num(0), table.array.items[0]);
+    try std.testing.expectEqual(Data.new.num(1), table.array.items[1]);
+
+    try std.testing.expectEqual(Data.new.num(0), table.array.orderedRemove(0));
+    try std.testing.expectEqual(@as(usize, 5), table.array.items.len);
+    try std.testing.expectEqual(Data.new.num(1), table.array.items[0]);
+}
+
+test "appendSlice bulk-fills without a growth chain" {
+    var table = Table.init(std.testing.allocator);
+    defer table.deinit();
+    const vals = [_]Data{
+        Data.new.num(1), Data.new.num(2), Data.new.num(3),
+        Data.new.num(4), Data.new.num(5), Data.new.num(6),
+    };
+    try table.array.appendSlice(std.testing.allocator, &vals);
+    try std.testing.expectEqual(@as(usize, 6), table.array.items.len);
+    try std.testing.expectEqual(Data.new.num(6), table.array.items[5]);
 }
 
 //

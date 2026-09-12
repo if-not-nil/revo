@@ -150,6 +150,8 @@ tuples and structs are gone now, most breaking change yet
   the scheduler instead of falling through with the fiber handle
 - `spawn` snapshots upvalues instead of sharing them, so fibers spawned in a
   `for` loop each see their own iteration value instead of all seeing the last
+- `table` array parts hold 4 inline slots before spilling to the heap
+  , so small tables skip array growth allocs and bulk appends size once instead of chaining
 
 ## [0.1.2] - 2026-09-05
 

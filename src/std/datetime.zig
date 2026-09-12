@@ -1,12 +1,11 @@
 // Inspirsed by: https://github.com/frmdstryr/zig-datetime/blob/master/src/datetime.zig
 pub const Impl = struct {
-
     pub const MIN_YEAR: u16 = 1;
     pub const MAX_YEAR: u16 = 9999;
 
     // The latemost datetime 9999-12-31 23:59:59
     //
-    // If you're curious! 
+    // If you're curious!
     // December 31st, 9999
     // 9999 years =  3,649,635 days (9999 × 365)
     // A leap year happens every year divisible by 4: [9999/4] = 2499
@@ -52,7 +51,6 @@ pub const Impl = struct {
         second: u8 = 0, // 0 to 59
         nanosecond: u30 = 0, // 0 to 999999999
 
-
         pub fn create(hour: u32, minute: u32, second: u32, nanosecond: u32) !Time {
             if (hour > 23 or minute > 59 or second > 59 or nanosecond > 999999999) {
                 return error.InvalidTime;
@@ -85,7 +83,6 @@ pub const Impl = struct {
             return std.fmt.allocPrint(allocator, "{d:0>2}:{d:0>2}:{d:0>2}", .{ self.hour, self.minute, self.second });
         }
     };
-
 
     pub const Date = struct {
         year: u16,
@@ -182,7 +179,6 @@ pub const Impl = struct {
         }
     };
 
-
     pub fn today(vm: *VM) !HostResult {
         const timestamp = std.Io.Clock.real.now(vm.runtime.io).toMilliseconds();
         const date = Date.fromTimestamp(timestamp);
@@ -196,7 +192,6 @@ pub const impls = root.impls(Impl).val;
 const std = @import("std");
 const assert = std.debug.assert;
 const time = std.time;
-
 
 const revo = @import("../root.zig");
 const Data = revo.Data;
