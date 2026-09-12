@@ -487,7 +487,6 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             .current_input = try std.ArrayList(u8).initCapacity(gpa, 256),
             .cursor_pos = 0,
         };
-        defer isocline_ctx.?.current_input.deinit(gpa);
 
         var b: [512]u8 = undefined;
         const hist_path = if (std.c.getenv("HOME")) |p|
@@ -511,6 +510,8 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             _ = isocline_c.ic_style_def(s_c.ptr, def.ptr);
         }
     }
+
+    defer if (build_options.isocline) isocline_ctx.?.current_input.deinit(gpa);
 
     while (true) {
         if (sigint_received.load(.seq_cst)) {
