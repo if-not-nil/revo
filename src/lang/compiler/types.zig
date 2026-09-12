@@ -143,6 +143,73 @@ pub fn newSignature(alloc: std.mem.Allocator, parts: SignatureParts) std.mem.All
     return sig;
 }
 
+///
+/// unannotated params act as implicit generics
+///
+/// `fn v2_new(x, y)` behaves like `fn v2_new[x, y](x: x, y: y)`
+/// so `{ x = x }` infers `{ x: x }`
+/// and call sites substitute concrete arg types. `_` stays `any`
+///
+pub fn combinedTypeParams(
+    alloc: std.mem.Allocator,
+    explicit: []const []const u8,
+    params: []const ast.FnParam,
+) std.mem.Allocator.Error![]const []const u8 {
+    var extra: usize = 0;
+
+    for (params, 0..) |p, pi| {
+        if (p.type_name != null) continue;
+        if (ast.isDiscardName(p.name)) continue;
+        var found = false;
+
+        for (explicit) |e| if (std.mem.eql(u8, e, p.name)) {
+            found = true;
+            break;
+        };
+
+        if (!found) for (params[0..pi]) |prev| {
+            if (prev.type_name != null) continue;
+
+            if (std.mem.eql(u8, prev.name, p.name)) {
+                found = true;
+                break;
+            }
+        };
+
+        if (!found) extra += 1;
+    }
+    if (extra == 0) return explicit;
+
+    // dedup repeated param names: first wins, mirroring bindTypeParams
+    var out = try alloc.alloc([]const u8, explicit.len + extra);
+    @memcpy(out[0..explicit.len], explicit);
+    var idx: usize = explicit.len;
+
+    for (params) |p| {
+        if (p.type_name != null) continue;
+        if (ast.isDiscardName(p.name)) continue;
+        var found = false;
+
+        for (out[0..idx]) |e| if (std.mem.eql(u8, e, p.name)) {
+            found = true;
+            break;
+        };
+
+        if (found) continue;
+        out[idx] = p.name;
+        idx += 1;
+    }
+    return out[0..idx];
+}
+
+/// param without annotation becomes `type_var(name)`, else `any` for `_`
+pub fn implicitParamType(p: ast.FnParam) TypeInfo {
+    if (p.type_name != null) unreachable;
+    if (ast.isDiscardName(p.name)) return .{ .tag = .any };
+
+    return .{ .tag = .{ .type_var = p.name } };
+}
+
 /// sentinel "any function" type,,, matches any callable value
 /// ptr identity;; only matches when &ANY_FN_SIG is used
 pub const ANY_FN_SIG: FunctionSignature = .{
@@ -2109,6 +2176,76 @@ test "explicit call-site type args id[num](42) resolves return type" {
         \\ fn id[T](x: T) -> T x
         \\ id[num](42)
     , 42);
+}
+
+test "return-only type param stays any without explicit args" {
+    // T appears only in the return, so a bare call leaves it unbound (any)
+    // and a string binding compiles; it still runs fine
+    try t.topNumber(
+        \\ fn make[T](x) -> T return x
+        \\ let y = make(1)
+        \\ let s: string = y
+        \\ y
+    , 1);
+    // shape-bound params still infer without any explicit args
+    try t.expectCompileError(
+        \\ fn id[T](x: T) x
+        \\ let y = id(42)
+        \\ let s: string = y
+    , .ParseError);
+}
+
+test "implicit generics" {
+    try t.topNumber(
+        \\ fn v2_new(x, y) { x = x, y = y }
+        \\ let t = v2_new(1, 2)
+        \\ t.x + t.y
+    , 3);
+    try t.expectCompileError(
+        \\ fn v2_new(x, y) { x = x, y = y }
+        \\ let t = v2_new(1, 2)
+        \\ let s: string = t.x
+    , .ParseError);
+    try t.expectCompileError(
+        \\ fn v2_new(x, y) { x = x, y = y }
+        \\ let u: { x: string } = v2_new(1, 2)
+    , .ParseError);
+    //
+    // atom and string args keep precise types
+    try t.topString(
+        \\ fn v2_new(x, y) { x = x, y = y }
+        \\ let t = v2_new(:hi, "str here")
+        \\ t.y
+    , "str here");
+    try t.expectCompileError(
+        \\ fn v2_new(x, y) { x = x, y = y }
+        \\ let t = v2_new(:hi, "str here")
+        \\ let n: num = t.x
+    , .ParseError);
+    //
+    // unannotated identity specializes return
+    try t.topNumber(
+        \\ fn id(x) x
+        \\ let y = id(42)
+        \\ y + 1
+    , 43);
+    try t.expectCompileError(
+        \\ fn id(x) x
+        \\ let y = id(42)
+        \\ let s: string = y
+    , .ParseError);
+    //
+    // constructor field specializes"
+    try t.topString(
+        \\ fn Hi(field) { field = field, get_field = fn(self) self.field }
+        \\ const t = Hi("hi")
+        \\ t.field
+    , "hi");
+    try t.expectCompileError(
+        \\ fn Hi(field) { field = field, get_field = fn(self) self.field }
+        \\ const t = Hi("hi")
+        \\ let n: num = t.field
+    , .ParseError);
 }
 
 //

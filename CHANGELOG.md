@@ -141,6 +141,16 @@ tuples and structs are gone now, most breaking change yet
   ```
 
 - compound ops (`a -= 1`, `b += 2`, `c ^= 3`) are real now and will not call the lhs twice
+- unannotated fn params are implicit generics, so table constructors specialize per call
+  `fn id(x) x` is `fn id[T](x: T) -> T`
+
+  aids tables massively
+  ```ruby
+  fn v2(x, y) { x = x, y = y }
+  let t = v2(1, 2)
+  # {x: number, y: number}, was {x: any, y: any}
+  ```
+
 - type-to-string rendering is unified
 - rendered types use spaces
 - internal

@@ -298,7 +298,7 @@ pub fn predeclareFunctionBindings(self: *Compiler, exprs: []const *Node) !void {
                 // temporarily set type_params so isTypeParam works during evalTypeExpr
                 const fn_state = &self.functions.items[self.functions.items.len - 1];
                 const saved = fn_state.type_params;
-                fn_state.type_params = binding.value.expr.fn_expr.type_params;
+                fn_state.type_params = try types.combinedTypeParams(self.alloc, binding.value.expr.fn_expr.type_params, binding.value.expr.fn_expr.params);
                 defer fn_state.type_params = saved;
                 try declareFnSignature(
                     self,
@@ -421,7 +421,7 @@ pub fn allocFnSig(
     for (params) |p| try param_types.append(self.alloc, if (p.type_name) |tn|
         type_serde.evalTypeExpr(self, tn) catch types.TypeInfo{ .tag = .any }
     else
-        types.TypeInfo{ .tag = .any });
+        types.implicitParamType(p));
 
     var required_count: usize = params.len;
     for (params) |p| {
@@ -432,6 +432,7 @@ pub fn allocFnSig(
     errdefer default_values.deinit(self.alloc);
     for (params) |p| try default_values.append(self.alloc, p.default_value);
 
+    const combined = try types.combinedTypeParams(self.alloc, type_params, params);
     return try types.newSignature(self.alloc, .{
         .param_names = try param_names.toOwnedSlice(self.alloc),
         .params = try param_types.toOwnedSlice(self.alloc),
@@ -440,7 +441,7 @@ pub fn allocFnSig(
         else
             types.TypeInfo{ .tag = .any },
         .required_count = required_count,
-        .type_params = type_params,
+        .type_params = combined,
         .default_values = try default_values.toOwnedSlice(self.alloc),
     });
 }

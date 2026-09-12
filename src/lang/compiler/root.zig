@@ -1544,7 +1544,7 @@ pub const Compiler = struct {
         const own_sig = !(ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>"));
 
         var s = try FunctionState.init(self.alloc);
-        s.type_params = type_params;
+        s.type_params = try types.combinedTypeParams(self.alloc, type_params, params);
 
         // push function state early so evalTypeExpr can resolve type params
         const params_len: LocalSlot = @intCast(params.len);

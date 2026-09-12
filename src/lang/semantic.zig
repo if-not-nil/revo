@@ -344,8 +344,9 @@ const SemanticChecker = struct {
     }
 
     pub fn inferFnType(self: *SemanticChecker, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8, doc: ?[]const u8) types_mod.TypeInfo {
+        const combined = types_mod.combinedTypeParams(self.alloc, type_params, params) catch type_params;
         const saved = self.current_type_params;
-        self.current_type_params = type_params;
+        self.current_type_params = combined;
         defer self.current_type_params = saved;
         const sig = self.makeFnSig(.{ .params = params, .return_type = return_type, .type_params = type_params, .doc = doc }) catch return .{ .tag = .any };
         return .{ .tag = .{ .function = sig } };
@@ -400,13 +401,6 @@ const SemanticChecker = struct {
             arg_types.append(self.alloc, types_mod.inferExprType(self, a)) catch return .{ .tag = .any };
         }
         types_mod.bindTypeParams(&param_map, sig.params, arg_types.items) catch {};
-        // plain `id[T](x: T)`: positional fallback for still-unbound params
-        if (type_args.len == 0) {
-            for (sig.type_params, 0..) |tp, i| {
-                if (!param_map.contains(tp) and i < eff.len)
-                    param_map.put(tp, types_mod.inferExprType(self, eff[i])) catch {};
-            }
-        }
         return types_mod.substituteTypeParams(self.alloc, sig.return_type, &param_map) catch types_mod.TypeInfo{ .tag = .any };
     }
 
@@ -599,7 +593,7 @@ const SemanticChecker = struct {
             const t = if (p.type_name) |tn|
                 try self.evalCheckedTypeExpr(tn)
             else
-                types_mod.TypeInfo{ .tag = .any };
+                types_mod.implicitParamType(p);
 
             try param_types.append(self.alloc, t);
             if (!p.optional and p.default_value == null) required_count += 1;
@@ -609,13 +603,14 @@ const SemanticChecker = struct {
         const names_slice = try param_names.toOwnedSlice(self.alloc);
         const ret = if (fn_expr.return_type) |rt| try self.evalCheckedTypeExpr(rt) else types_mod.TypeInfo{ .tag = .any };
         const doc: ?[]const u8 = if (@hasField(@TypeOf(fn_expr), "doc")) fn_expr.doc else null;
+        const combined = try types_mod.combinedTypeParams(self.alloc, fn_expr.type_params, fn_expr.params);
 
         return try types_mod.newSignature(self.alloc, .{
             .param_names = names_slice,
             .params = params_slice,
             .return_type = ret,
             .required_count = required_count,
-            .type_params = fn_expr.type_params,
+            .type_params = combined,
             .doc = doc,
         });
     }
@@ -939,8 +934,9 @@ const SemanticChecker = struct {
 
     fn analyzeFnExpr(self: *SemanticChecker, fn_expr: anytype, span: ast.Span) !types_mod.TypeInfo {
         _ = span;
+        const combined = try types_mod.combinedTypeParams(self.alloc, fn_expr.type_params, fn_expr.params);
         const saved = self.current_type_params;
-        self.current_type_params = fn_expr.type_params;
+        self.current_type_params = combined;
         defer self.current_type_params = saved;
         const sig = try self.makeFnSig(fn_expr);
         return self.analyzeFnBody(fn_expr, sig);
@@ -970,8 +966,9 @@ const SemanticChecker = struct {
             break :blk null;
         };
         if (binding.value.expr == .fn_expr) {
+            const combined = try types_mod.combinedTypeParams(self.alloc, binding.value.expr.fn_expr.type_params, binding.value.expr.fn_expr.params);
             const saved = self.current_type_params;
-            self.current_type_params = binding.value.expr.fn_expr.type_params;
+            self.current_type_params = combined;
             defer self.current_type_params = saved;
             const sig = try self.makeFnSig(binding.value.expr.fn_expr);
             const fn_type: types_mod.TypeInfo = .{ .tag = .{ .function = sig } };
@@ -1260,7 +1257,7 @@ const SemanticChecker = struct {
                 }
             },
             .mul => {
-                if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
+                if (!isOptimisticOperand(l) and !isOptimisticOperand(r) and (l.tag != .number or r.tag != .number)) {
                     try self.appendError(
                         try std.fmt.allocPrint(self.alloc, "cannot multiply {s} and {s}", .{ try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
                         span,
@@ -1270,7 +1267,7 @@ const SemanticChecker = struct {
             },
             .concat => {},
             .band, .bor, .bxor, .shl, .shr => {
-                if (l.tag != .any and r.tag != .any and (l.tag != .number or r.tag != .number)) {
+                if (!isOptimisticOperand(l) and !isOptimisticOperand(r) and (l.tag != .number or r.tag != .number)) {
                     try self.appendError(
                         try std.fmt.allocPrint(self.alloc, "cannot apply {s} to {s} and {s}", .{ @tagName(op), try type_serde.formatType(self.alloc, l), try type_serde.formatType(self.alloc, r) }),
                         span,
@@ -1382,6 +1379,13 @@ const SemanticChecker = struct {
     fn numberAccepts(expected: types_mod.TypeInfo, actual: types_mod.TypeInfo) bool {
         if (expected.tag == .number and actual.tag == .number) return true;
         return types_mod.canCoerce(actual, expected);
+    }
+
+    /// `any` and implicit `type_var` params are both optimistic
+    /// : skip strict operand errors
+    ///   , same as untyped code we had b4 generics
+    fn isOptimisticOperand(t: types_mod.TypeInfo) bool {
+        return t.tag == .any or t.tag == .type_var;
     }
 
     fn analyzeCall(self: *SemanticChecker, call: anytype, _: ast.Span) !types_mod.TypeInfo {

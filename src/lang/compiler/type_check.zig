@@ -81,13 +81,6 @@ fn genericSubstReturnType(
             if (i < 4) arg_types[i] = inferExprType(self, a);
         }
         types_mod.bindTypeParams(&subst, params, arg_types[0..@min(args.len, 4)]) catch {};
-        // plain `fn id[T](x: T)`: bind from the positional arg if still unbound
-        if (type_args.len == 0) {
-            for (type_params, 0..) |tp, i| {
-                if (subst.get(tp) == null and i < args.len)
-                    subst.put(tp, inferExprType(self, args[i])) catch {};
-            }
-        }
         return types_mod.substituteTypeParams(self.alloc, return_type, &subst) catch TypeInfo{ .tag = .any };
     }
     // fallback: heap-allocated map for many type params
@@ -104,12 +97,6 @@ fn genericSubstReturnType(
         arg_types.append(self.alloc, inferExprType(self, a)) catch return .{ .tag = .any };
     }
     types_mod.bindTypeParams(&param_map, params, arg_types.items) catch {};
-    if (type_args.len == 0) {
-        for (type_params, 0..) |tp, i| {
-            if (!param_map.contains(tp) and i < args.len)
-                param_map.put(tp, inferExprType(self, args[i])) catch {};
-        }
-    }
     return types_mod.substituteTypeParams(self.alloc, return_type, &param_map) catch TypeInfo{ .tag = .any };
 }
 
@@ -169,17 +156,18 @@ pub fn inferFnType(
     var param_names = std.ArrayList([]const u8).initCapacity(self.alloc, params.len) catch return .{ .tag = .any };
     defer param_names.deinit(self.alloc);
     for (params) |p| {
-        const pt = if (p.type_name) |tn| type_serde.evalTypeExpr(self, tn) catch TypeInfo{ .tag = .any } else TypeInfo{ .tag = .any };
+        const pt = if (p.type_name) |tn| type_serde.evalTypeExpr(self, tn) catch TypeInfo{ .tag = .any } else types_mod.implicitParamType(p);
         param_types.append(self.alloc, pt) catch return .{ .tag = .any };
         param_names.append(self.alloc, p.name) catch return .{ .tag = .any };
     }
     const ret = if (return_type) |rt| type_serde.evalTypeExpr(self, rt) catch TypeInfo{ .tag = .any } else TypeInfo{ .tag = .any };
+    const combined = types_mod.combinedTypeParams(self.alloc, type_params, params) catch type_params;
     const sig = self.alloc.create(FunctionSignature) catch return .{ .tag = .any };
     sig.* = .{
         .param_names = param_names.toOwnedSlice(self.alloc) catch return TypeInfo{ .tag = .any },
         .params = param_types.toOwnedSlice(self.alloc) catch return TypeInfo{ .tag = .any },
         .return_type = ret,
-        .type_params = type_params,
+        .type_params = combined,
         .doc = doc,
     };
     return .{ .tag = .{ .function = sig } };
