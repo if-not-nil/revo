@@ -3878,6 +3878,36 @@ test "string indexing and slicing" {
         \\ s[2..2]
     , "");
 }
+
+test "string index out of range errors" {
+    try t.expectRuntimeError(
+        \\ let s: string = "hello"
+        \\ s[5]
+    , .TypeError);
+    try t.expectRuntimeError(
+        \\ let s: string = "hello"
+        \\ s[100]
+    , .TypeError);
+    try t.expectRuntimeError(
+        \\ let s: string = ""
+        \\ s[0]
+    , .TypeError);
+    try t.expectRuntimeFailureWithMessage(
+        \\ let s: string = "hello"
+        \\ s[5]
+    , .TypeError, "string index 5 out of range (len 5)");
+}
+
+test "string negative index accesses last character" {
+    try t.topString(
+        \\ let s: string = "hello"
+        \\ s[-1]
+    , "o");
+    try t.topString(
+        \\ let s: string = "x"
+        \\ s[-1]
+    , "x");
+}
 //
 // any type accepts everything
 //

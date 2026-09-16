@@ -32,11 +32,16 @@ pub fn resolveField(self: *VM, object: Data, key: Data, result_reg: ?@import("op
             // numeric character access: "str"[n]
             if (key.asNum()) |n| {
                 const str = self.stringValue(object.asString().?);
+                // get the last value of the string
+                if (n == -1) {
+                    return .{ .value = try self.ownDataStringNoDedup(str[str.len - 1 .. str.len]), .from_meta = false };
+                }
                 const idx = revo.asIndex(n) catch return null;
                 if (idx < str.len) {
                     return .{ .value = try self.ownDataStringNoDedup(str[idx .. idx + 1]), .from_meta = false };
                 }
-                return null;
+                try self.setRuntimeMessageFmt("string index {d} out of range (len {d})", .{ idx, str.len });
+                return error.TypeError;
             }
             return null;
         },
