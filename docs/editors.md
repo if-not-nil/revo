@@ -199,7 +199,7 @@ it is not available on the marketplace, [so you need to get a version from the r
 **install from terminal**
 
 ```bash
-code --install-extension ~/Downloads/revo-lsp-<the version you've dowloaded>.vsix
+code --install-extension ~/Downloads/revo-lsp-<the version you've downloaded>.vsix
 ```
 
 **install from gui**

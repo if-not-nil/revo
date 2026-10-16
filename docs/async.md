@@ -13,7 +13,7 @@ this lets you spawn hundreds of fibers without threads, callbacks or other nasty
 
 ### fibers
 
-a fiber is just a lightweight task the scheduler managws. you spawn them like this:
+a fiber is just a lightweight task the scheduler manages. you spawn them like this:
 
 ```revo
 fn client() do
