@@ -367,6 +367,19 @@ test "formatter" {
         \\else 4
         \\
         },
+        .{ .name = "an if on the line after else still indents", .src =
+        \\if (a) 1
+        \\else
+        \\if (b) 2
+        \\else 3
+        \\
+        , .want =
+        \\if (a) 1
+        \\else
+        \\  if (b) 2
+        \\  else 3
+        \\
+        },
         .{ .name = "do-less while and for", .src =
         \\let n = 0
         \\while (n < 2)
@@ -705,7 +718,7 @@ const Walk = struct {
                 self.body(at, i.then);
                 if (i.else_tok) |t| {
                     // the else branch hangs off the `else` line; an `else if` chains flat
-                    if (i.else_) |e| if (e.kind != .if_expr) self.body(t.start, e);
+                    if (i.else_) |e| if (e.kind != .if_expr or e.span.line != t.line) self.body(t.start, e);
                     self.pin(at, t.start);
                 }
                 self.condParens(i.cond, i.then);
