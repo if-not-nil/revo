@@ -348,6 +348,25 @@ test "formatter" {
         \\  print("else")
         \\
         },
+        .{ .name = "else if chains stay flat", .src =
+        \\if (a)
+        \\1
+        \\else if (b)
+        \\2
+        \\else if (c)
+        \\3
+        \\else 4
+        \\
+        , .want =
+        \\if (a)
+        \\  1
+        \\else if (b)
+        \\  2
+        \\else if (c)
+        \\  3
+        \\else 4
+        \\
+        },
         .{ .name = "do-less while and for", .src =
         \\let n = 0
         \\while (n < 2)
@@ -685,8 +704,8 @@ const Walk = struct {
             .if_expr => |i| {
                 self.body(at, i.then);
                 if (i.else_tok) |t| {
-                    // the else branch hangs off the `else` line
-                    if (i.else_) |e| self.body(t.start, e);
+                    // the else branch hangs off the `else` line; an `else if` chains flat
+                    if (i.else_) |e| if (e.kind != .if_expr) self.body(t.start, e);
                     self.pin(at, t.start);
                 }
                 self.condParens(i.cond, i.then);
