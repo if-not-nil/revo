@@ -1,9 +1,9 @@
-const ast = @import("ast.zig");
+const cst = @import("cst.zig");
 const std = @import("std");
 const types = @import("compiler/types.zig");
 const TypeInfo = types.TypeInfo;
 
-/// ======================= pub iface of mod ast ==========================
+/// ======================= pub iface of mod cst ==========================
 /// this bhv shold be
 /// ~ record type for the import binding & resolved type aliases
 /// ~ pub fn bindings get signature types (dep generics scoped correctly)
@@ -27,23 +27,23 @@ pub const ModuleIface = struct {
     aliases: []const ModuleAlias,
 };
 
-pub fn moduleInterface(alloc: std.mem.Allocator, items: []const *ast.Node) !ModuleIface {
+pub fn moduleInterface(alloc: std.mem.Allocator, items: []const *const cst.CstNode) !ModuleIface {
     var mctx = ModuleCtx{
         .alloc = alloc,
-        .raws = std.StringHashMap(*ast.TypeExpr).init(alloc),
+        .raws = std.StringHashMap(*cst.CstType).init(alloc),
         .resolved = std.StringHashMap(types.Alias).init(alloc),
     };
     defer mctx.raws.deinit();
     defer mctx.resolved.deinit();
-    // pre-collect every alias raw (pub or not) so forward references
-    // and private bases resolve; only pub names are exported below
-    // keyed by bare name so dotted aliases (`uri.Hi`) resolve as `Hi`
-    // inside the dep, matching specs declSpec
+
     for (items) |item| {
-        if (item.expr != .decl) continue;
-        const d = item.expr.decl;
-        if (d.inner.expr == .type_alias) {
-            try mctx.raws.put(ast.bareName(d.inner.expr.type_alias), d.inner.expr.type_alias.type_expr);
+        if (item.kind != .decl) continue;
+        const d = item.kind.decl;
+
+        if (d.inner.kind == .type_alias) {
+            const t = d.inner.kind.type_alias;
+            if (t.segs.len == 0) continue;
+            try mctx.raws.put(cst.aliasName(t), t.type);
         }
     }
     // resolve in file order, repeating until stable
@@ -56,11 +56,13 @@ pub fn moduleInterface(alloc: std.mem.Allocator, items: []const *ast.Node) !Modu
         stable = true;
 
         for (items) |item| {
-            if (item.expr != .decl) continue;
-            const d = item.expr.decl;
-            if (d.inner.expr != .type_alias) continue;
+            if (item.kind != .decl) continue;
+            const d = item.kind.decl;
+            if (d.inner.kind != .type_alias) continue;
 
-            const name = ast.bareName(d.inner.expr.type_alias);
+            const t = d.inner.kind.type_alias;
+            if (t.segs.len == 0) continue;
+            const name = cst.aliasName(t);
             const ti = mctx.resolveOne(name) orelse continue;
 
             if (mctx.resolved.get(name)) |old| {
@@ -82,12 +84,13 @@ pub fn moduleInterface(alloc: std.mem.Allocator, items: []const *ast.Node) !Modu
     errdefer aliases.deinit(alloc);
 
     for (items) |item| {
-        if (item.expr != .decl) continue;
-        const d = item.expr.decl;
-        if (!d.pub_ or d.inner.expr != .type_alias) continue;
+        if (item.kind != .decl) continue;
+        const d = item.kind.decl;
+        if (!d.pub_ or d.inner.kind != .type_alias) continue;
 
-        const t = d.inner.expr.type_alias;
-        const name = ast.bareName(t);
+        const t = d.inner.kind.type_alias;
+        if (t.segs.len == 0) continue;
+        const name = cst.aliasName(t);
 
         if (mctx.resolved.get(name)) |a| {
             try aliases.append(alloc, .{ .name = name, .info = a.info });
@@ -114,7 +117,7 @@ pub fn moduleInterface(alloc: std.mem.Allocator, items: []const *ast.Node) !Modu
 /// ~ fn type params scope per fn
 const ModuleCtx = struct {
     alloc: std.mem.Allocator,
-    raws: std.StringHashMap(*ast.TypeExpr),
+    raws: std.StringHashMap(*cst.CstType),
     resolved: std.StringHashMap(types.Alias),
     type_params: []const []const u8 = &.{},
 
@@ -143,22 +146,22 @@ const ModuleCtx = struct {
 
     pub fn inferCallReturnType(
         _: *ModuleCtx,
-        _: *const ast.Node,
-        _: []const *ast.Node,
+        _: *const cst.CstNode,
+        _: []const *const cst.CstNode,
         _: []const []const u8,
         _: bool,
     ) TypeInfo {
         return .{ .tag = .any };
     }
 
-    pub fn inferFieldType(_: *ModuleCtx, _: *const ast.Node, _: []const u8) TypeInfo {
+    pub fn inferFieldType(_: *ModuleCtx, _: *const cst.CstNode, _: []const u8) TypeInfo {
         return .{ .tag = .any };
     }
 
     pub fn inferFnType(
         self: *ModuleCtx,
-        params: []const ast.FnParam,
-        return_type: ?*ast.TypeExpr,
+        params: []const cst.CstParam,
+        return_type: ?*const cst.CstType,
         type_params: []const []const u8,
         doc: ?[]const u8,
     ) TypeInfo {
@@ -181,30 +184,31 @@ const ModuleCtx = struct {
     }
 };
 
-fn moduleExportInto(mctx: *ModuleCtx, node: *const ast.Node, out: *std.ArrayList(types.RecordField)) !void {
+fn moduleExportInto(mctx: *ModuleCtx, node: *const cst.CstNode, out: *std.ArrayList(types.RecordField)) !void {
     const alloc = mctx.alloc;
-    switch (node.expr) {
+    switch (node.kind) {
         .decl => |d| {
             // host contracts, no runtime value
-            if (d.kind == .declare_decl and d.inner.expr == .type_alias) {
+            if (d.kind == .declare_decl and d.inner.kind == .type_alias) {
                 if (!d.pub_) return;
-                const t = d.inner.expr.type_alias;
-                const ft = types.evalTypeExpr(mctx.aliasScope(), t.type_expr) catch TypeInfo{ .tag = .any };
-                try out.append(alloc, .{ .name = t.name, .field_type = ft });
+                const t = d.inner.kind.type_alias;
+                if (t.segs.len == 0) return;
+                const ft = types.evalTypeExpr(mctx.aliasScope(), t.type) catch TypeInfo{ .tag = .any };
+                try out.append(alloc, .{ .name = t.segs[0].text, .field_type = ft });
                 return;
             }
             if (!d.pub_) return;
-            switch (d.inner.expr) {
+            switch (d.inner.kind) {
                 .binding => |b| {
-                    if (b.target.expr != .ident) return;
+                    if (b.target.kind != .ident) return;
                     // ascription wins over inference, as in analyzeBinding
                     const inferred = types.inferExprType(mctx.check(), b.value);
-                    const field_type = if (b.type_name) |tn|
+                    const field_type = if (b.type) |tn|
                         types.evalTypeExpr(mctx.aliasScope(), tn) catch inferred
                     else
                         inferred;
                     try out.append(alloc, .{
-                        .name = b.target.expr.ident,
+                        .name = b.target.kind.ident.tok.text,
                         // inferred with the module ctx: unknown names
                         // degrade to any inside inference, so nothing
                         // leaks across scopes
@@ -217,54 +221,79 @@ fn moduleExportInto(mctx: *ModuleCtx, node: *const ast.Node, out: *std.ArrayList
         },
         // re-exports resolve in sub-dep scope, not here
         // were it not any-typed, the reads could false-flag
-        .import_stmt => |stmt| if (stmt.pub_) try out.append(alloc, .{
-            .name = stmt.name,
-            .field_type = .{ .tag = .any },
-        }),
+        .import => |im| {
+            if (!(im.pub_ or false)) {
+                // check per-item pub too
+                var any_pub = im.pub_;
+                for (im.items) |it| if (it.pub_) {
+                    any_pub = true;
+                    break;
+                };
+                if (!any_pub) return;
+            }
+            for (im.items) |it| {
+                const is_pub = it.pub_ or im.pub_;
+                if (!is_pub) continue;
+                const nm: []const u8 = if (it.name_tok) |nt| nt.text else std.Io.Dir.path.stem(it.path.text);
+                try out.append(alloc, .{
+                    .name = nm,
+                    .field_type = .{ .tag = .any },
+                });
+            }
+        },
         else => {},
     }
 }
 /// the name a pub-less module evaluates to: a trailing `return e`, `e` or
 ///   `const e = ...`, null otherwise
-pub fn tailBindingName(items: []const *ast.Node) ?[]const u8 {
+fn tailBindingName(items: []const *const cst.CstNode) ?[]const u8 {
     if (items.len == 0) return null;
     const last = items[items.len - 1];
-    if (last.expr == .decl and last.expr.decl.inner.expr == .binding) {
-        const b = last.expr.decl.inner.expr.binding;
-        if (b.target.expr == .ident and !ast.isDiscardName(b.target.expr.ident)) return b.target.expr.ident;
+    const unwrapped = cst.unwrapParen(last) orelse return null;
+    if (unwrapped.kind == .decl and unwrapped.kind.decl.inner.kind == .binding) {
+        const b = unwrapped.kind.decl.inner.kind.binding;
+        if (b.target.kind == .ident and !cst.isDiscardName(b.target.kind.ident.tok.text)) return b.target.kind.ident.tok.text;
         return null;
     }
-    switch (last.expr) {
-        .return_expr => |val| {
-            const v = val orelse return null;
-            if (v.expr != .ident or ast.isDiscardName(v.expr.ident)) return null;
-            return v.expr.ident;
+    switch (unwrapped.kind) {
+        .return_expr => |r| {
+            const v = r.value orelse return null;
+            const inner = cst.unwrapParen(v) orelse return null;
+            if (inner.kind != .ident or cst.isDiscardName(inner.kind.ident.tok.text)) return null;
+            return inner.kind.ident.tok.text;
         },
         .ident => |n| {
-            if (ast.isDiscardName(n)) return null;
-            return n;
+            if (cst.isDiscardName(n.tok.text)) return null;
+            return n.tok.text;
         },
         else => return null,
     }
 }
 
 /// the tail binding's ascription, newest binding first
-fn tailBindingType(mctx: *ModuleCtx, items: []const *ast.Node) ?TypeInfo {
+fn tailBindingType(mctx: *ModuleCtx, items: []const *const cst.CstNode) ?TypeInfo {
     const name = tailBindingName(items) orelse return null;
     var i = items.len;
     while (i > 0) {
         i -= 1;
         const item = items[i];
-        if (item.expr == .decl and item.expr.decl.inner.expr == .binding) {
-            const b = item.expr.decl.inner.expr.binding;
-            if (b.target.expr == .ident and std.mem.eql(u8, b.target.expr.ident, name)) {
-                if (b.type_name) |tn| {
+        const unwrapped = cst.unwrapParen(item) orelse continue;
+        if (unwrapped.kind == .decl and unwrapped.kind.decl.inner.kind == .binding) {
+            const b = unwrapped.kind.decl.inner.kind.binding;
+            if (b.target.kind == .ident and std.mem.eql(u8, b.target.kind.ident.tok.text, name)) {
+                if (b.type) |tn| {
                     return types.evalTypeExpr(mctx.aliasScope(), tn) catch null;
                 }
                 return null;
             }
         }
-        if (item.expr == .import_stmt and std.mem.eql(u8, item.expr.import_stmt.name, name)) return null;
+        if (unwrapped.kind == .import) {
+            const im = unwrapped.kind.import;
+            for (im.items) |it| {
+                const nm: []const u8 = if (it.name_tok) |nt| nt.text else std.Io.Dir.path.stem(it.path.text);
+                if (std.mem.eql(u8, nm, name)) return null;
+            }
+        }
     }
     return null;
 }

@@ -1,12 +1,11 @@
-##
-  build first:
-  zig build && cp zig-out/lib/libzrevo.* ./zrevo.so
-  then: revo ./extension.rv
+#!/usr/bin/env revo
+build first:
+zig build && cp zig-out/lib/libzrevo.* ./zrevo.so
+then: revo ./extension.rv
+!#
 
-  the shapes live in zrevo.rv, the values come from zrevo.so
-##
-
-const zrevo = import "./zrevo.rv"
+const zrevo =
+  import "./zrevo.rv"
 
 print("zadd:", zrevo.zadd(3, 4))
 print("zecho:", zrevo.zecho("hello"))

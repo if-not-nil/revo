@@ -5,8 +5,8 @@ const Value = revo.Value;
 const root = @import("root.zig");
 const Compiler = root.Compiler;
 
-const ast = @import("../ast.zig");
-const Node = ast.Node;
+const cst = @import("../cst.zig");
+const Node = cst.CstNode;
 const Opcode = revo.opcode.Opcode;
 const control = @import("control.zig");
 const ir = @import("../ir/root.zig");
@@ -21,10 +21,10 @@ pub fn compileLocalBinding(
     name: []const u8,
     value: *const Node,
     mutable: bool,
-    type_name: ?*ast.TypeExpr,
+    type_name: ?*const cst.CstType,
 ) !void {
     try self.validateName(name, value.span);
-    if (!ast.isDiscardName(name)) if (locals.currentFunctionState(self)) |fn_state|
+    if (!cst.isDiscardName(name)) if (locals.currentFunctionState(self)) |fn_state|
         for (fn_state.import_locals.items) |il|
             if (std.mem.eql(u8, il.name, name)) {
                 try self.appendFailureReport(.ParseError, &.{
@@ -34,21 +34,26 @@ pub fn compileLocalBinding(
                 return error.CompileFailed;
             };
     // fn slots can be reused if not initialized
-    const slot = if (value.expr == .fn_expr)
+    const vu = cst.unwrapParen(value);
+    const is_fn = if (vu) |u| u.kind == .fn_def else false;
+
+    const slot = if (is_fn)
         try locals.reuseOrDeclareLocal(self, name, mutable)
     else
         try locals.declareLocal(self, name, mutable);
 
     locals.reserveLocalSlots(self);
 
-    if (value.expr == .fn_expr) {
+    if (vu != null and vu.?.kind == .fn_def) {
+        const f = vu.?.kind.fn_def;
+        const tps = try cst.tokenTexts(self.alloc, f.type_params);
         try self.compileFn(
-            value.expr.fn_expr.params,
-            value.expr.fn_expr.return_type,
-            value.expr.fn_expr.body,
+            f.params,
+            f.return_type,
+            f.body,
             name,
             null,
-            value.expr.fn_expr.type_params,
+            tps,
         );
     } else {
         // hide the binding's own name from its initializer so `x() = x()` and
@@ -81,19 +86,23 @@ pub fn bindDeclaredPattern(
     source_idx: usize,
     kind: BindingKind,
 ) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             const slot = try locals.reuseOrDeclareLocal(self, name, kind != .@"const" and kind != .global_const);
             locals.markLocalInitialized(self, slot);
             try self.emitBind(.bind_local, slot, try toRegister(source_idx));
             _ = try self.pop();
             locals.reserveLocalSlots(self);
         },
-        .table_pattern => |items| {
-            for (items, 0..) |item, idx| {
+        .table => |tbl| {
+            // only keyless tables destructure; keyed handled by callers
+            for (tbl.entries, 0..) |entry, idx| {
+                if (entry != .bare) continue;
                 try control.fetchPatternElem(self, .{ .reg = source_idx }, idx);
-                try bindDeclaredPattern(self, item, self.active_registers - 1, kind);
+                try bindDeclaredPattern(self, entry.bare.value, self.active_registers - 1, kind);
             }
         },
 
@@ -107,15 +116,18 @@ pub fn declarePatternLocals(
     pattern: *const Node,
     mutable: bool,
 ) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             _ = try locals.reuseOrDeclareLocal(self, name, mutable);
             locals.reserveLocalSlots(self);
         },
-        .table_pattern => |items| {
-            for (items) |item| {
-                try declarePatternLocals(self, item, mutable);
+        .table => |tbl| {
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                try declarePatternLocals(self, entry.bare.value, mutable);
             }
         },
         .ascribed => |a| try declarePatternLocals(self, a.expr, mutable),
@@ -128,13 +140,18 @@ pub fn collectPatternNames(
     out: *std.ArrayList([]const u8),
     alloc: std.mem.Allocator,
 ) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             try out.append(alloc, name);
         },
-        .table_pattern => |items| {
-            for (items) |item| try collectPatternNames(item, out, alloc);
+        .table => |tbl| {
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                try collectPatternNames(entry.bare.value, out, alloc);
+            }
         },
         .ascribed => |a| try collectPatternNames(a.expr, out, alloc),
         else => {},
@@ -145,14 +162,17 @@ pub fn declareGlobalPattern(
     self: *Compiler,
     pattern: *const Node,
 ) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             try self.declared_globals.put(name, {});
         },
-        .table_pattern => |items| {
-            for (items) |item| {
-                try declareGlobalPattern(self, item);
+        .table => |tbl| {
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                try declareGlobalPattern(self, entry.bare.value);
             }
         },
         .ascribed => |a| try declareGlobalPattern(self, a.expr),
@@ -166,9 +186,11 @@ pub fn bindPattern(
     source_idx: usize,
     kind: BindingKind,
 ) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             const mv_dst = try locals.pushRegister(self);
             try self.spans.append(self.alloc, self.active_span);
             _ = try self.record(.move, &.{.{ .reg = try toRegister(source_idx) }}, true, mv_dst, 0);
@@ -177,12 +199,23 @@ pub fn bindPattern(
                 try self.vm.internAtom(name),
             );
         },
-        .table_pattern => |items| {
+        .table => |tbl| {
             const is_mutable = kind != .@"const" and kind != .global_const;
-            for (items, 0..) |item, idx| {
-                switch (item.expr) {
-                    .ident => |name| {
-                        if (ast.isDiscardName(name)) continue;
+            var idx: usize = 0;
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                const item = entry.bare.value;
+                const iu = cst.unwrapParen(item) orelse {
+                    idx += 1;
+                    continue;
+                };
+                switch (iu.kind) {
+                    .ident => |n| {
+                        const name = n.tok.text;
+                        if (cst.isDiscardName(name)) {
+                            idx += 1;
+                            continue;
+                        }
                         try control.fetchPatternElem(self, .{ .reg = source_idx }, idx);
 
                         try self.emit(
@@ -190,13 +223,14 @@ pub fn bindPattern(
                             try self.vm.internAtom(name),
                         );
                     },
-                    .table_pattern, .ascribed => {
+                    .table, .ascribed => {
                         try control.fetchPatternElem(self, .{ .reg = source_idx }, idx);
 
                         try bindPattern(self, item, self.active_registers - 1, kind);
                     },
                     else => {},
                 }
+                idx += 1;
             }
         },
         .ascribed => |a| try bindPattern(self, a.expr, source_idx, kind),
@@ -206,18 +240,29 @@ pub fn bindPattern(
 
 /// like bindPattern, but the names are already declared
 fn storePattern(self: *Compiler, pattern: *const Node, source_idx: usize) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             try self.spans.append(self.alloc, self.active_span);
             try storeIdentTop(self, name, pattern, pattern);
             return;
         },
-        .table_pattern => |items| {
-            for (items, 0..) |item, idx| {
-                if (item.expr != .ident and item.expr != .table_pattern and item.expr != .ascribed) continue;
+        .table => |tbl| {
+            var idx: usize = 0;
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                const item = entry.bare.value;
+                const iu = cst.unwrapParen(item);
+                const patternish = if (iu) |v| v.kind == .ident or v.kind == .table or v.kind == .ascribed else false;
+                if (!patternish) {
+                    idx += 1;
+                    continue;
+                }
                 try control.fetchPatternElem(self, .{ .reg = source_idx }, idx);
                 try storePattern(self, item, self.active_registers - 1);
+                idx += 1;
             }
         },
         .ascribed => |a| try storePattern(self, a.expr, source_idx),
@@ -230,21 +275,19 @@ pub fn compileAssign(
     target: *const Node,
     value: *const Node,
 ) !void {
-    switch (target.expr) {
-        .table_pattern => |items| {
-            try validateTablePatternShape(self, items, value, "assignment");
-        },
-        else => return compileAssignInner(self, target, value, null),
+    if (cst.patternBareEntries(target)) |items| {
+        try validateTablePatternShape(self, items, value, "assignment");
+        try self.compile(value, true);
+        const src_idx = self.active_registers - 1;
+        return storePattern(self, target, src_idx);
     }
-    try self.compile(value, true);
-    const src_idx = self.active_registers - 1;
-    return storePattern(self, target, src_idx);
+    return compileAssignInner(self, target, value, null);
 }
 
 pub fn compileCompound(
     self: *Compiler,
     target: *const Node,
-    op: ast.BinOp,
+    op: cst.BinOp,
     value: *const Node,
 ) !void {
     return compileAssignInner(self, target, value, op);
@@ -257,10 +300,12 @@ fn compileAssignInner(
     self: *Compiler,
     target: *const Node,
     value: *const Node,
-    op: ?ast.BinOp,
+    op: ?cst.BinOp,
 ) !void {
-    switch (target.expr) {
-        .ident => |name| {
+    const tu = cst.unwrapParen(target) orelse return self.fail(.InvalidAssignmentTarget, target, "cannot assign to nothing");
+    switch (tu.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
             if (op) |o| {
                 try self.compile(target, true);
                 try computeCompoundNew(self, o, target, value);
@@ -268,7 +313,8 @@ fn compileAssignInner(
             try storeIdentTop(self, name, target, value);
         },
         .field => |field| {
-            const key_atom = try self.vm.internAtom(field.name);
+            const fname = field.name_tok.text;
+            const key_atom = try self.vm.internAtom(fname);
             try self.compile(field.object, true);
             try self.regDupe();
             if (op) |o| {
@@ -276,19 +322,32 @@ fn compileAssignInner(
                 try computeCompoundNew(self, o, target, value);
             } else try self.compile(value, true);
 
-            try finishAtomStore(self, field.object, key_atom, field.name, value);
+            try finishAtomStore(self, field.object, key_atom, fname, value);
+        },
+        .dotted_index => |d| {
+            // `t.0` reads element 0; assignment reuses the index path
+            const key_node = try cst.allocNode(self.alloc, d.num_tok.span(), .{ .number = .{ .tok = d.num_tok, .value = d.value, .is_float = false } });
+            const index_node = try cst.allocNode(self.alloc, target.span, .{ .index = .{
+                .object = d.object,
+                .lbracket_tok = d.dot_tok,
+                .key = key_node,
+                .rbracket_tok = d.dot_tok,
+            } });
+            return compileAssignInner(self, index_node, value, op);
         },
         .index => |index| {
             try self.compile(index.object, true);
-            if (index.key.expr == .atom) {
-                const key_atom = try self.vm.internAtom(index.key.expr.atom);
+            const ku = cst.unwrapParen(index.key);
+            if (ku != null and ku.?.kind == .atom) {
+                const aname = cst.atomName(ku.?.kind.atom.tok.text);
+                const key_atom = try self.vm.internAtom(aname);
                 try self.regDupe();
                 if (op) |o| {
                     try self.emit(.table_get_atom, key_atom);
                     try computeCompoundNew(self, o, target, value);
                 } else try self.compile(value, true);
 
-                try finishAtomStore(self, index.object, key_atom, index.key.expr.atom, value);
+                try finishAtomStore(self, index.object, key_atom, aname, value);
             } else {
                 // evaluate object + key once; re-materialize them after the
                 // set so the get doesn't re-evaluate either operand
@@ -310,7 +369,7 @@ fn compileAssignInner(
             // all bullshit like == or |
             const msg = try self.alloc.print(
                 "bad assignment target: {s}",
-                .{@tagName(target.expr)},
+                .{@tagName(tu.kind)},
             );
             return self.fail(.InvalidAssignmentTarget, target, msg);
         },
@@ -319,24 +378,29 @@ fn compileAssignInner(
 
 pub fn validateTablePatternShape(
     self: *Compiler,
-    pattern: []*Node,
+    pattern: []const cst.CstEntry,
     value: *const Node,
     context: []const u8,
 ) !void {
-    if (value.expr != .table) return;
+    const vu = cst.unwrapParen(value);
+    if (vu == null or vu.?.kind != .table) return;
     // only array part counts
     // , hash entries dont matter
     var got: usize = 0;
-    for (value.expr.table) |entry| {
-        if (entry.key == null and !entry.computed) got += 1;
+    for (vu.?.kind.table.entries) |entry| {
+        if (entry == .bare) got += 1;
     }
 
     // exact arity on the array part
     // ; hash entries dont matter
-    if (got == pattern.len) return;
+    var want: usize = 0;
+    for (pattern) |entry| {
+        if (entry == .bare) want += 1;
+    }
+    if (got == want) return;
     const msg = try self.alloc.print(
         "table {s} expects {d} items, got {d}",
-        .{ context, pattern.len, got },
+        .{ context, want, got },
     );
     return self.fail(.ParseError, value, msg);
 }
@@ -411,14 +475,15 @@ fn finishIndexStore(self: *Compiler, object: *const Node, key: *const Node, obj_
     // static str keys widen like hash keys
     // ; computed keys leave the hint alone
     //   (nulling it would misguide method shadowing codegen)
-    if (key.expr == .string) {
-        try widenLocalTableHint(self, object, key.expr.string, hint_node);
+    const ku = cst.unwrapParen(key);
+    if (ku != null and ku.?.kind == .string) {
+        try widenLocalTableHint(self, object, ku.?.kind.string.tok.text, hint_node);
     }
 }
 
 /// OLD is on stack top. folds int rhs into an immediate when both sides
 /// are numeric, else compiles rhs and emits the binop.
-fn computeCompoundNew(self: *Compiler, op: ast.BinOp, target: *const Node, value: *const Node) !void {
+fn computeCompoundNew(self: *Compiler, op: cst.BinOp, target: *const Node, value: *const Node) !void {
     const left_type = self.annotatedType(target);
     const right_type = self.annotatedType(value);
     const both_numeric = op != .concat and left_type.tag == .number and right_type.tag == .number;
@@ -459,9 +524,8 @@ fn moveInstTo(self: *Compiler, dst: revo.opcode.Register, src: *ir.IrInst) !void
 /// unknown shapes (plain `table`) start a fresh list. hint-scoped, so a
 /// conditional add only persists inside its scope
 fn widenLocalTableHint(self: *Compiler, object: *const Node, field_name: []const u8, value: *const Node) !void {
-    if (object.expr != .ident) return;
-    const name = object.expr.ident;
-    const hint = locals.resolveLocalTypeHint(self, name) orelse return;
+    const oname = cst.identText(object) orelse return;
+    const hint = locals.resolveLocalTypeHint(self, oname) orelse return;
     if (hint.tag != .table) return;
     const field_type = self.annotatedType(value);
     const old = if (hint.tag.table.fields) |fs| fs else &[_]types_mod.RecordField{};
@@ -476,10 +540,10 @@ fn widenLocalTableHint(self: *Compiler, object: *const Node, field_name: []const
         owned[old.len] = .{ .name = field_name, .field_type = field_type };
         widened.tag.table.fields = owned;
     }
-    try locals.setLocalTypeHint(self, name, widened);
+    try locals.setLocalTypeHint(self, oname, widened);
 }
 
-pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {
+pub fn compileTable(self: *Compiler, entries: []const cst.CstEntry) !void {
     try self.emit(.table_new, 0);
     var array_index: i64 = 0;
     for (entries) |entry| {
@@ -490,51 +554,88 @@ pub fn compileTable(self: *Compiler, entries: []const ast.TableEntry) !void {
         // which store under their name without declaring it as a local
         // so a keyless `let x = e` stores e itself
         var atom: ?[]const u8 = null;
-        var named_fn: ?*const ast.Binding = null;
-        if (entry.key) |key| {
-            if (!entry.computed) switch (key.expr) {
-                .ident => |n| atom = n,
-                .atom => |n| atom = n,
-                else => try self.compile(try isolateEntryDecls(self, key), true),
-            } else try self.compile(try isolateEntryDecls(self, key), true);
-        } else if (namedFnBinding(entry.value)) |b| {
-            atom = b.target.expr.ident;
-            named_fn = b;
-        } else {
-            try self.@"const"(Value.new.num(array_index));
-            array_index += 1;
+        var named_fn: ?NamedFnBinding = null;
+        switch (entry) {
+            .computed => |cc| try self.compile(try isolateEntryDecls(self, cc.key), true),
+            .keyed => |k| {
+                const ku = cst.unwrapParen(k.key);
+                if (ku != null and ku.?.kind == .ident) {
+                    atom = ku.?.kind.ident.tok.text;
+                } else if (ku != null and ku.?.kind == .atom) {
+                    atom = cst.atomName(ku.?.kind.atom.tok.text);
+                } else try self.compile(try isolateEntryDecls(self, k.key), true);
+            },
+            .bare => |b| {
+                if (namedFnBinding(b.value)) |nb| {
+                    atom = nb.name;
+                    named_fn = nb;
+                } else {
+                    try self.@"const"(Value.new.num(array_index));
+                    array_index += 1;
+                }
+            },
         }
 
         if (atom) |name| {
-            if (named_fn) |b| {
+            if (named_fn) |nb| {
                 try self.compileFn(
-                    b.value.expr.fn_expr.params,
-                    b.value.expr.fn_expr.return_type,
-                    b.value.expr.fn_expr.body,
+                    nb.params,
+                    nb.return_type,
+                    nb.body,
                     name,
                     null,
-                    b.value.expr.fn_expr.type_params,
+                    nb.type_params,
                 );
             } else {
-                try self.compile(try isolateEntryDecls(self, entry.value), true);
+                const value_node = switch (entry) {
+                    .computed => |cc| cc.value,
+                    .keyed => |k| k.value,
+                    .bare => |b| b.value,
+                };
+                try self.compile(try isolateEntryDecls(self, value_node), true);
             }
             try self.emit(.table_set_atom, try self.vm.internAtom(name));
         } else {
-            try self.compile(try isolateEntryDecls(self, entry.value), true);
+            const value_node = switch (entry) {
+                .computed => |cc| cc.value,
+                .keyed => |k| k.value,
+                .bare => |b| b.value,
+            };
+            try self.compile(try isolateEntryDecls(self, value_node), true);
             try self.emit(.table_set, 0);
         }
         try self.regRelease();
     }
 }
 
+const NamedFnBinding = struct {
+    name: []const u8,
+    params: []const cst.CstParam,
+    return_type: ?*const cst.CstType,
+    body: *const Node,
+    type_params: []const []const u8,
+};
+
 /// the binding of a keyless `fn f ...` / `let f = fn ...` entry
-fn namedFnBinding(node: *const Node) ?*const ast.Binding {
-    if (node.expr != .decl) return null;
-    const d = node.expr.decl;
-    if (d.inner.expr != .binding) return null;
-    const b = &d.inner.expr.binding;
-    if (b.target.expr != .ident or b.value.expr != .fn_expr) return null;
-    return b;
+fn namedFnBinding(node: *const Node) ?NamedFnBinding {
+    const u = cst.unwrapParen(node) orelse return null;
+    if (u.kind != .decl) return null;
+    const d = u.kind.decl;
+    const inner = cst.unwrapParen(d.inner) orelse return null;
+    const b = if (inner.kind == .binding) inner.kind.binding else return null;
+    const bt = cst.unwrapParen(b.target) orelse return null;
+    if (bt.kind != .ident) return null;
+    const bv = cst.unwrapParen(b.value) orelse return null;
+    if (bv.kind != .fn_def) return null;
+    const f = bv.kind.fn_def;
+    // type_params borrow the parse arena; callers use them transiently
+    return .{
+        .name = bt.kind.ident.tok.text,
+        .params = f.params,
+        .return_type = f.return_type,
+        .body = f.body,
+        .type_params = &.{},
+    };
 }
 
 /// entry values and computed keys that declare bindings or carry loop
@@ -550,18 +651,31 @@ pub fn isolateEntryDecls(self: *Compiler, node: *const Node) !*Node {
     visitor.visit(node);
     if (!visitor.found) return @constCast(node);
 
-    const fn_node = try self.alloc.create(ast.Node);
-    fn_node.* = .{ .span = node.span, .expr = .{ .fn_expr = .{
-        .params = &.{},
-        .body = @constCast(node),
+    const span = node.span;
+    const fn_node = try cst.allocNode(self.alloc, span, .{ .fn_def = .{
+        .fn_tok = null,
+        .head = .anon,
+        .kind = .@"const",
+        .lt_tok = null,
         .type_params = &.{},
-    } } };
+        .tp_commas = &.{},
+        .gt_tok = null,
+        .lparen_tok = cst.syntheticToken("(", span),
+        .params = &.{},
+        .commas = &.{},
+        .rparen_tok = cst.syntheticToken(")", span),
+        .arrow_tok = null,
+        .return_type = null,
+        .body = @constCast(node),
+    } });
 
-    const call_node = try self.alloc.create(ast.Node);
-    call_node.* = .{ .span = node.span, .expr = .{ .call = .{
+    const call_node = try cst.allocNode(self.alloc, span, .{ .call = .{
         .callee = fn_node,
+        .lparen_tok = cst.syntheticToken("(", span),
         .args = &.{},
-    } } };
+        .commas = &.{},
+        .rparen_tok = cst.syntheticToken(")", span),
+    } });
     return call_node;
 }
 
@@ -573,11 +687,15 @@ pub const IsolationVisitor = struct {
 
     pub fn visit(self: *IsolationVisitor, node: *const Node) void {
         if (self.found) return;
-        switch (node.expr) {
-            .decl, .binding, .import_stmt, .loop_expr, .for_loop, .while_loop, .labeled_block => self.found = true,
+        const u = cst.unwrapParen(node) orelse return;
+        switch (u.kind) {
+            .decl, .binding, .import, .loop_expr, .for_loop, .while_loop => self.found = true,
+            .do_block => |d| if (d.label_tok != null) {
+                self.found = true;
+            } else cst.walkCst(IsolationVisitor, self, node),
             // fn frames isolate themselves already
-            .fn_expr => {},
-            else => ast.walkAST(IsolationVisitor, self, node),
+            .fn_def, .fn_method => {},
+            else => cst.walkCst(IsolationVisitor, self, node),
         }
     }
 };

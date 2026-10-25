@@ -52,7 +52,6 @@ title: 'docs'
 - [doc comments](#doc-comments)
 - [advanced](#advanced)
   - [comptime](#comptime)
-  - [macros](#macros)
   - [metatables](#metatables)
 
 </div>
@@ -195,6 +194,16 @@ the fundamental types are:
 
   only `:false`, `0`, `:undef`, `:missing`, `:no`, `:none`, `:no_result`,  and `:nil` are falsey - everything else (including `""` and `{{}}`) is truthy
 
+  ```zig
+  pub inline fn isFalse(val: Value) bool {
+      return ( //
+          (val.bits >= Value.new.atom(0).bits //
+          and val.bits <= Value.new.atom(CoreAtoms.lastFalse).bits) //
+          or val.bits == Value.new.num(0).bits //
+      );
+  }
+  ```
+
   for this reason, the language does not have exceptions/errors and uses
   `{:err, :ErrorName}` and `{:ok, value}` together with pattern matching, `?`, `orelse` and `:unwrap()`
   to handle errors. toplevel `?` panics instead of returning silently:
@@ -283,6 +292,17 @@ the fundamental types are:
     let a = let b = 5 # both a and b are 5, line returns 5
     ```
 
+  a call normally uses parens. when its only argument is a string or table
+  literal, you can drop them and keep one space:
+
+    ```revo
+    print "hello"       # print("hello")
+    setfps {60}         # setfps({60})
+    ```
+
+  postfix operators apply to the result:
+  `f "x":upper()` is `(f "x"):upper()`. use `f("a", "b")` for multiple args
+
 - strings - `"string"`
   they're just like any other strings. double-quoted strings process escape sequences, while
   single-quoted strings are completely literal (no escape processing):
@@ -290,17 +310,6 @@ the fundamental types are:
     ```revo
     "hello\nworld" # newline
     'hello\nworld' # literal backslash-n
-    ```
-
-  backtick strings `` ` `` are for quasiquote templates inside proc macros;
-  they're parsed as raw text with capture placeholders:
-
-    ```revo
-    proc unless!(iter) do
-      let cond = iter:next()
-      let body = iter:next()
-      {`{:if_expr, %cond, %body, {:nil}}`}
-    end
     ```
 
   you can also use the `"string":method()` methods:
@@ -1087,115 +1096,6 @@ const t = {a = 1}
 const w = t.b orelse 0                 # w = 0, missing keys are :undef
 ```
 
-## builtins
-
-revo ships a small set of helpful globals without imports:
-
-`len(x)` - length of strings, tables:
-
-```revo
-len("hello")   # 5
-len({1, 2, 3}) # 3
-len({a=1, b=2}) # 2
-```
-
-`panic(msg)` - crashes with an error message:
-
-```revo
-panic("something went wrong")
-```
-
-`number(s)` - parse a string into a number, returns `{:ok, n}` or `{:err, :ParseError}`
-
-```revo
-number("42")?
-number("nope") orelse 0
-```
-
-`string(x)` - convert any value to its string representation
-
-```revo
-string(42)      # "42"
-string(:hello)  # ":hello"
-```
-
-`string_of(code)` and `string_of({codes})` - create a string from ASCII code(s):
-
-```revo
-string_of(97)       # "a"
-string_of({97, 98}) # "ab"
-```
-
-`string.join(table, sep)` - join table elements into a string:
-
-```revo
-string.join({"a", "b", "c"}, ",") # "a,b,c"
-```
-
-`inspect(x)` - prints the value and returns it (useful in pipe chains):
-
-```revo
-42 |> inspect |> fn(x) x * 2 # prints 42, returns 84
-```
-
-`assert_eq(a, b)` - panics if values differ, returns `a` on success:
-
-```revo
-assert_eq(1 + 1, 2)
-```
-
-`expect(cond)` - panics if condition is false, returns `:ok` on success. commonly used with `?` in test blocks:
-
-```revo
-expect(1 + 1 == 2)?
-```
-
-`input()` - reads a line from stdin (os-only), returns `{:ok, line}` or `{:err, :EndOfStream}` on EOF. use `input({delimiter = :eof})` to read all of stdin:
-
-```revo
-const line = input():unwrap()
-print(line)
-```
-
-`cwd()` - current working directory path:
-
-```revo
-print(cwd())
-```
-
-`print(...)` - prints values to stdout:
-
-```revo
-print("hello", :world, 42)
-```
-
-`typeof(x)` - returns the runtime type as an atom (see [types](#runtime-type-predicates))
-
-`revo.eval(code)` - evaluate a string as revo code at runtime:
-
-```revo
-revo.eval("print(1 + 2)") # 3
-```
-
-failures come back as `{:err, revo.EvalError}` tables instead of panicking,
-so you can inspect them programmatically. nothing prints to stderr:
-
-```revo
-match revo.eval("let x: num = 'hi'") | {:ok, v} => v | {:err, e} => e.message
-# "`x` wants number, got string"
-
-match revo.eval("1/0") | {:ok, v} => v | {:err, e} => e.kind
-# "DivisionByZero"
-```
-
-`revo.EvalError` fields: `message` (first error line), `phase`
-(`:parse | :expand | :semantic | :compile | :runtime | :io`), `code`
-(kebab-case slug like `"type-mismatch"`, else `:nil`), `line` / `column` /
-`source`, `rendered` (the full multi-line report), plus runtime-only `kind`
-and `trace` (always a table of `{function, source, line, column}` frames,
-empty when none). `revo.dofile(path)` and `revo.compile(code)` return the
-same shape (`dofile` reports missing files as `phase = :io`).
-
 ## fibers and channels
 
 fibers are cooperative (not preemptive). the main fiber runs first and the run queue is FIFO.
@@ -1237,127 +1137,6 @@ do yield end
 sleep(100)
 ```
 
-## baselib modules
-
-revo ships a small set of helpful globals without imports: essentials like `print`, `read`, `cwd`,
-and `revo.eval`, plus a few module-style namespaces
-
-`fs` - file and directory access:
-
-```revo
-let f = fs.open("./README.md"):unwrap()
-let data = f:read()
-f:close()
-
-let dir = fs.open("./src"):unwrap()
-let entries = dir:readdir():unwrap()
-dir:close()
-
-let stat = fs.open("./README.md"):unwrap():stat():unwrap()
-stat.size  # file size in bytes
-stat.kind  # :file or :dir
-
-fs.touch("./notes.txt")?  # create an empty file when missing
-let g = fs.open("./notes.txt", "w")?  # "w" creates or truncates, "a" creates or keeps
-fs.mkdir("./out/build/cache", :true)?  # mkdir -p
-fs.copy("./notes.txt", "./out/notes.bak")?
-fs.remove("./out", :true)?  # recursive delete, without :true only empty dirs go
-fs.exists?("~/")  # paths starting with ~/ expand to home
-```
-
-`json` - encode and decode json:
-
-```revo
-json.encode(("a", "b", "c")):unwrap()  # ["a","b","c"]
-json.decode('{"a":1}'):unwrap().a    # 1
-```
-
-`math` - numeric helpers:
-
-```revo
-math.abs(-3)      # 3
-math.floor(3.7)   # 3
-math.ceil(3.2)    # 4
-math.sqrt(9)      # 3
-math.pow(2, 10)   # 1024
-math.min(3, 7)    # 3
-math.max(3, 7)    # 7
-math.sin(0)       # 0.0
-math.cos(0)       # 1.0
-math.pi           # 3.141592653589793
-```
-
-`time` - wall-clock and monotonic time:
-
-```revo
-time.now()              # current time in ms
-time.now_ns()           # current time in ns
-# monotonic ms starts at program execution
-time.monotonic()        # monotonic ms
-time.monotonic_ns()     # monotonic ns
-time.sleep(100)
-```
-
-`net` - tcp sockets:
-
-```revo
-# server
-const listener = (net.listen(8080))?
-const client = listener:accept()?
-const data = client:recv({mode = :read_some})?
-client:send(data)?
-client:close()?
-
-# client
-const conn = (net.connect("127.0.0.1", 8080))?
-conn:send("hello")?
-const reply = conn:recv({mode = :read_some})?
-conn:close()?
-```
-
-`net.connect` is offloaded from the vm thread: a slow or unreachable host won't freeze
-other fibers while the kernel finishes the handshake.
-
-`os` - system access (read from stdin, etc.)
-
-`system` - run a subprocess and capture its output:
-
-```revo
-system({"echo", "hello"}) # {:ok, {"hello\n", ""}}
-```
-
-exit 0 gives `{:ok, {stdout, stderr}}`; anything else is an error.
-non-zero exit carries its code, signal death reports `:Signaled`:
-
-```revo
-system({"bash", "-c", "exit 3"}) # {:err, {:NonZeroExit, 3}}
-system({"bash", "-c", "kill -TERM $$"}) # {:err, :Signaled}
-```
-
-strings interpolate expressions with `#{{}}`. normal interpolation uses display formatting;
-use `:?` for debug formatting or `:p` for pretty formatting:
-
-```revo
-const name = "world"
-"hello #{name}!"
-"value = #{name:?}"
-"answer = #{42:p}"
-```
-
-`fmt` remains useful for dynamic format strings:
-
-```revo
-fmt("hello %s", :world)   # hello world
-fmt("hello %d", "world")  # hello "world"
-fmt("hello %p", :world)   # hello "world" (this one has colors)
-```
-
-`debug_info` - inspect the current vm state:
-
-```revo
-debug_info()  # table with fiber_id, pc, stack, frames, and register info
-```
-
 ## modules
 
 import resolves a string path to a table of public declarations
@@ -1393,75 +1172,6 @@ cycles caught via `loading_stack` before they hang
 import "config" # compile and cache
 import "config" # stamp match: instant
 ```
-
-<details>
-<summary>for nerds</summary>
-
-{{< ref "fn moduleStamp" >}}
-{{< ref "loading_stack" >}}
-
-**preload**
-ast walk before expansion extracts macros from imports:
-
-```revo
-import "macros"
-macros.repeat!(print("hi")) # macro extracted at preload time
-```
-
-{{< ref "fn preloadImports(vm" >}}
-{{< ref "fn resolveModuleFile(vm" >}}
-
-**wrapModule**
-`module_scope = true` wraps root ast with exports:
-
-```text
-|# source                  |# after wrapModule
-|1 pub const x = 1         |1 const @exports = {{}}
-|1 pub fn add(a, b) a + b  |2 const x = 1
-|3                         |3 @exports[:x] = x
-|4                         |4 fn add(a, b) a + b
-|5                         |5 @exports[:add] = add
-|6                         |6 @exports
-```
-
-{{< ref "fn wrapModule" >}}
-
-**compiler**
-`import_stmt` is a first-class node, not sugar
-compiles to: `load_global import, const "path", call 1, reg_dupe, bind_local`.
-`const x = import "path"` double-binds if names differ.
-
-{{< ref ".import_stmt => |is| {" >}}
-{{< ref "if (b.value.expr == .import_stmt and b.target.expr == .ident) {" >}}
-
-**project detection**
-`Project.detect` walks ancestors for `lib.json`/`exe.json`
-sets `project_root`, appends `"paths"` to `package_path`. in script mode,
-simple bare names fail unless a package_path template matches
-
-{{< ref "Project.detect" >}}
-{{< ref "vm.project_root" >}}
-{{< ref "vm.package_path" >}}
-
-**module_dir**
-set to importing file's dir, restored after
-relative paths (`./`, `../`) check it. all bare names skip it
-
-{{< ref "vm.module_dir" >}}
-
-**runtime**
-native `import()` fn at `std/root.zig`
-
-{{< ref "pub fn import(args" >}}
-{{< ref "fn runImportedModule(vm" >}}
-
-`.so`/`.dylib` resolved paths load as C shared libraries via ffi.
-
-```revo
-import "sqlite3" # loads sqlite3.dylib if resolution finds it
-```
-
-</details>
 
 ## doc comments
 
@@ -1526,164 +1236,6 @@ print(comp ("prefix_" ~ "suffix")) # prefix_suffix
 print(comp (1 < 2))                # :true
 print(comp (1 + 2))                # only runs at compilation time
 ```
-
-### macros
-
-macros are compile-time code transformers. they can rewrite syntax into any
-other syntax, letting you extend the language without runtime cost
-
-> if a language doesn't have metaprogramming, the programmer **will** metaprogram it themselves
-
-they are also how you implement variable-argument functions
-
-{{< ref "pub const Expr" >}}
-
-#### procedural macros (proc!)
-
-proc macros run arbitrary revo code at compile time. they receive an iterator
-of ast nodes and return a new ast node:
-
-{{< ref "pub fn parseProc(" >}}
-
-```revo
-proc add3!(iter) do
-  let a = iter:next()
-  let b = iter:next()
-  let c = iter:next()
-  {{:binary, :add, {:binary, :add, a, b}, c}}
-end
-
-print(add3!(10, 20, 12)) # 42
-```
-
-the iterator methods:
-{{< ref "pub fn MacroIter" >}}
-
-- `iter:next()` - consume and return the next ast node
-- `iter:next_of(:type)` - next node, asserted to be a specific type
-- `iter:peek()` - look ahead without consuming
-
-the return value is always a table wrapping a single ast node: `{node}`
-
-#### ast data format
-
-the ast is encoded as tagged tables -- the same format everywhere (proc macros,
-quasiquoting, and revo.parse)
-
-they always match up with the `Expr` struct:
-
-{{< ref "pub const Expr = union(enum)" >}}
-
-building nodes manually works directly with the table format:
-
-```revo
-proc print!(iter) do
-  let fmt = iter:next_of(:string)
-  let args = {fmt}
-  while iter:peek() != :nil do
-    args:push(iter:next())
-  end
-  {{:call, {:ident, "print"}, {{:call, {:ident, "fmt"}, args, :false, {}}}, :false, {}}}
-end
-
-print!("hello %v", :world) # "hello :world"
-```
-
-you can inspect what the iterator receives using `iter:peek()` and `fmt("%?", ...)`:
-
-```revo
-proc what!(iter) do
-    print(fmt("%?", iter:peek()))
-    iter:next_of(:number)
-    print(fmt("%?", iter:peek()))
-    iter:next()
-    iter:next()
-end
-
-what!(10, "hello", :world)
-```
-
-the `%?` format specifier prints the debug representation of any value
-
-#### quasiquoting (`` ` ``)
-
-backtick-quoted expressions build ast data at runtime. `%name` splices in a
-variable's value:
-
-```revo
-let a = 20
-let b = 22
-let r = `(f(%a, %b))`
-r == {:call, {:ident, "f"}, {20, 22}, :false, {}} # :true
-```
-
-numbers and atoms quote directly:
-
-```revo
-let r = `42`
-r == {:number, 42} # :true
-
-let r = `:hello`
-r == {:atom, "hello"} # :true
-```
-
-tables nest:
-
-```revo
-let v = 42
-let r = `{key = %v}`
-r == {:table, {{{:ident, "key"}, :false, {:number, 42}}}}
-```
-
-combined with a proc macro:
-
-```revo
-proc unless!(iter) do
-  let cond = iter:next()
-  let body = iter:next()
-  {`{:if_expr, %cond, %body, {:nil}}`}
-end
-```
-
-#### gensym
-
-`gensym()` gives you a unique interned string each call. use it to generate
-fresh names that won't clash with user code:
-
-{{< ref "pub fn gensym(" >}}
-
-```revo
-const a = gensym()
-const b = gensym()
-a != b # :true
-```
-
-essential for macro hygiene! create a gensym'd variable inside a quasiquote
-to avoid capture:
-
-{{< ref "var gensym_counter" >}}
-
-```revo
-proc swap!(iter) do
-  let tmp = gensym()
-  let a = iter:next()
-  let b = iter:next()
-  {{:decl, {:binding, {:ident, tmp}, :nil, a, :false}, :let, :false},
-   {:assign_expr, a, b},
-   {:assign_expr, b, {:ident, tmp}}}
-end
-
-let x = 1
-let y = 2
-swap!(x, y)
-print(x, y) # 2, 1
-```
-
-#### preloaded macros
-
-these live in `src/baselib/base.rv` and merge into every build.
-  right now that file declares no macros; baselib tables can add
-  `pub proc` macros there (`pub proc uri.shout! ...`), called qualified
 
 ### metatables
 

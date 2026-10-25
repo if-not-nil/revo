@@ -2,8 +2,7 @@
 
 const std = @import("std");
 
-const ast = @import("../ast.zig");
-const Parser = @import("../Parser.zig");
+const cst = @import("../cst.zig");
 const pipeline = @import("../pipeline.zig");
 const txt = @import("text.zig");
 
@@ -110,7 +109,7 @@ fn pickBestFromFile(
     }
 }
 
-/// walk AST for `.ident` nodes matching `name`
+/// walk cst for `.ident` nodes matching `name`
 fn collectReferencesInFile(
     self: *Workspace,
     alloc: std.mem.Allocator,
@@ -120,14 +119,10 @@ fn collectReferencesInFile(
     opts: pipeline.BuildOptions,
 ) void {
     const snap = self.snapshot(id) orelse return;
-    _ = opts;
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    const arena_alloc = arena.allocator();
-
-    const parsed = Parser.parseSourceReport(arena_alloc, snap.text, .{}) catch return;
+    const parsed_entry = self.parsed(id, opts.repl_mode) catch return;
+    const parsed = parsed_entry.result;
     const root = switch (parsed) {
-        .ok => |r| r,
+        .ok => |r| r.root,
         .err => return,
     };
 
@@ -150,12 +145,13 @@ const IdentCollector = struct {
     snap_name: []const u8,
     text: []const u8,
 
-    pub fn visit(self: *@This(), node: *const ast.Node) void {
-        if (node.expr == .fn_expr) {
-            for (node.expr.fn_expr.params) |p| {
-                if (std.mem.eql(u8, p.name, self.name)) {
-                    const start = txt.offsetToPosition(self.text, p.name_span.start);
-                    const end = txt.offsetToPosition(self.text, p.name_span.end);
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
+        const u = cst.unwrapParen(node) orelse return;
+        if (u.kind == .fn_def) {
+            for (u.kind.fn_def.params) |p| {
+                if (std.mem.eql(u8, p.name_tok.text, self.name)) {
+                    const start = txt.offsetToPosition(self.text, p.name_tok.span().start);
+                    const end = txt.offsetToPosition(self.text, p.name_tok.span().end);
                     self.out.append(self.alloc, .{
                         .file_id = self.file_id,
                         .name = self.snap_name,
@@ -164,8 +160,8 @@ const IdentCollector = struct {
                 }
             }
         }
-        if (node.expr == .ident) {
-            if (std.mem.eql(u8, node.expr.ident, self.name)) {
+        if (u.kind == .ident) {
+            if (std.mem.eql(u8, u.kind.ident.tok.text, self.name)) {
                 const start = txt.offsetToPosition(self.text, node.span.start);
                 const end = txt.offsetToPosition(self.text, node.span.end);
                 self.out.append(self.alloc, .{
@@ -175,7 +171,7 @@ const IdentCollector = struct {
                 }) catch {};
             }
         }
-        ast.walkAST(@This(), self, node);
+        cst.walkCst(@This(), self, node);
     }
 };
 
@@ -193,7 +189,6 @@ test "workspace query surface" {
     ;
     const id = try ws.open("<test>", source, .{});
     const query_opts: pipeline.BuildOptions = .{
-        .include_baselib_macros = false,
         .install_debug_info = false,
         .test_mode = false,
     };

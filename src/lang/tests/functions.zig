@@ -24,6 +24,52 @@ test "function with multiple parameters" {
     , 60);
 }
 
+test "bare calls" {
+    // is a one-argument call
+    try t.topString(
+        \\ fn f(a) a
+        \\ f "hello"
+    , "hello");
+    try t.topNumber(
+        \\ fn f(t) t.a + t.b
+        \\ f {a = 1, b = 2}
+    , 3);
+
+    // bare call fills defaults like a normal call
+    try t.topString(
+        \\ fn f(a, b = "d") b
+        \\ f "x"
+    , "d");
+    try t.topString(
+        \\ fn f(a, b = "d") b
+        \\ f("x")
+    , "d");
+
+    // fills optional params with none
+    try t.topAtom(
+        \\ fn f(a, ?b) b
+        \\ f "x"
+    , "none");
+
+    // postfix binds to the result
+    try t.topString(
+        \\ fn f(a) "a" ~ a
+        \\ f "x":upper()
+    , "AX");
+    try t.topString(
+        \\ fn f(a) "a" ~ a
+        \\ f "x"[0]
+    , "a");
+    try t.topString(
+        \\ fn f(a) fn(b) a ~ b
+        \\ f "x"("y")
+    , "xy");
+    try t.topString(
+        \\ fn f(a) {:ok, a}
+        \\ f "x"?
+    , "x");
+}
+
 test "typed function alias call is checked" {
     try t.expectSemanticFailure(
         \\ const id = fn(x: int) x
@@ -196,12 +242,6 @@ test "comp errors" {
     try t.expectCompileFailure(
         \\ comp (1 / 0)
     , .ParseError, 1, 8, "division by zero!");
-    try t.expectCompileFailure(
-        \\ proc bad_comp!(iter) do
-        \\   {{:comp_block, {:binary, :div, {:number, 1}, {:number, 0}}}}
-        \\ end
-        \\ bad_comp!()
-    , .ParseError, 4, 2, "division by zero!");
 }
 
 test "fn name(params) defines named function" {

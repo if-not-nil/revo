@@ -3,57 +3,15 @@ const lang = revo.lang;
 
 const t = revo.lang.test_helpers;
 
-test "quasiquote encodes literals as tables" {
-    try t.topTrue(
-        \\let r = `:hello`
-        \\r == {:atom, "hello"}
-    );
-    try t.topTrue(
-        \\let r = `42`
-        \\r == {:number, 42}
-    );
-    try t.topTrue(
-        \\let r = `"hello"`
-        \\r == {:string, "hello"}
-    );
-    try t.topTrue(
-        \\let r = `hello`
-        \\r == {:ident, "hello"}
-    );
-    try t.topTrue(
-        \\let r = `{:a, :b}`
-        \\r == {:table, {{:nil, :false, {:atom, "a"}}, {:nil, :false, {:atom, "b"}}}}
-    );
-}
-
-test "quasiquote splices insert values" {
-    try t.topTrue(
-        \\let x = 10
-        \\let r = `(%x + 1)`
-        \\r == {:binary, :add, 10, {:number, 1}}
-    );
-    try t.topTrue(
+test "interpolated strings evaluate" {
+    try t.topString(
+        \\let name = "bob"
+        \\"hi #{name}!"
+    , "hi bob!");
+    try t.topString(
         \\let v = 42
-        \\let r = `{key = %v}`
-        \\r == {:table, {{{:ident, "key"}, :false, 42}}}
-    );
-    try t.topTrue(
-        \\let x = 42
-        \\let r = `{{:a, %x}}`
-        \\r == {:table, {{:nil, :false, {:table, {{:nil, :false, {:atom, "a"}}, {:nil, :false, 42}}}}}}
-    );
-    try t.topTrue(
-        \\let a = 20
-        \\let b = 22
-        \\let r = `(f(%a, %b))`
-        \\r == {:call, {:ident, "f"}, {20, 22}, :false, {}}
-    );
-    try t.topTrue(
-        \\let k = 99
-        \\let v = 42
-        \\let r = `{[%k] = %v}`
-        \\r == {:table, {{99, :true, 42}}}
-    );
+        \\"n = #{v:?}"
+    , "n = 42");
 }
 
 //

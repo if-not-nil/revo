@@ -17,21 +17,21 @@ print(initwin)
 initwin(640, 480, "yay")
 
 let setfps = rl:func("SetTargetFPS", {:i}, :v)
-setfps{60}
+setfps {60}
 
 let winshcl = rl:func("WindowShouldClose", {}, :c)
 
 let getcolor = rl:func("GetColor", {:u}, :p)
-let col = getcolor{0x101042FF}
+let col = getcolor {0x101042FF}
 
 let begindraw = rl:func("BeginDrawing", {}, :v)
 let cleardraw = rl:func("ClearBackground", {:p}, :v)
 let drawfps = rl:func("DrawFPS", {:i, :i}, :v)
 let enddraw = rl:func("EndDrawing", {}, :v)
 
-while winshcl{} == 0 do
-  begindraw{}
-  cleardraw{col}
-  drawfps{0, 0}
-  enddraw{}
+while winshcl {} == 0 do
+  begindraw {}
+  cleardraw {col}
+  drawfps {0, 0}
+  enddraw {}
 end

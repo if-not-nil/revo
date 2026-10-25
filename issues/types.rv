@@ -1,15 +1,15 @@
 # [ ] shadowing overrides type
 
-do # [ ] the docs are not inherited from rng.rand into x
-	let a = rng.rand
-	a
+do  # [ ] the docs are not inherited from rng.rand into x
+  let a = rng.rand
+  a
 end
 
-do # [ ] type of x should be num | string
-	let b = 
-		match input()
-		| {:ok, v} => v
-		| {:err, e} => 123
+do  # [ ] type of x should be num | string
+  let b =
+    match input()
+    | {:ok, v} => v
+    | {:err, e} => 123
 end
 
 # [ ] type is `(type = {:ok, string} | {:err, any})`

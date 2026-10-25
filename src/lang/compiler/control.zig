@@ -9,8 +9,9 @@ const Opcode = revo.opcode.Opcode;
 const Register = revo.opcode.Register;
 const LocalSlot = revo.LocalSlot;
 
-const ast = @import("../ast.zig");
-const Node = ast.Node;
+const cst = @import("../cst.zig");
+const Lexer = @import("../Lexer.zig");
+const Node = cst.CstNode;
 const ir = @import("../ir/root.zig");
 const locals = @import("locals.zig");
 const toRegister = locals.toRegister;
@@ -72,7 +73,7 @@ pub fn compileWhile(
 
 pub fn compileForRange(
     self: *Compiler,
-    params: []const ast.FnParam,
+    params: []const Lexer.Token,
     body: *const Node,
     start_expr: *const Node,
     step_expr: *const Node,
@@ -90,7 +91,7 @@ pub fn compileForRange(
     try self.spans.append(self.alloc, self.active_span);
     try self.recordStackOp(.range_init, 3, 0, base_reg, 0);
 
-    const needs_index = params.len == 2 and !ast.isDiscardName(params[1].name);
+    const needs_index = params.len == 2 and !cst.isDiscardName(params[1].text);
 
     try compileRangeLoopBody(self, params, body, base_reg, needs_index);
     // collapse to result
@@ -99,7 +100,7 @@ pub fn compileForRange(
 
 pub fn compileRangeLoopBody(
     self: *Compiler,
-    params: []const ast.FnParam,
+    params: []const Lexer.Token,
     body: *const Node,
     state_reg: Register,
     needs_index: bool,
@@ -116,37 +117,17 @@ pub fn compileRangeLoopBody(
     }
 
     // declare before loop_check so range_loop can fill them each iteration
-    if (params.len >= 1 and !ast.isDiscardName(params[0].name)) {
-        value_slot = try locals.declareLocal(self, params[0].name, false);
-        if (params[0].type_name) |tn| {
-            const declared = try types_mod.evalTypeExpr(self.aliasScope(), tn);
-            if (declared.tag != .number) {
-                const msg = try self.alloc.print(
-                    "range loop variable must be num, got {s}",
-                    .{@tagName(declared.tag)},
-                );
-                try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
-                return error.CompileFailed;
-            }
-        }
+    // (cst for-params are bare tokens, always numeric)
+    if (params.len >= 1 and !cst.isDiscardName(params[0].text)) {
+        value_slot = try locals.declareLocal(self, params[0].text, false);
         locals.setLocalType(self, value_slot.?, .{ .tag = .number });
-        try locals.setLocalTypeHint(self, params[0].name, .{ .tag = .number });
+        try locals.setLocalTypeHint(self, params[0].text, .{ .tag = .number });
     }
-    if (params.len == 2 and !ast.isDiscardName(params[1].name)) {
-        index_slot = try locals.declareLocal(self, params[1].name, false);
-        if (params[1].type_name) |tn| {
-            const declared = try types_mod.evalTypeExpr(self.aliasScope(), tn);
-            if (declared.tag != .number) {
-                const msg = try self.alloc.print(
-                    "range loop variable must be num, got {s}",
-                    .{@tagName(declared.tag)},
-                );
-                try self.appendFailureReport(.ParseError, &.{.{ .@"error" = msg }});
-                return error.CompileFailed;
-            }
-        }
+
+    if (params.len == 2 and !cst.isDiscardName(params[1].text)) {
+        index_slot = try locals.declareLocal(self, params[1].text, false);
         locals.setLocalType(self, index_slot.?, .{ .tag = .number });
-        try locals.setLocalTypeHint(self, params[1].name, .{ .tag = .number });
+        try locals.setLocalTypeHint(self, params[1].text, .{ .tag = .number });
     }
 
     // L_body: the top of the loop body, where range_loop backbranches
@@ -203,9 +184,15 @@ pub fn compileRangeLoopBody(
     try self.regRelease();
 }
 
+/// synthesized `number` node for default range bounds
+fn numNode(self: *Compiler, span: Lexer.Span, value: f64) !*Node {
+    const tok = cst.syntheticToken("", span);
+    return cst.allocNode(self.alloc, span, .{ .number = .{ .tok = tok, .value = value, .is_float = false } });
+}
+
 pub fn compileFor(
     self: *Compiler,
-    params: []const ast.FnParam,
+    params: []const Lexer.Token,
     body: *const Node,
     iter: *const Node,
     label: ?[]const u8,
@@ -218,9 +205,38 @@ pub fn compileFor(
         return self.fail(.UnsupportedSyntax, iter, msg);
     }
 
-    if (iter.expr == .range_literal) {
-        const range_info = iter.expr.range_literal;
-        return compileForRange(self, params, body, range_info.start, range_info.step, range_info.end, label);
+    const iter_u = cst.unwrapParen(iter) orelse return self.fail(.UnsupportedSyntax, iter, "for over nothing");
+
+    if (iter_u.kind == .range) {
+        const r = iter_u.kind.range;
+        if (r.dot2_tok != null) {
+            const end = r.end orelse return self.fail(.UnsupportedSyntax, iter, "open range needs an end");
+            return compileForRange(self, params, body, r.start, r.mid, end, label);
+        }
+
+        // `a..b` is start..end with step 1
+        const step = try numNode(self, r.mid.span, 1);
+        return compileForRange(self, params, body, r.start, step, r.mid, label);
+    }
+    if (iter_u.kind == .for_range) {
+        const r = iter_u.kind.for_range;
+        const one = try numNode(self, iter.span, 1);
+        const start = if (r.start) |s| s else try numNode(self, iter.span, 0);
+
+        if (r.dot2_tok == null) {
+            if (r.mid) |m| {
+                const step = try numNode(self, m.span, 1);
+                return compileForRange(self, params, body, start, step, m, label);
+            }
+            const end = try numNode(self, iter.span, cst.sentinelForCstStep(one));
+            return compileForRange(self, params, body, start, one, end, label);
+        }
+
+        const mid = r.mid orelse return self.fail(.UnsupportedSyntax, iter, "open range needs a step");
+        if (r.end) |e| return compileForRange(self, params, body, start, mid, e, label);
+        const end = try numNode(self, iter.span, cst.sentinelForCstStep(mid));
+
+        return compileForRange(self, params, body, start, mid, end, label);
     }
 
     var loop = try locals.LoopScope.init(self, label);
@@ -239,15 +255,15 @@ pub fn compileFor(
     try self.emit(.store_local, idx_slot);
     reserveRegisters(self, @intCast(idx_slot + 1));
 
-    const needs_index = params.len == 2 and !ast.isDiscardName(params[1].name);
+    const needs_index = params.len == 2 and !cst.isDiscardName(params[1].text);
     var value_storage: ?VarStorage = null;
     var index_storage: ?VarStorage = null;
-    if (!ast.isDiscardName(params[0].name)) {
-        const value_slot = try locals.declareLocal(self, params[0].name, false);
+    if (!cst.isDiscardName(params[0].text)) {
+        const value_slot = try locals.declareLocal(self, params[0].text, false);
         value_storage = .{ .local = value_slot };
     }
     if (needs_index) {
-        const index_slot = try locals.declareLocal(self, params[1].name, false);
+        const index_slot = try locals.declareLocal(self, params[1].text, false);
         index_storage = .{ .local = index_slot };
     }
 
@@ -379,7 +395,8 @@ fn restoreRegState(self: *Compiler, s: RegisterState) void {
 pub fn compileMatch(
     self: *Compiler,
     subject: *const Node,
-    arms: []const ast.MatchArm,
+    arms: []const cst.CstArm,
+    subject_type: types_mod.TypeInfo,
 ) !void {
     if (locals.currentFunctionState(self) == null)
         return self.fail(.UnsupportedSyntax, subject, "match requires function scope");
@@ -392,7 +409,7 @@ pub fn compileMatch(
 
     // slots n regs share the same frame storage
     // , so locals must not alias live temporaries from enclosing expressions
-    // (like how thee `print` in `print(match ...)` lives in r0 while next_slot may still be 0)
+    // (like how thee `print` in `print(match ...)` is at r0 while next_slot may still be 0)
     //
     // pin the slot allocator above active registers before declaring
     if (self.slot_allocators.items.len > 0) {
@@ -444,7 +461,7 @@ pub fn compileMatch(
         const arm_body_base = self.active_registers;
 
         // capture subject type before patternTypeInfo overwrites the hint
-        const pre_narrow_subject_type = self.annotatedType(subject);
+        const pre_narrow_subject_type = subject_type;
 
         //
         // matchers are alternatives:
@@ -471,9 +488,11 @@ pub fn compileMatch(
 
             const fail_jumps = try compilePatternChecks(self, subject_storage, matcher_expr);
             const me = matcher_expr.?;
-            if (subject.expr == .ident) {
-                if (patternTypeInfo(self, me)) |ti| {
-                    try locals.setLocalTypeHint(self, subject.expr.ident, ti);
+            if (cst.unwrapParen(subject)) |su| {
+                if (su.kind == .ident) {
+                    if (patternTypeInfo(self, me)) |ti| {
+                        try locals.setLocalTypeHint(self, su.kind.ident.tok.text, ti);
+                    }
                 }
             }
             try bindMatchPattern(self, me, subject_storage);
@@ -562,13 +581,18 @@ pub fn reserveRegisters(self: *Compiler, min_register: Register) void {
 // bound idents in a pattern, deduped;
 // arm slots are hoisted from these
 fn collectBindNames(alloc: std.mem.Allocator, pattern: *const Node, out: *std.ArrayList([]const u8)) !void {
-    switch (pattern.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(pattern) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             for (out.items) |have| if (std.mem.eql(u8, have, name)) return;
             try out.append(alloc, name);
         },
-        .table_pattern => |items| for (items) |item| try collectBindNames(alloc, item, out),
+        .table => |tbl| for (tbl.entries) |entry| {
+            if (entry != .bare) continue;
+            try collectBindNames(alloc, entry.bare.value, out);
+        },
         .ascribed => |a| try collectBindNames(alloc, a.expr, out),
         else => {},
     }
@@ -579,21 +603,34 @@ pub fn bindMatchPattern(
     matcher: *const Node,
     subject: VarStorage,
 ) !void {
-    switch (matcher.expr) {
-        .ident => |name| {
-            if (ast.isDiscardName(name)) return;
+    const u = cst.unwrapParen(matcher) orelse return;
+    switch (u.kind) {
+        .ident => |n| {
+            const name = n.tok.text;
+            if (cst.isDiscardName(name)) return;
             try emitStorageLoad(self, subject);
             try bindMatchIdent(self, name);
         },
-        .table_pattern => |items| {
-            for (items, 0..) |item, idx| {
-                switch (item.expr) {
-                    .ident => |name| {
-                        if (ast.isDiscardName(name)) continue;
+        .table => |tbl| {
+            var idx: usize = 0;
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                const item = entry.bare.value;
+                const iu = cst.unwrapParen(item) orelse {
+                    idx += 1;
+                    continue;
+                };
+                switch (iu.kind) {
+                    .ident => |n| {
+                        const name = n.tok.text;
+                        if (cst.isDiscardName(name)) {
+                            idx += 1;
+                            continue;
+                        }
                         try fetchPatternElem(self, .{ .storage = subject }, idx);
                         try bindMatchIdent(self, name);
                     },
-                    .table_pattern, .ascribed => {
+                    .table, .ascribed => {
                         try fetchPatternElem(self, .{ .storage = subject }, idx);
 
                         // temp for nested pattern
@@ -606,6 +643,7 @@ pub fn bindMatchPattern(
                     },
                     else => {},
                 }
+                idx += 1;
             }
         },
         .ascribed => |a| try bindMatchPattern(self, a.expr, subject),
@@ -630,13 +668,14 @@ pub fn compilePatternChecks(
 ) ![]usize {
     var fail_jumps = try std.ArrayList(usize).initCapacity(self.alloc, 4);
     const expr = matcher orelse return fail_jumps.toOwnedSlice(self.alloc);
+    const eu = cst.unwrapParen(expr) orelse return fail_jumps.toOwnedSlice(self.alloc);
 
-    switch (expr.expr) {
+    switch (eu.kind) {
         .ident => {}, // always matches
         .ascribed => |a| {
             // type check first, then the inner pattern
             //   ; fail fast
-            const asc_ti = types_mod.evalTypeExpr(self.aliasScope(), a.type_name) catch types_mod.TypeInfo{ .tag = .any };
+            const asc_ti = types_mod.evalTypeExpr(self.aliasScope(), a.type) catch types_mod.TypeInfo{ .tag = .any };
 
             const type_fails = try compileTypeSatisfies(self, subject, asc_ti);
             defer self.alloc.free(type_fails);
@@ -646,7 +685,7 @@ pub fn compilePatternChecks(
             defer self.alloc.free(inner_fails);
             try fail_jumps.appendSlice(self.alloc, inner_fails);
         },
-        .table_pattern => |items| {
+        .table => |tbl| {
             // type check
             //  , then array length
             //  , then each element
@@ -659,18 +698,28 @@ pub fn compilePatternChecks(
 
             // alen counts the array part only
             //  , hash entries don't matter
+            var bare_count: usize = 0;
+            for (tbl.entries) |entry| if (entry == .bare) {
+                bare_count += 1;
+            };
             try self.emit(.load_builtin_global, try self.vm.internAtom("table"));
             try self.emit(.table_get_atom, try self.vm.internAtom("alen"));
             try emitStorageLoad(self, subject);
             try self.emit(.call, 1);
-            try self.@"const"(Value.new.num(items.len));
+            try self.@"const"(Value.new.num(bare_count));
             try self.emit(.eq, 0);
             try fail_jumps.append(self.alloc, try self.jump(.jump_if_false));
 
-            for (items, 0..) |item, idx| {
-                switch (item.expr) {
-                    .ident => |name| if (ast.isDiscardName(name)) continue,
-                    else => {},
+            var idx: usize = 0;
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                const item = entry.bare.value;
+                const iu = cst.unwrapParen(item);
+                if (iu != null and iu.?.kind == .ident) {
+                    if (cst.isDiscardName(iu.?.kind.ident.tok.text)) {
+                        idx += 1;
+                        continue;
+                    }
                 }
                 const depth_before = self.active_registers;
                 const slot_before = self.slot_allocators.items[self.slot_allocators.items.len - 1];
@@ -690,6 +739,7 @@ pub fn compilePatternChecks(
                 self.alloc.free(nested_fails);
                 self.active_registers = depth_before;
                 self.slot_allocators.items[self.slot_allocators.items.len - 1] = slot_before;
+                idx += 1;
             }
         },
         else => {
@@ -752,7 +802,7 @@ fn compileTypeSatisfies(
             if (name.len == 0) {
                 try fail_jumps.append(self.alloc, try jumpIfNotType(self, subject, "atom"));
             } else {
-                const base = ast.atomName(name);
+                const base = cst.atomName(name);
                 const want: Value = if (std.mem.eql(u8, base, "nil"))
                     Value.new.nil()
                 else
@@ -958,25 +1008,27 @@ fn compileConditional(
 }
 
 fn conditionTypeHint(condition: *const Node) ?TypeHint {
-    return switch (condition.expr) {
+    const cu = cst.unwrapParen(condition) orelse return null;
+    return switch (cu.kind) {
         .call => |call| blk: {
-            if (call.args.len != 1 or call.callee.expr != .ident or
-                !std.mem.endsWith(u8, call.callee.expr.ident, "?")) break :blk null;
-            if (call.args[0].expr != .ident) break :blk null;
+            const cname = cst.identText(call.callee) orelse break :blk null;
+            if (call.args.len != 1 or !std.mem.endsWith(u8, cname, "?")) break :blk null;
+            const au = cst.unwrapParen(call.args[0]) orelse break :blk null;
+            if (au.kind != .ident) break :blk null;
 
-            const type_info = if (std.mem.eql(u8, call.callee.expr.ident, "number?"))
+            const type_info = if (std.mem.eql(u8, cname, "number?"))
                 typeNameInfo("number")
-            else if (std.mem.eql(u8, call.callee.expr.ident, "string?"))
+            else if (std.mem.eql(u8, cname, "string?"))
                 typeNameInfo("string")
-            else if (std.mem.eql(u8, call.callee.expr.ident, "bool?"))
+            else if (std.mem.eql(u8, cname, "bool?"))
                 typeNameInfo("bool")
-            else if (std.mem.eql(u8, call.callee.expr.ident, "table?"))
+            else if (std.mem.eql(u8, cname, "table?"))
                 typeNameInfo("table")
             else
                 null;
 
             const unwrapped = type_info orelse break :blk null;
-            break :blk .{ .name = call.args[0].expr.ident, .type_info = unwrapped };
+            break :blk .{ .name = au.kind.ident.tok.text, .type_info = unwrapped };
         },
         .binary => |b| blk: {
             if (b.op != .eq) break :blk null;
@@ -992,16 +1044,20 @@ fn conditionTypeHint(condition: *const Node) ?TypeHint {
 }
 
 fn typeCompareHint(type_expr: *const Node, value_expr: *const Node) ?TypeHint {
-    if (type_expr.expr != .call) return null;
-    const call = type_expr.expr.call;
+    const tu = cst.unwrapParen(type_expr) orelse return null;
+    if (tu.kind != .call) return null;
+    const call = tu.kind.call;
 
-    if (call.args.len != 1 or call.callee.expr != .ident) return null;
-    if (!std.mem.eql(u8, call.callee.expr.ident, "typeof")) return null;
-    if (call.args[0].expr != .ident) return null;
-    if (value_expr.expr != .atom) return null;
+    const cname = cst.identText(call.callee) orelse return null;
+    if (call.args.len != 1) return null;
+    if (!std.mem.eql(u8, cname, "typeof")) return null;
+    const au = cst.unwrapParen(call.args[0]) orelse return null;
+    if (au.kind != .ident) return null;
+    const vu = cst.unwrapParen(value_expr) orelse return null;
+    if (vu.kind != .atom) return null;
 
-    const type_info = typeNameInfo(value_expr.expr.atom) orelse return null;
-    return .{ .name = call.args[0].expr.ident, .type_info = type_info };
+    const type_info = typeNameInfo(cst.atomName(vu.kind.atom.tok.text)) orelse return null;
+    return .{ .name = au.kind.ident.tok.text, .type_info = type_info };
 }
 
 fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
@@ -1015,16 +1071,24 @@ fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
 }
 
 fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
-    return switch (pattern.expr) {
-        .ascribed => |a| types_mod.evalTypeExpr(self.aliasScope(), a.type_name) catch null,
+    const u = cst.unwrapParen(pattern) orelse return null;
+    return switch (u.kind) {
+        .ascribed => |a| types_mod.evalTypeExpr(self.aliasScope(), a.type) catch null,
         .number => .{ .tag = .number },
-        .string, .multiline_string => .{ .tag = .string },
-        .atom => |name| .{ .tag = .{ .atom = name } },
-        .table_pattern => |items| blk: {
-            var fields = std.ArrayList(types_mod.RecordField).initCapacity(self.alloc, items.len) catch break :blk null;
+        .string, .interpolated => .{ .tag = .string },
+        .atom => |a| .{ .tag = .{ .atom = cst.atomName(a.tok.text) } },
+        .table => |tbl| blk: {
+            var bare_count: usize = 0;
+            for (tbl.entries) |entry| if (entry == .bare) {
+                bare_count += 1;
+            };
+            var fields = std.ArrayList(types_mod.RecordField).initCapacity(self.alloc, bare_count) catch break :blk null;
             defer fields.deinit(self.alloc);
 
-            for (items, 0..) |item, idx| {
+            var idx: usize = 0;
+            for (tbl.entries) |entry| {
+                if (entry != .bare) continue;
+                const item = entry.bare.value;
                 var buf: [16]u8 = undefined;
                 const name = std.mem.print(&buf, "{d}", .{idx}) catch break :blk null;
                 const owned = self.alloc.dupe(u8, name) catch break :blk null;
@@ -1033,6 +1097,7 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
                     .name = owned,
                     .field_type = patternTypeInfo(self, item) orelse types_mod.TypeInfo{ .tag = .any },
                 }) catch break :blk null;
+                idx += 1;
             }
 
             const owned_fields = fields.toOwnedSlice(self.alloc) catch break :blk null;
@@ -1041,13 +1106,12 @@ fn patternTypeInfo(self: *Compiler, pattern: *const Node) ?types_mod.TypeInfo {
             value_ptr.* = .{ .tag = .any };
             break :blk types_mod.makeTable(null, value_ptr, owned_fields);
         },
-        .ident => |name| {
+        .ident => {
             // look up the variable type from hints or local state
             // // and type narrowing from variable names is handled somewher else
-            _ = name;
             return null;
         },
-        .nil => .{ .tag = .{ .atom = ":nil" } },
+        .err => .{ .tag = .{ .atom = ":nil" } },
         else => null,
     };
 }
@@ -1063,33 +1127,46 @@ fn narrowMatchPattern(
 ) !void {
     // ascriptions apply regardless of subject type
     //   ; and win over union narrowing
-    if (pattern.expr == .ascribed) {
-        const a = pattern.expr.ascribed;
+    const pu = cst.unwrapParen(pattern) orelse return;
+    if (pu.kind == .ascribed) {
+        const a = pu.kind.ascribed;
 
-        if (a.expr.expr == .ident and !ast.isDiscardName(a.expr.expr.ident)) {
-            const ti = types_mod.evalTypeExpr(self.aliasScope(), a.type_name) catch types_mod.TypeInfo{ .tag = .any };
-            try locals.setLocalTypeHint(self, a.expr.expr.ident, ti);
+        if (cst.identText(a.expr)) |iname| {
+            if (!cst.isDiscardName(iname)) {
+                const ti = types_mod.evalTypeExpr(self.aliasScope(), a.type) catch types_mod.TypeInfo{ .tag = .any };
+                try locals.setLocalTypeHint(self, iname, ti);
 
-            return;
+                return;
+            }
         }
 
         return try narrowMatchPattern(self, a.expr, subject_type);
     }
 
-    const items = switch (pattern.expr) {
-        .table_pattern => |items| items,
-        else => return,
-    };
+    const tu = cst.unwrapParen(pattern) orelse return;
+    if (tu.kind != .table) return;
+    var bare_items: [32]*const Node = undefined;
+    var bare_len: usize = 0;
+    for (tu.kind.table.entries) |entry| {
+        if (entry != .bare) return;
+        if (bare_len >= bare_items.len) return;
+        bare_items[bare_len] = entry.bare.value;
+        bare_len += 1;
+    }
+    const items = bare_items[0..bare_len];
 
     // ascribed items narrow from their annotation
     //   ; whatever the subject
     for (items) |item| {
-        if (item.expr != .ascribed) continue;
-        const a = item.expr.ascribed;
+        const iu = cst.unwrapParen(item) orelse continue;
+        if (iu.kind != .ascribed) continue;
+        const a = iu.kind.ascribed;
 
-        if (a.expr.expr == .ident and !ast.isDiscardName(a.expr.expr.ident)) {
-            const ti = types_mod.evalTypeExpr(self.aliasScope(), a.type_name) catch types_mod.TypeInfo{ .tag = .any };
-            try locals.setLocalTypeHint(self, a.expr.expr.ident, ti);
+        if (cst.identText(a.expr)) |iname| {
+            if (!cst.isDiscardName(iname)) {
+                const ti = types_mod.evalTypeExpr(self.aliasScope(), a.type) catch types_mod.TypeInfo{ .tag = .any };
+                try locals.setLocalTypeHint(self, iname, ti);
+            }
         }
     }
 
@@ -1098,7 +1175,8 @@ fn narrowMatchPattern(
     if (items.len == 0) return;
 
     const first = items[0];
-    const tag = if (first.expr == .atom) first.expr.atom else return;
+    const fu = cst.unwrapParen(first) orelse return;
+    const tag = if (fu.kind == .atom) cst.atomName(fu.kind.atom.tok.text) else return;
 
     for (subject_type.tag.@"union") |variant| {
         if (!types_mod.unionVariantTagEql(variant, tag)) continue;
@@ -1107,22 +1185,27 @@ fn narrowMatchPattern(
         try types_mod.appendUnionVariantPayload(self.alloc, variant, &payload);
 
         for (items[1..], 0..) |item, i| {
+            const iu = cst.unwrapParen(item) orelse continue;
             // ascriptions win over the union payload
             //   ; for the names they cover
-            if (item.expr == .ascribed) {
-                const a = item.expr.ascribed;
+            if (iu.kind == .ascribed) {
+                const a = iu.kind.ascribed;
 
-                if (a.expr.expr == .ident and !ast.isDiscardName(a.expr.expr.ident)) {
-                    const ti = types_mod.evalTypeExpr(self.aliasScope(), a.type_name) catch types_mod.TypeInfo{ .tag = .any };
-                    try locals.setLocalTypeHint(self, a.expr.expr.ident, ti);
+                if (cst.identText(a.expr)) |iname| {
+                    if (!cst.isDiscardName(iname)) {
+                        const ti = types_mod.evalTypeExpr(self.aliasScope(), a.type) catch types_mod.TypeInfo{ .tag = .any };
+                        try locals.setLocalTypeHint(self, iname, ti);
+                    }
                 }
 
                 continue;
             }
 
-            if (item.expr == .ident and !ast.isDiscardName(item.expr.ident)) {
-                const narrowed = if (i < payload.items.len) payload.items[i] else types_mod.TypeInfo{ .tag = .any };
-                try locals.setLocalTypeHint(self, item.expr.ident, narrowed);
+            if (cst.identText(item)) |iname| {
+                if (!cst.isDiscardName(iname)) {
+                    const narrowed = if (i < payload.items.len) payload.items[i] else types_mod.TypeInfo{ .tag = .any };
+                    try locals.setLocalTypeHint(self, iname, narrowed);
+                }
             }
         }
         return;
@@ -1170,7 +1253,7 @@ fn compileShortCircuit(self: *Compiler, left: *const Node, right: *const Node, s
             left_reg,
             0,
         );
-        // drop pushed move so end jump patching sees a the stack it needs
+        // drop pushed move so end jump patching sees the stack it needs
         // its reappended below after active is fixed
         _ = try self.pop();
     }

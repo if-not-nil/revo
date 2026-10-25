@@ -147,7 +147,7 @@ test "string literals survive source free" {
     const bytecode = switch (try lang.build(&vm, .{ .text = source }, .{})) {
         .ok => |ok| ok,
         .err => |err| {
-            defer lang.deinitError(alloc, err);
+            defer lang.deinitError(err);
             return error.ParseFailed;
         },
     };

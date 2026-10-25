@@ -160,34 +160,6 @@ test "imported module members work  and are typed" {
     );
 }
 
-test "imported proc macros expand, unknown ones error" {
-    var m = try t.TmpMod.init(&.{
-        .{ .path = "macs.rv", .data =
-        \\ pub proc answer!(iter) do
-        \\   {{:number, 42}}
-        \\ end
-        },
-    });
-    defer m.deinit();
-
-    try t.topNumberInDir(m.dir,
-        \\ const m = import "./macs"
-        \\ m.answer!()
-    , 42);
-
-    try t.expectExpandErrorInDir(m.dir,
-        \\ const m = import "./macs"
-        \\ m.nope!(1)
-    , "unknown macro `m.nope!`");
-}
-
-test "unknown macro calls are compile errors" {
-    // yes this happens sometimes and its REALLY unfun
-    try t.expectExpandError(
-        \\ nosuchmacro!(1)
-    , "unknown macro `nosuchmacro!`");
-}
-
 test "imported qualified types check values" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "shapes.rv", .data =

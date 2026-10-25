@@ -1,13 +1,10 @@
-//! salsa-ish query inputs;;; content hashes + revision guard
-//!   so inputs are tracked by hash, not version+opts
-//!   todo providers still read the legacy caches; queries take over one at a time
+//! salsa-ish query inputs; content hashes, dirty when the hash moves
 
 const std = @import("std");
 
 const txt = @import("text.zig");
 
 pub const FileId = txt.FileId;
-pub const Revision = u64;
 
 /// always xxhash64 at seed 0
 /// i only picked xxhash because vite and webpack use it for some reason
@@ -17,14 +14,12 @@ pub fn hashText(text: []const u8) u64 {
 
 pub const QueryInput = struct {
     hash: u64,
-    revision: Revision,
 };
 
 /// input table
 /// dirty when current hash differs from recorded
 pub const QueryDb = struct {
     alloc: std.mem.Allocator,
-    revision: Revision = 1,
     inputs: std.AutoHashMap(FileId, QueryInput),
 
     pub fn init(alloc: std.mem.Allocator) QueryDb {
@@ -35,14 +30,9 @@ pub const QueryDb = struct {
         self.inputs.deinit();
     }
 
-    pub fn bump(self: *QueryDb) Revision {
-        self.revision += 1;
-        return self.revision;
-    }
-
-    /// record current text hash for a file at the current revision
+    /// record current text hash for a file
     pub fn track(self: *QueryDb, id: FileId, text: []const u8) !void {
-        try self.inputs.put(id, .{ .hash = hashText(text), .revision = self.revision });
+        try self.inputs.put(id, .{ .hash = hashText(text) });
     }
 
     /// forget a closed file
@@ -66,10 +56,6 @@ test "same text hashes stable, edits go dirty" {
     try db.track(id, "let x = 1");
     try std.testing.expect(!db.isDirty(id, "let x = 1"));
     try std.testing.expect(db.isDirty(id, "let x = 2"));
-
-    _ = db.bump();
-    // revision bump alone does not dirty clean content
-    try std.testing.expect(!db.isDirty(id, "let x = 1"));
 
     db.evict(id);
     try std.testing.expect(db.isDirty(id, "let x = 1"));

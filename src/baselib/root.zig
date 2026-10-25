@@ -63,14 +63,6 @@ pub const Impl = struct {
         return .parked();
     }
 
-    pub fn gensym(vm: *VM) !host.HostResult {
-        const n = vm.runtime.gensym_counter;
-        vm.runtime.gensym_counter += 1;
-        const name = try vm.runtime.alloc.print("__gensym_{d}", .{n});
-        defer vm.runtime.alloc.free(name);
-        return .data(try vm.ownValueStringNoDedup(name));
-    }
-
     pub fn hash(vm: *VM, val: host.ArgTypes.any) !host.HostResult {
         return .data(Value.new.num(val.hash(vm)));
     }
@@ -247,16 +239,18 @@ test "fmt rendering is recursive" {
 pub fn dotest(args: []const Value, vm: *VM) !host.HostResult {
     const name = args[0].asString().?;
     const body = args[1].asFunction().?;
+
     var buf: [128]u8 = undefined;
     var w = revo.stdout().writerStreaming(vm.runtime.io, &buf);
     defer w.flush() catch {};
 
     w.interface.print("* test \"{s}\"...\n", .{try vm.strings.get(name)}) catch {};
     w.flush() catch {};
+
     const res = vm.callFunctionParts(Value.new.function(body), null, &[0]Value{}, null) catch |err| {
         const failure = vm.runFailure(err);
-        failure.render(vm.runtime.alloc, &w.interface, vm.currentDebugSource() orelse "", vm.runtime.supports_color) catch {
-            try revo.term.printError(&w.interface, vm.runtime.supports_color, "hard-fail - {s}", .{@errorName(err)});
+        failure.render(&w.interface, vm.currentDebugSource() orelse "", vm.runtime.supports_color) catch {
+            try revo.term.printError(&w.interface, vm.runtime.supports_color, "hard fail! {s}", .{@errorName(err)});
             return .data(Value.new.nil());
         };
         return .data(Value.new.nil());
@@ -285,11 +279,13 @@ pub fn dosuite(args: []const Value, vm: *VM) !host.HostResult {
     var sbuf: [128]u8 = undefined;
     var sw = revo.stdout().writerStreaming(vm.runtime.io, &sbuf);
     defer sw.flush() catch {};
+
     _ = vm.callFunctionParts(Value.new.function(body), null, &[0]Value{}, null) catch |err| {
         const failure = vm.runFailure(err);
         var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
         defer buf.deinit();
-        failure.render(vm.runtime.alloc, &buf.writer, vm.currentDebugSource() orelse "", vm.runtime.supports_color) catch {
+
+        failure.render(&buf.writer, vm.currentDebugSource() orelse "", vm.runtime.supports_color) catch {
             sw.interface.print("* suite hard-failed: \"{s}\"\n", .{@errorName(err)}) catch {};
             return .coreAtom(.nil);
         };
@@ -698,14 +694,6 @@ pub fn input(args: []const Value, vm: *VM) !host.HostResult {
         try result.appendSlice(vm.runtime.alloc, rt.input_buf[0..total]);
         rt.input_buf_len = 0;
     }
-}
-
-test "gensym produces different values on each call" {
-    try revo.lang.test_helpers.topAtom(
-        \\ const a = gensym()
-        \\ const b = gensym()
-        \\ a != b
-    , "true");
 }
 
 pub fn cwd(args: []const Value, vm: *VM) !host.HostResult {

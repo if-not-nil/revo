@@ -442,22 +442,6 @@ test "two vms can disagree about color" {
     try std.testing.expect(b.runtime.supports_color != false or a.runtime.supports_color == b.runtime.supports_color);
 }
 
-test "two vms have independent gensym counters" {
-    var a = try VM.init(t.runtime());
-    defer a.deinit();
-    var b = try VM.init(t.runtime());
-    defer b.deinit();
-
-    a.runtime.gensym_counter = 100;
-    b.runtime.gensym_counter = 500;
-    try std.testing.expectEqual(@as(u64, 100), a.runtime.gensym_counter);
-    try std.testing.expectEqual(@as(u64, 500), b.runtime.gensym_counter);
-
-    a.runtime.gensym_counter += 1;
-    try std.testing.expectEqual(@as(u64, 101), a.runtime.gensym_counter);
-    try std.testing.expectEqual(@as(u64, 500), b.runtime.gensym_counter);
-}
-
 test "two vms have independent stdin buffers" {
     var a = try VM.init(t.runtime());
     defer a.deinit();

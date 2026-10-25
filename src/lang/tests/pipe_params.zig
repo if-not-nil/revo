@@ -13,20 +13,6 @@ test "channel select w/ multiple waiters" {
     , 30);
 }
 
-test "proc macro call with multiple args does not analyze arguments" {
-    // arguments to proc macros are raw syntax, not real revo expressions
-    // (e.g. method names passed to a doto!-style macro); the semantic
-    // checker must not report false "unknown name" errors inside them
-    try t.topNumber(
-        \\ proc pick!(iter) do
-        \\   let _first = iter:next()
-        \\   let second = iter:next()
-        \\   {second}
-        \\ end
-        \\ pick!(ignored, 45)
-    , 45);
-}
-
 test "numeric and string keys are distinct" {
     try t.topNumber(
         \\ const t = {}

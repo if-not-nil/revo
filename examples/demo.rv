@@ -5,10 +5,8 @@
  δ
 !#
 
-#*
-this is a doc-comment, markdown goes here
-you can run `revo doc demo.rv` to get them in a readable markdown format
-*#
+#* this is a doc-comment, markdown goes here
+   you can run `revo doc demo.rv` to get them in a readable markdown format *#
 fn the_basics() do
   print("the basics")
 
@@ -61,6 +59,7 @@ fn the_basics() do
   print(1 and 2, 0 or 9)
 end
 
+
 fn functions() do
   print("\nfunctions")
 
@@ -74,14 +73,13 @@ fn functions() do
 
   # multi-statement functions use do ... end blocks
   fn fact(n) do
-    if n <= 1 1
-    else n * fact(n - 1)
+    if (n <= 1) 1 else n * fact(n - 1)
   end
   print(fact(5))
 
   # explicit return: returns immediately from the function
   fn maybe_double(x) do
-    if x > 100 return x
+    if (x > 100) return x
     x * 2
   end
   print(maybe_double(5))
@@ -99,42 +97,44 @@ fn functions() do
   print(ctr(), ctr(), ctr())
 end
 
+
 # control flow: if/else, match, reduce, loop
 fn control_flow() do
   print("\ncontrol flow")
 
   # if/else is an expression: returns value of chosen branch
-  const branch = if 1 < 2 "yes" else "no"
+  const branch = if (1 < 2) "yes" else "no"
   print(branch)
 
   # match is an expression with pattern matching and guards
   const msg = match 5
-    | 1 => "one"
-    | 2 => "two"
-    | v when v > 3 => "big"
-    | _ => "other"
+  | 1 => "one"
+  | 2 => "two"
+  | v when v > 3 => "big"
+  | _ => "other"
   print(msg)
 
   # match on tables: pattern matching extracts values
   const result = match {10, "ok"}
-    | {n, "ok"} when n > 5 => "success: " ~ string(n)
-    | {n, "ok"} => "small success"
-    | {_, err} => "error: " ~ err
+  | {n, "ok"} when n > 5 => "success: " ~ string(n)
+  | {n, "ok"} => "small success"
+  | {_, err} => "error: " ~ err
   print(result)
 
   # reduce iterates over a collection, accumulating a result
-  const sum = iter.reduce({0,1,2,3,4}, fn(a,b) a + b, 0)
+  const sum = iter.reduce({0, 1, 2, 3, 4}, fn(a, b) a + b, 0)
   print(sum)
 
   # loop creates an infinite loop!
-	# break/l returns a value, unlabeled is always :loop
+  # break/l returns a value, unlabeled is always :loop
   const loop_result = loop/l do
-    if :true
-			break/l 42
+    if (:true)
+      break/l 42
   end
 
   print(loop_result)
 end
+
 
 # tables: do-end blocks as values, destructuring
 fn tables_destructure() do
@@ -164,6 +164,7 @@ fn tables_destructure() do
   print(a, b, c, d)
 end
 
+
 # pipes: value |> fn passes value as first arg
 fn pipes() do
   print("\npipes")
@@ -186,24 +187,24 @@ fn pipes() do
   print(obj.val)
 
   # chain multiple pipe operations
-  const chain = {1,2,3,4,5} |> iter.map(fn(x) x * 2) |> iter.reduce(fn(a,b) a + b, 0)
+  const chain = {1, 2, 3, 4, 5} |> iter.map(fn(x) x * 2) |> iter.reduce(fn(a, b) a + b, 0)
   print(chain)
 end
+
 
 fn error_handling() do
   print("\nerror handling")
 
   #* functions return ({:ok, value}) or ({:err, error_atom}) instead of exceptions *#
   fn safe_div(a, b) do
-    if b == 0 {:err, :DivByZero}
-    else {:ok, a / b}
+    if (b == 0) {:err, :DivByZero} else {:ok, a / b}
   end
 
   # match extracts the value from a result type
   const ok_val = safe_div(10, 2)
   const result = match ok_val
-    | {:ok, v} => v
-    | {:err, e} => 0
+  | {:ok, v} => v
+  | {:err, e} => 0
 
   # orelse provides a fallback value on error
   const bad_val = safe_div(10, 0)
@@ -214,6 +215,8 @@ end
 
 #* tables;
    tables with closures give you fields and methods *#
+
+
 fn tables() do
   print("\ntables")
 
@@ -221,42 +224,40 @@ fn tables() do
   # with them and the compiler checks the fields. method fields go
   # in the type too, so colon calls resolve to them instead of
   # baselib methods with the same name
-  type Point = { x: number, y: number, mag: function, add: function }
+  type Point = {x: number, y: number, mag: function, add: function}
   # methods are something you call via the colon syntax, `obj:mag()`
   # that puts `obj` as the first argument (`self`, in this case)
   fn mag(self: Point) self.x * self.x + self.y * self.y
-  fn add(self: Point, other: Point) -> Point {
-    x = self.x + other.x,
-    y = self.y + other.y,
-    mag = mag,
-    add = add,
-  }
+  fn add(self: Point, other: Point) -> Point {x = self.x + other.x, y = self.y + other.y, mag = mag, add = add}
 
-  let p1: Point = { x = 3, y = 4, mag = mag, add = add }
-  let p2: Point = { x = 1, y = 2, mag = mag, add = add }
+  let p1: Point = {x = 3, y = 4, mag = mag, add = add}
+  let p2: Point = {x = 1, y = 2, mag = mag, add = add}
   let p3 = p1:add(p2)
 
   print(p1.x, p1:mag(), p3.x, p3.y)
 
   # another example!
-	#	  mutable counter
-  type Counter = { count: number, inc: function, val: function }
-  fn inc(self: Counter) do self.count += 1 end
+  #	  mutable counter
+  type Counter = {count: number, inc: function, val: function}
+  fn inc(self: Counter)
+    self.count += 1
+
   fn val(self: Counter) self.count
 
-  let c: Counter = { count = 10, inc = inc, val = val }
+  let c: Counter = {count = 10, inc = inc, val = val}
   c:inc()
   c:inc()
   print(c:val())
 end
 
 #* this is a public, documented table factory *#
-pub fn Hi(field) {
-  field = field,
-  get_field = fn(self) self.field
-}
+
+
+pub fn Hi(field) {field = field, get_field = fn(self) self.field}
+
 
 const t = Hi("hi")
+
 
 # methods;
 #		calling with :syntax like lua
@@ -265,23 +266,24 @@ const t = Hi("hi")
 fn methods() do
   print("\nmethods")
 
-
-  type MethodsCounter = { count: number, inc: function, get: function }
-  fn inc(self: MethodsCounter) do self.count += 1 end
+  type MethodsCounter = {count: number, inc: function, get: function}
+  fn inc(self: MethodsCounter) do
+    self.count += 1
+  end
   fn get(self: MethodsCounter) self.count
 
-  let c: MethodsCounter = { count = 5, inc = inc, get = get }
+  let c: MethodsCounter = {count = 5, inc = inc, get = get}
   print(c:get())
   c:inc()
   print(c:get())
 
   # method chaining works neatly with pipes
-  const result = c
-    :get()
+  const result = c:get()
     |> fn(x) x * 2
 
   print(result)
 end
+
 
 # fibers;
 #   super lightweight concurrency with spawn/join and channels
@@ -314,6 +316,7 @@ fn fibers() do
   print(recv(ch))
 end
 
+
 # nonblocking io;
 #   looks blocking but runs concurrently
 fn nonblocking() do
@@ -321,7 +324,6 @@ fn nonblocking() do
 
   # revo's async io looks like blocking code but parks the fiber instead
   # this lets you write synchronous-looking code that runs concurrently
-
   # simulate async operations
   #   they look blocking but yield to other fibers
   fn work1fn() do
@@ -370,31 +372,6 @@ fn nonblocking() do
   print("producer/consumer done")
 end
 
-# macros;
-#   compile-time code transformers
-fn macros() do
-  print("\nmacros")
-
-  # TMPL: macro defines a syntax transformation at compile time
-  # TMPL: macro double! `(%x:expr)` `%x * 2`
-  # TMPL: macro twice! `(%x:expr %y:expr)` `%x + %y`
-
-  # TMPL: macro expands to the transformed code
-  # TMPL: print(double!(21))
-  # TMPL: print(twice!(1, 2))
-end
-
-# proc macros;
-#   compile-time procedural code generation
-fn proc_macros() do
-  print("\nproc macros")
-
-  # proc is a compile-time function that receives an AST iterator
-  # it can generate new code at compile time
-  # see examples/proc.rv for detailed usage
-
-  print("see examples/proc.rv for proc macro examples")
-end
 
 # comp;
 #   compile-time evaluation
@@ -402,14 +379,11 @@ fn comp_time() do
   print("\ncomp")
 
   # comp evaluates the expression at compile time and embeds the result
-  const config = comp ({
-    version = "1.0",
-    env = "demo",
-      features = {"pipes", "match", "fibers"},
-  })
+  const config = comp ({version = "1.0", env = "demo", features = {"pipes", "match", "fibers"}})
 
   print(config.version, config.env, config.features)
 end
+
 
 # some builtin globals
 fn baselib() do
@@ -420,33 +394,33 @@ fn baselib() do
   print(string(42), string(:ok))
 
   # type checking
-    print(typeof(42), typeof("hi"), typeof(:atom), typeof({1,2,3}), typeof({}))
+  print(typeof(42), typeof("hi"), typeof(:atom), typeof({1, 2, 3}), typeof({}))
 
   # inspection
   const val = 42
   print(inspect(val))
 
   # collection functions
-    const mapped = iter.collect(iter.map({1,2,3}, fn(x) x * 2))
+  const mapped = iter.collect(iter.map({1, 2, 3}, fn(x) x * 2))
   print(mapped)
 
-  const filtered = iter.collect(iter.filter({1,2,3}, fn(x) x > 1))
+  const filtered = iter.collect(iter.filter({1, 2, 3}, fn(x) x > 1))
   print(filtered)
 
-  const chained = {1,2,3,4}
+  const chained = {1, 2, 3, 4}
     |> iter.map(fn(x) x * x)
     |> iter.filter(fn(x) x > 5)
     |> iter.fold(fn(a, b) a + b)
   print(chained)
 
-    const summed = iter.reduce({1,2,3,4}, fn(a,b) a + b, 0)
+  const summed = iter.reduce({1, 2, 3, 4}, fn(a, b) a + b, 0)
   print(summed)
 
-  const found = iter.find({1,2,3}, fn(x) x == 2)
+  const found = iter.find({1, 2, 3}, fn(x) x == 2)
   print(found)
 
-  const all_ok = iter.all?({1,2,3}, fn(x) x > 0)
-  const any_big = iter.any?({1,2,3}, fn(x) x > 2)
+  const all_ok = iter.all?({1, 2, 3}, fn(x) x > 0)
+  const any_big = iter.any?({1, 2, 3}, fn(x) x > 2)
   print(all_ok, any_big)
 
   # string functions
@@ -459,6 +433,7 @@ fn baselib() do
   print(t2)
 end
 
+
 # modules! to you, they're just tables
 fn modules() do
   print("\nmodules")
@@ -468,7 +443,6 @@ fn modules() do
   # modules are cached
   # same path returns the same table
   # functions can be modules too
-
   fn a() do
     # this is private
     const a = 10
@@ -480,16 +454,15 @@ fn modules() do
 
   # const math_utils = import "lib"
   # math_utils.add(1, 2)
-
   # module-private variables stay hidden, only the returned value is exposed
   # example module structure:
   # # lib.rv
   # let private_var = "hidden"
   # const public_fn = fn(x) x + 1
   # public_fn  # this becomes the module value
-
   print("import loads .rv files, see examples/lib.rv")
 end
+
 
 # tests;
 #   compile and run only with --test flag
@@ -520,6 +493,7 @@ fn run_tests() do
   end
 end
 
+
 fn main() do
   the_basics()
   functions()
@@ -531,8 +505,6 @@ fn main() do
   methods()
   fibers()
   nonblocking()
-  macros()
-  proc_macros()
   comp_time()
   baselib()
   modules()
@@ -540,5 +512,6 @@ fn main() do
 
   print("\ndone")
 end
+
 
 main()

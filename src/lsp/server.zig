@@ -123,6 +123,7 @@ const Handler = struct {
                 .text_document_sync_options = .{
                     .openClose = true,
                     .change = .Full,
+                    .willSaveWaitUntil = true,
                 },
             },
             .definitionProvider = .{ .bool = true },
@@ -133,6 +134,7 @@ const Handler = struct {
             .completionProvider = .{ .triggerCharacters = &.{"."} },
             .renameProvider = .{ .rename_options = .{ .prepareProvider = true } },
             .codeActionProvider = .{ .bool = true },
+            .documentFormattingProvider = .{ .bool = true },
             .inlayHintProvider = .{ .inlay_hint_options = .{} },
             .signatureHelpProvider = T.SignatureHelp.Options{
                 .triggerCharacters = &.{},
@@ -379,7 +381,7 @@ const Handler = struct {
                 .name = sym.name,
                 .kind = switch (sym.kind) {
                     .binding => .Variable,
-                    .function, .macro => .Function,
+                    .function => .Function,
                     .param => .Variable,
                     .type_alias => .Class,
                 },
@@ -446,8 +448,8 @@ const Handler = struct {
     ) !void {
         var bundle = try h.ws.diagnosticsWithWarnings(arena, file_id, .{});
         defer {
-            if (bundle.err) |e| lang.deinitError(arena, e);
-            if (bundle.warnings) |*w| w.deinit(arena);
+            if (bundle.err) |e| lang.deinitError(e);
+            if (bundle.warnings) |*w| w.deinit();
         }
         var all = try std.ArrayList(T.Diagnostic).initCapacity(arena, 4);
 
@@ -455,7 +457,6 @@ const Handler = struct {
             // extract from whichever phase did it
             const report = switch (err) {
                 .parse => |f| f.report,
-                .expand => |f| f.report,
                 .compile => |f| f.report,
                 .semantic => |f| f.report,
             };
@@ -531,8 +532,8 @@ const Handler = struct {
         const snap = h.ws.snapshot(file_id) orelse return null;
         var bundle = try h.ws.diagnosticsWithWarnings(arena, file_id, .{});
         defer {
-            if (bundle.err) |e| lang.deinitError(arena, e);
-            if (bundle.warnings) |*w| w.deinit(arena);
+            if (bundle.err) |e| lang.deinitError(e);
+            if (bundle.warnings) |*w| w.deinit();
         }
         const w = bundle.warnings orelse return null;
         var out = try std.ArrayList(T.CodeAction.Result).initCapacity(arena, 2);
@@ -573,6 +574,42 @@ const Handler = struct {
         return try out.toOwnedSlice(arena);
     }
 
+    pub fn @"textDocument/formatting"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.document_formatting.Params,
+    ) !?[]const T.TextEdit {
+        // client options are ignored on purpose
+        // two-space indent is the language style
+        return h.formatDocument(arena, params.textDocument.uri);
+    }
+
+    pub fn @"textDocument/willSaveWaitUntil"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.TextDocument.WillSaveParams,
+    ) !?[]const T.TextEdit {
+        return h.formatDocument(arena, params.textDocument.uri);
+    }
+
+    fn formatDocument(h: *Handler, arena: std.mem.Allocator, uri: []const u8) !?[]const T.TextEdit {
+        const file_id = h.uri_to_file.get(uri) orelse return null;
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const formatted = lang.fmt.format(arena, snap.text) catch return null;
+
+        if (std.mem.eql(u8, formatted, snap.text)) return &.{};
+        const edits = try arena.alloc(T.TextEdit, 1);
+
+        edits[0] = .{
+            .range = .{
+                .start = .{ .line = 0, .character = 0 },
+                .end = offsetToLspPos(snap.text, snap.text.len, h.enc),
+            },
+            .newText = formatted,
+        };
+        return edits;
+    }
+
     /// return type inlay hints for visible bindings
     pub fn @"textDocument/inlayHint"(
         h: *Handler,
@@ -611,75 +648,55 @@ const Handler = struct {
         const snap = h.ws.snapshot(file_id) orelse return null;
         const source = snap.text;
 
-        const lexed = try lang.lexReportAt(arena, source, .{});
-        const tokens = switch (lexed) {
-            .ok => |t| t,
-            .err => return null,
-        };
+        // non-fatal
+        // highlight what we have even with lex errors
+        const out = lang.Lexer.lexAll(arena, source) catch return null;
+        const tokens = out.tokens;
+        const trivia = out.trivia;
 
-        // try parser-based role map for more accurate highlighting
-        const ast_map = Workspace.buildASTSpanMap(arena, source);
+        // role map comes off the workspaces cached parse, instaeof of a second parse
+        const cst_map = h.ws.cstSpanMap(arena, file_id);
 
-        var cap: usize = tokens.len * 5;
-        for (tokens) |t| {
-            if (t.interp_opens.len > 0) {
-                const inner_off: usize = if (t.type == .multiline_string) 3 else 1;
-                const inner_start = t.start + inner_off;
-                const inner_end = t.end - inner_off;
-                if (inner_start >= inner_end) continue;
-                var literal_start: usize = inner_start;
-                for (t.interp_opens) |open| {
-                    if (open.offset < literal_start) continue;
-                    cap += 10; // literal prefix + #{ operator
-                    const close = interpEnd(source, open.offset, inner_end) orelse {
-                        literal_start = open.offset + 1;
-                        continue;
-                    };
-                    const body_start = open.offset + 1;
-                    if (close > body_start) {
-                        const body = source[body_start..close];
-                        if (lang.lexReportAt(arena, body, .{
-                            .offset = body_start,
-                            .line = open.line,
-                            .column = open.column + 1,
-                        })) |body_lexed| {
-                            const sub = switch (body_lexed) {
-                                .ok => |t2| t2,
-                                .err => &.{},
-                            };
-                            cap += sub.len * 5;
-                        } else |_| {}
-                    }
-                    cap += 5; // closing }
-                    literal_start = close + 1;
-                }
-                if (inner_end > literal_start) cap += 5;
-            }
-        }
-        var data = try std.ArrayList(u32).initCapacity(arena, cap);
+        var data = try std.ArrayList(u32).initCapacity(arena, (tokens.len + trivia.len) * 5);
 
         var prev_line: u32 = 0;
         var prev_col: u32 = 0;
 
-        for (tokens) |tok| {
-            if (tok.type == .eof) break;
+        // merge tokens + trivia in source order so comments highlight
+        var ti: usize = 0;
+        var ri: usize = 0;
 
-            if (tok.interp_opens.len > 0 and (tok.type == .string or tok.type == .multiline_string)) {
-                try emitInterpolatedStringTokens(arena, source, tok, &data, &prev_line, &prev_col, h.enc);
+        while (ti < tokens.len or ri < trivia.len) {
+            var is_trivia = false;
+            if (ti < tokens.len and ri < trivia.len) {
+                is_trivia = trivia[ri].start < tokens[ti].start;
+            } else if (ri < trivia.len) {
+                is_trivia = true;
+            }
+
+            if (is_trivia) {
+                const t = trivia[ri];
+                ri += 1;
+                const type_idx = @backingInt(t.type.classify() orelse .comment);
+                try emitSemanticToken(&data, arena, &prev_line, &prev_col, t.start, t.end, type_idx, source, h.enc);
                 continue;
             }
+
+            const tok = tokens[ti];
+            ti += 1;
+            if (tok.type == .eof) break;
 
             const ctfr = switch (tok.type) {
                 .ident => if (lang.identIsFunction(source, tok.end)) tc(.function) else tc(.variable),
                 else => @backingInt(tok.type.classify() orelse .variable),
             };
 
-            const type_idx = if (ast_map) |m|
+            const type_idx = if (cst_map) |m|
                 if (m.get(tok.start)) |t| t else ctfr
             else
                 ctfr;
 
-            emitSemanticToken(&data, &prev_line, &prev_col, tok.start, tok.end, type_idx, source, h.enc);
+            try emitSemanticToken(&data, arena, &prev_line, &prev_col, tok.start, tok.end, type_idx, source, h.enc);
         }
 
         return T.semantic_tokens.Result{ .data = try data.toOwnedSlice(arena) };
@@ -694,37 +711,9 @@ fn tc(cls: lang.TokenClass) u32 {
     return @backingInt(cls);
 }
 
-fn interpEnd(source: []const u8, start: usize, bound: usize) ?usize {
-    var depth: usize = 1;
-    var quote: u8 = 0;
-    var escaped = false;
-    var i = start + 1;
-    while (i < bound) : (i += 1) {
-        const c = source[i];
-        if (quote != 0) {
-            if (escaped) {
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == quote) {
-                quote = 0;
-            }
-            continue;
-        }
-        if (c == '"' or c == '\'' or c == '`') {
-            quote = c;
-        } else if (c == '{') {
-            depth += 1;
-        } else if (c == '}') {
-            depth -= 1;
-            if (depth == 0) return i;
-        }
-    }
-    return null;
-}
-
 fn emitSemanticToken(
     data: *std.ArrayList(u32),
+    alloc: std.mem.Allocator,
     prev_line: *u32,
     prev_col: *u32,
     start: usize,
@@ -732,105 +721,24 @@ fn emitSemanticToken(
     type_idx: u32,
     source: []const u8,
     enc: lsp.offsets.Encoding,
-) void {
+) !void {
     const pos = offsetToLspPos(source, start, enc);
     const line = pos.line;
     const col = pos.character;
+    if (line < prev_line.* or (line == prev_line.* and col < prev_col.*)) return;
     const dl = line - prev_line.*;
     const dc = if (dl > 0) col else col - prev_col.*;
-    data.appendAssumeCapacity(dl);
-    data.appendAssumeCapacity(dc);
-    data.appendAssumeCapacity(@intCast(lsp.offsets.countCodeUnits(source[start..end], enc)));
-    data.appendAssumeCapacity(type_idx);
-    data.appendAssumeCapacity(0);
+    // comment trivia is emitted too, so the token-count estimate up front
+    // is only a hint; grow the buffer instead of assuming it fits
+    try data.appendSlice(alloc, &.{
+        dl,
+        dc,
+        @intCast(lsp.offsets.countCodeUnits(source[start..end], enc)),
+        type_idx,
+        0,
+    });
     prev_line.* = line;
     prev_col.* = col;
-}
-
-fn emitInterpolatedStringTokens(
-    arena: std.mem.Allocator,
-    source: []const u8,
-    tok: lang.Token,
-    data: *std.ArrayList(u32),
-    prev_line: *u32,
-    prev_col: *u32,
-    enc: lsp.offsets.Encoding,
-) !void {
-    const inner_off: usize = if (tok.type == .multiline_string) 3 else 1;
-    const inner_start = tok.start + inner_off;
-    const inner_end = tok.end - inner_off;
-
-    if (inner_start >= inner_end) return;
-
-    var literal_start: usize = inner_start;
-
-    for (tok.interp_opens) |open| {
-        // the lexer also records nested braces inside an earlier body; skip
-        if (open.offset < literal_start) continue;
-
-        // emit literal string part before this `#{`
-        if (open.offset - 1 > literal_start) {
-            emitSemanticToken(data, prev_line, prev_col, literal_start, open.offset - 1, tc(.string), source, enc);
-        }
-
-        // emit #{ as operator
-        emitSemanticToken(data, prev_line, prev_col, open.offset - 1, open.offset + 1, tc(.operator), source, enc);
-
-        // find matching }
-        const close = interpEnd(source, open.offset, inner_end) orelse {
-            literal_start = open.offset + 1;
-            continue;
-        };
-
-        // emit expression body tokens
-        if (close > open.offset + 1) {
-            try emitSubTokens(arena, source, open, close, data, prev_line, prev_col, enc);
-        }
-
-        // emit } as operator
-        emitSemanticToken(data, prev_line, prev_col, close, close + 1, tc(.operator), source, enc);
-
-        literal_start = close + 1;
-    }
-
-    // remaining literal string part
-    if (inner_end > literal_start) {
-        emitSemanticToken(data, prev_line, prev_col, literal_start, inner_end, tc(.string), source, enc);
-    }
-}
-
-fn emitSubTokens(
-    arena: std.mem.Allocator,
-    source: []const u8,
-    open: lang.InterpOpen,
-    close: usize,
-    data: *std.ArrayList(u32),
-    prev_line: *u32,
-    prev_col: *u32,
-    enc: lsp.offsets.Encoding,
-) !void {
-    const body_start = open.offset + 1;
-    const body = source[body_start..close];
-    // lex the body with an origin at the `{` so sub-token offsets come out
-    // absolute in the source already
-    const lexed = lang.lexReportAt(arena, body, .{
-        .offset = body_start,
-        .line = open.line,
-        .column = open.column + 1,
-    }) catch return;
-    const sub_tokens = switch (lexed) {
-        .ok => |t| t,
-        .err => return,
-    };
-
-    for (sub_tokens) |st| {
-        if (st.type == .eof) break;
-        const ctfr = switch (st.type) {
-            .ident => if (lang.identIsFunction(body, st.end - body_start)) tc(.function) else tc(.variable),
-            else => @backingInt(st.type.classify() orelse .variable),
-        };
-        emitSemanticToken(data, prev_line, prev_col, st.start, st.end, ctfr, source, enc);
-    }
 }
 
 /// convert a diag report into lsp diag objects
@@ -847,12 +755,7 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report, uri: 
 
     var out = try std.ArrayList(T.Diagnostic).initCapacity(arena, report.parts.len);
 
-    // group flat parts into diags:
-    //
-    // a text part starts a group
-    // , following spans attach (first primary = range, rest = related)
-    // , tips and notes join the message
-    //
+    // group flat parts into diags
     var cur_text: []const u8 = "";
     var have_cur = false;
     var cur_range: ?T.Range = null;
@@ -909,8 +812,6 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report, uri: 
                 }
                 try cur_tips.append(arena, text);
             },
-            // suggestions are code actions, not diagnostic text,
-            // the quickfix title already carries them
             .suggestion => {},
             .trace => {},
         }

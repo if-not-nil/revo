@@ -1,3 +1,3 @@
 "hello    world":split(" ")
 # [ ] consecutive whistespace must be collapsed
-|> assert_eq( { "hello", "world" })
+  |> assert_eq({ "hello", "world" })

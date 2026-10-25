@@ -893,7 +893,7 @@ inline fn execFiberDispatch(
         },
         .store_upval => {
             const closure2 = (try self.currentClosureIn(fiber)) orelse return self.runFailure(error.InvalidLocal);
-            try self.storeUpvalueValueIn(fiber, closure2.upvalues[instr.bx], regRead(regs, base, instr.a));
+            try self.storeUpvalueValue(fiber, closure2.upvalues[instr.bx], regRead(regs, base, instr.a));
 
             fetchNext(self, fiber, &instr);
             continue :dispatch instr.op;

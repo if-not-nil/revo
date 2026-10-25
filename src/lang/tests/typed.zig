@@ -776,3 +776,57 @@ test "for loop expression produces loop atom" {
         \\ f()
     , 4);
 }
+
+test "compiler annotations cover analyzed constructs" {
+    // sema is the only typer
+    // every node the compiler reads a type from
+    //   must already be annotated, including lowered sugar and patterns
+    const cases = [_][]const u8{
+        \\ const mk = fn(x: number) do
+        \\   const rec = { value = x, next = :none }
+        \\   rec.value + 1
+        \\ end
+        \\ let total = 0
+        \\ for i in 0..3 do total = total + i end
+        \\ match total | 3 => mk(total) | _ => 0
+        ,
+        \\ const f = fn(a: number, b: number = 2) a + b
+        \\ f(1)
+        ,
+        \\ const f = fn(a: number, b: number) a + b
+        \\ f(b = 2, a = 1)
+        ,
+        \\ fn id<T>(x: T) x
+        \\ id<number>(4)
+        ,
+        \\ const inc = fn(x) x |> (fn(y) y + 1)
+        \\ inc(1)
+        ,
+        \\ const t = { a = 1, b = "x" }
+        \\ const {a, b} = t
+        \\ a
+        ,
+        \\ comp 1 + 2
+        ,
+        \\ let x: number = 1
+        \\ while x < 3 do x = x + 1 end
+        \\ x
+        ,
+        \\ fn f(a) fn(b) a ~ b
+        \\ f "x"("y")
+        ,
+        \\ 2
+        \\ |> match
+        \\    | x => 42
+        ,
+        \\ let a = 1
+        \\ let b = 2
+        \\ {a, b} = {3, 4}
+        \\ a == 3 and b == 4
+        ,
+    };
+    for (cases) |src| {
+        const stats = try t.compileStats(src);
+        try t.expectNoAnnotationMisses(stats, src);
+    }
+}

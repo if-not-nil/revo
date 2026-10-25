@@ -10,7 +10,7 @@ for _ in 0..n
       for _ in 0..n
         for _ in 0..n
           for _ in 0..n
-            x+=1
+            x += 1
 
 print(x)
 

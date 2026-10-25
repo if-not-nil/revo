@@ -197,12 +197,9 @@ test "unwrap panics on err result" {
         \\ {:err, :Unlucky}:unwrap()
     , .Panic, ":Unlucky");
 }
+
 test "unwrap rejects non-results at runtime" {
     try t.expectRuntimeError(
         \\ {1, 2}:unwrap()
     , .TypeError);
 }
-
-//
-// quasiquote `template` with %splice
-//

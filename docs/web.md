@@ -59,17 +59,6 @@ to embed a repl on your own page, include these assets:
 the `repl.js` script hydrates all `.repl` elements on page load
 , it creates a codemirror editor for each, wires the run button to the wasm evaluator, and displays the result
 
-### wasm build
-
-the revo compiler and runtime compile to a single `.wasm` binary via zig:
-
-```sh
-zig build -Dtarget=wasm64-freestanding -Doptimize=small
-cp zig-out/bin/revo.wasm .priv/web/static/revo.wasm
-```
-
-the javascript bindings live in `wasm/revo.js` (copied to `static/engine/revo.js`). the repl lazily imports both when the first run button is clicked
-
 ### syntax highlighting
 
 the repl editors are highlighted by a `revoLang` stream parser defined in `repl/cm-shared.js`

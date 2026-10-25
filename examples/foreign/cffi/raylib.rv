@@ -6,7 +6,6 @@ const cffi = import "./cffi.so"
 let lib = cffi.load("./libraylib.so")
 print(lib)
 
-
 pub const initwin = lib:func("InitWindow", {:i, :i, :s}, :v)
 pub const set_fps = lib:func("SetTargetFPS", {:i}, :v)
 pub const window_should_close = lib:func("WindowShouldClose", {}, :c)

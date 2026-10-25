@@ -1,23 +1,11 @@
 //!
 //! welcome to baselib as data
 //!
-//! ~ sigs and docs live in `src/baselib/base.rv`
-//!   one `pub declare mod = { ... }` table per module in a single file
-//!   (root/os globals and `pub type` aliases stay flat)
-//! ~ zig supplies impls only (`pub const impls: []const specs.Impl` per file)
-//! ~ each spec stores the whole RHS type once and derives sig text,
-//!   variadic-ness and core keys from it, so new shapes need no new fields
-//! ~ `loadAllSpecs` merges the two at boot
-//!   a missing or orphaned impl is a hard error,
-//!   so docs can't drift from the runtime
-//! ~ the primitive type metatable *is* the module table, so dynamic
-//!   `x:method()` dispatch is one direct `getRaw`; numeric indexing is
-//!   the exception, via the `__index` native stashed inside it
-//!
 
 const std = @import("std");
 
-const ast = @import("../lang/ast.zig");
+const cst = @import("../lang/cst.zig");
+const Lexer = @import("../lang/Lexer.zig");
 const builtin = @import("builtin");
 const revo = @import("../root.zig");
 const Value = revo.Value;
@@ -146,61 +134,6 @@ pub fn loadAllSpecs(caller_alloc: std.mem.Allocator) ![]const []const FnSpec {
 /// the cache lives in page_allocator so no debug allocator tracks it
 pub fn freeLoadedSpecs(_: std.mem.Allocator, _: []const []const FnSpec) void {}
 
-/// spans of every `pub macro` / `pub proc` decl in one source
-/// . span values only
-/// , no lifetimes involved
-fn collectMacroSpans(alloc: std.mem.Allocator, src: []const u8) ![]ast.Span {
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    const parsed = try revo.lang.parseSourceReport(arena.allocator(), src, .{});
-
-    const tree = switch (parsed) {
-        .ok => |node| node,
-        .err => return error.IfaceParseFailed,
-    };
-
-    const items: []const *const revo.lang.Node = if (tree.expr == .block) tree.expr.block else &.{tree};
-    var out = std.ArrayList(ast.Span).empty;
-    errdefer out.deinit(alloc);
-
-    for (items) |item| {
-        if (item.expr != .decl) continue;
-        const d = item.expr.decl;
-        if (!d.pub_) continue;
-
-        switch (d.inner.expr) {
-            .proc_macro => try out.append(alloc, item.span),
-            else => {},
-        }
-    }
-    return out.toOwnedSlice(alloc);
-}
-
-var macro_sources_cache: ?[]const []const u8 = null;
-
-/// source slices of every `pub macro` / `pub proc` across embedded groups
-pub fn macroSources(caller_alloc: std.mem.Allocator) ![]const []const u8 {
-    if (macro_sources_cache) |cached| return cached;
-
-    const pa = if (revo.is_freestanding) caller_alloc else std.heap.page_allocator;
-
-    var out = std.ArrayList([]const u8).empty;
-    errdefer out.deinit(pa);
-    for (groups) |g| {
-        // happy path
-        //   macro decls need their keyword spelled out, so most
-        //   groups skip the parse entirely (prose mentions still parse)
-        if (std.mem.find(u8, g.src, "macro") == null and
-            std.mem.find(u8, g.src, "proc") == null) continue;
-        const spans = try collectMacroSpans(pa, g.src);
-        defer pa.free(spans);
-        for (spans) |span| try out.append(pa, g.src[span.start..span.end]);
-    }
-    const owned = try out.toOwnedSlice(pa);
-    macro_sources_cache = owned;
-    return owned;
-}
-
 /// registry key for impl pairing
 /// , derived from the head: `fs.open`, else the bare name
 fn headKey(spec: *const FnSpec, buf: []u8) []const u8 {
@@ -259,13 +192,15 @@ fn note(comptime format: []const u8, args: anytype) void {
 }
 
 /// null when the declared type is richer than a ParamType can say
-fn declaredParamType(te: ?*ast.TypeExpr) ?ParamType {
+fn declaredParamType(te: ?*const cst.CstType) ?ParamType {
     const t = te orelse return null;
-    return switch (t.kind) {
-        .named => |n| checkable_types.get(n),
-        .atom => .atom,
-        else => null,
-    };
+    switch (t.kind) {
+        .named => |n| return checkable_types.get(n.tok.text),
+        .atom => return .atom,
+        .paren => |p| return declaredParamType(p.inner),
+        .optional => |o| return declaredParamType(o.inner),
+        else => return null,
+    }
 }
 
 fn checkImplSig(spec: FnSpec) !void {
@@ -279,7 +214,7 @@ fn checkImplSig(spec: FnSpec) !void {
     var key_buf: [256]u8 = undefined;
     const key = headKey(&spec, &key_buf);
     const params = fnty.params;
-    const variadic = params.len > 0 and params[params.len - 1].variadic;
+    const variadic = params.len > 0 and params[params.len - 1].dots.len == 2;
     if (spec.f.arity > params.len or (variadic and !spec.f.variadic)) {
         note("sig shape mismatch on {s}: surface allows {d} params{s}, impl needs {d}\n", .{
             key, params.len, if (variadic) " variadic" else "", spec.f.arity,
@@ -291,10 +226,10 @@ fn checkImplSig(spec: FnSpec) !void {
     for (params[0..typed_n], spec.f.param_types[0..typed_n]) |p, want| {
         // `.any` on the impl side means it range-checks the arg itself
         if (want.toTag() == (@as(ParamType, .any)).toTag()) continue;
-        const got = declaredParamType(p.type_name) orelse continue;
+        const got = declaredParamType(p.type) orelse continue;
         if (got.toTag() == want.toTag()) continue;
         note("sig param mismatch on {s}: `{s}` declares {s}, impl wants {s}\n", .{
-            key, p.name, @tagName(got), @tagName(want),
+            key, p.name_tok.text, @tagName(got), @tagName(want),
         });
         return error.ImplSigMismatch;
     }
@@ -437,25 +372,25 @@ fn renderSignatureInner(w: *std.Io.Writer, spec: FnSpec) !void {
 
     for (f.params, 0..) |p, i| {
         if (i > 0) try w.writeAll(", ");
-        if (p.optional) try w.writeByte('?');
-        try w.writeAll(p.name);
-        if (p.type_name) |tn| {
+        if (p.qmark_tok != null) try w.writeByte('?');
+        try w.writeAll(p.name_tok.text);
+        if (p.type) |tn| {
             try w.writeAll(": ");
-            try revo.lang.ast.printTypeExpr(tn, w);
+            try cst.printCstType(tn, w);
         }
-        if (p.variadic) try w.writeAll("...");
+        if (p.dots.len == 2) try w.writeAll("...");
     }
     try w.writeAll(")");
-    if (f.return_type) |r| {
+    if (f.ret) |r| {
         try w.writeAll(" -> ");
-        try revo.lang.ast.printTypeExpr(r, w);
+        try cst.printCstType(r, w);
     }
 }
 
 /// `true` when any fn param is variadic; derived from the stored type
 pub fn isVariadic(spec: *const FnSpec) bool {
     if (spec.is_type) return false;
-    for (spec.type.kind.function.params) |p| if (p.variadic) return true;
+    for (spec.type.kind.function.params) |p| if (p.dots.len == 2) return true;
     return false;
 }
 
@@ -478,7 +413,7 @@ pub const FnSpec = struct {
     name: []const u8,
     head: Head,
     type_params: []const []const u8,
-    type: *ast.TypeExpr,
+    type: *cst.CstType,
     is_type: bool = false,
     doc: []const u8 = "",
     module_doc: []const u8 = "",
@@ -493,7 +428,7 @@ pub const FnSpec = struct {
         for (self.type_params) |tp| alloc.free(tp);
         alloc.free(self.type_params);
 
-        revo.lang.ast.freeTypeExpr(alloc, self.type);
+        cst.freeCstType(alloc, self.type);
         alloc.free(self.doc);
     }
 };
@@ -515,92 +450,154 @@ fn parseGroup(alloc: std.mem.Allocator, src: []const u8) ![]FnSpec {
     return collectSpecs(alloc, root_node, true);
 }
 
+/// a type alias view for spec extraction
+const SpecAlias = struct {
+    name: []const u8,
+    name_span: Lexer.Span,
+    /// dotted head segments starting with the name, len 1 when plain
+    segs: []const []const u8,
+    declare_tps: []const []const u8,
+    type: *cst.CstType,
+    doc: ?[]const u8,
+};
+
+fn fnTypeShell(
+    span: Lexer.Span,
+    params: []const cst.CstParam,
+    return_type: ?*cst.CstType,
+    tps: []const revo.lang.Token,
+    alloc: std.mem.Allocator,
+) !cst.CstType {
+    const tparams = try alloc.alloc(cst.CstTypeParam, params.len);
+    for (params, tparams) |p, *dst| {
+        dst.* = .{
+            .qmark_tok = p.qmark_tok,
+            .name_tok = p.name_tok,
+            .colon_tok = p.colon_tok,
+            .type = p.type,
+            .dots = &.{},
+        };
+    }
+    return cst.CstType{ .span = span, .kind = .{ .function = .{
+        .fn_tok = cst.syntheticToken("fn", span),
+        .lt_tok = null,
+        .tps = @constCast(tps),
+        .tp_commas = &.{},
+        .gt_tok = null,
+        .lparen_tok = cst.syntheticToken("(", span),
+        .params = tparams,
+        .commas = &.{},
+        .rparen_tok = cst.syntheticToken(")", span),
+        .arrow_tok = null,
+        .ret = return_type,
+    } } };
+}
+
 /// the spec surface of a parsed node
-pub fn collectSpecs(alloc: std.mem.Allocator, node: *const revo.lang.Node, iface: bool) ![]FnSpec {
+pub fn collectSpecs(alloc: std.mem.Allocator, node: *const cst.CstNode, iface: bool) ![]FnSpec {
     var specs = std.ArrayList(FnSpec).empty;
     errdefer specs.deinit(alloc);
 
-    const items: []const *const revo.lang.Node = if (node.expr != .block) &.{node} else node.expr.block;
+    const items: []const *const cst.CstNode = cst.blockStmts(node) orelse &.{node};
     for (items) |item| {
-        // method-style `fn math:twice(x)` parses to a bare assign_expr
-        // , no decl wrapper
-        // - only docgen collects these
-        if (item.expr == .assign_expr) {
+        const unwrapped = cst.unwrapParen(item) orelse continue;
+        // method-style `fn math:twice(x)` is its own node
+        // only docgen collects these
+        if (unwrapped.kind == .fn_method) {
             if (iface) continue;
-            const ae = item.expr.assign_expr;
-            if (ae.value.expr != .fn_expr) continue;
-            const t = ae.value.expr.fn_expr;
-            if (t.doc == null) continue;
-
-            const ix = switch (ae.target.expr) {
-                .index => |x| x,
+            const f = unwrapped.kind.fn_method;
+            const doc = cst.trimmedDocText(item.doc_tok);
+            if (doc == null) continue;
+            const obj: []const u8 = switch (f.head) {
+                .method_colon => |m| m.obj_tok.text,
+                .method_dot => |m| m.obj_tok.text,
                 else => continue,
             };
-
-            if (ix.object.expr != .ident) continue;
-            const key: []const u8 = switch (ix.key.expr) {
-                .atom => |h| h,
-                .ident => |n| n,
+            const key: []const u8 = switch (f.head) {
+                .method_colon => |m| if (m.atom_tok.text.len > 0 and m.atom_tok.text[0] == ':') m.atom_tok.text[1..] else m.atom_tok.text,
+                .method_dot => |m| m.name_tok.text,
                 else => continue,
             };
-
             // stack shell, declSpec clones what it keeps
-            var shell = ast.TypeExpr{ .span = item.span, .kind = .{ .function = .{ .params = t.params, .return_type = t.return_type } } };
-            const segs = [_][]const u8{ ix.object.expr.ident, key };
-            const synth = ast.TypeAlias{
+            var shell = try fnTypeShell(item.span, f.params, f.return_type, f.type_params, alloc);
+            const segs = [_][]const u8{ obj, key };
+            const synth = SpecAlias{
                 .name = key,
                 .name_span = item.span,
-                .type_expr = &shell,
-                .declare_head = .{ .module = &segs },
+                .segs = &segs,
+                .declare_tps = &.{},
+                .type = &shell,
+                .doc = doc,
             };
-
-            try specs.append(alloc, try declSpec(alloc, synth, t.doc, false));
+            try specs.append(alloc, try declSpec(alloc, synth, doc, false));
             continue;
         }
-        if (item.expr != .decl) continue;
-        const d = item.expr.decl;
-        switch (d.inner.expr) {
+        if (unwrapped.kind != .decl) continue;
+        const d = unwrapped.kind.decl;
+        const inner = cst.unwrapParen(d.inner) orelse continue;
+        switch (inner.kind) {
             .type_alias => |t| {
+                if (t.segs.len == 0) continue;
+                const seg_texts = alloc.alloc([]const u8, t.segs.len) catch continue;
+                for (t.segs, 0..) |seg, i| seg_texts[i] = seg.text;
+                const tp_texts = alloc.alloc([]const u8, t.tps.len) catch {
+                    alloc.free(seg_texts);
+                    continue;
+                };
+                for (t.tps, 0..) |tp, i| tp_texts[i] = tp.text;
+                const doc = cst.trimmedDocText(item.doc_tok);
+                const alias = SpecAlias{
+                    .name = seg_texts[seg_texts.len - 1],
+                    .name_span = t.segs[0].span(),
+                    .segs = seg_texts,
+                    .declare_tps = tp_texts,
+                    .type = t.type,
+                    .doc = doc,
+                };
+                defer alloc.free(seg_texts);
+                defer alloc.free(tp_texts);
                 if (d.kind == .declare_decl) {
                     // a module table desugars to one spec per field, sharing
                     //   the dotted `MOD.field` head (pairing, docs, metatables)
-                    if (t.declare_head == null and t.type_expr.kind == .record) {
-                        try expandTableDeclare(alloc, &specs, t, iface, d.doc orelse t.doc);
+                    if (seg_texts.len == 1 and t.type.kind == .record) {
+                        try expandTableDeclare(alloc, &specs, alias, iface, doc);
                     } else {
-                        try specs.append(alloc, try declSpec(alloc, t, d.doc orelse t.doc, iface));
+                        try specs.append(alloc, try declSpec(alloc, alias, doc, iface));
                     }
                 } else if (d.kind == .type_alias_decl and d.pub_) {
-                    try specs.append(alloc, try typeSpec(alloc, t, d.doc orelse t.doc));
-                } else continue;
+                    try specs.append(alloc, try typeSpec(alloc, alias, doc));
+                }
             },
-            // macros ride along as source via macroSources, never as specs
-            .proc_macro => {},
             .binding => |b| {
-                const doc = d.doc orelse b.doc;
+                const bdoc = cst.trimmedDocText(item.doc_tok);
                 if (iface) continue;
-                if (doc == null) continue;
-                if (b.target.expr != .ident) continue;
-                if (b.value.expr == .fn_expr) {
-                    const t = b.value.expr.fn_expr;
-                    var shell = ast.TypeExpr{
-                        .span = item.span,
-                        .kind = .{ .function = .{ .params = t.params, .return_type = t.return_type } },
-                    };
-
-                    const synth = ast.TypeAlias{
-                        .name = b.target.expr.ident,
+                if (bdoc == null) continue;
+                const bt = cst.unwrapParen(b.target) orelse continue;
+                if (bt.kind != .ident) continue;
+                const bv = cst.unwrapParen(b.value) orelse continue;
+                if (bv.kind == .fn_def) {
+                    const f = bv.kind.fn_def;
+                    var shell = try fnTypeShell(item.span, f.params, f.return_type, f.type_params, alloc);
+                    const synth = SpecAlias{
+                        .name = bt.kind.ident.tok.text,
                         .name_span = item.span,
-                        .type_expr = &shell,
+                        .segs = &[_][]const u8{bt.kind.ident.tok.text},
+                        .declare_tps = &.{},
+                        .type = &shell,
+                        .doc = bdoc,
                     };
-                    try specs.append(alloc, try declSpec(alloc, synth, doc, false));
+                    try specs.append(alloc, try declSpec(alloc, synth, bdoc, false));
                 } else {
-                    var shell = ast.TypeExpr{ .span = item.span, .kind = .{ .named = "any" } };
-                    const synth = ast.TypeAlias{
-                        .name = b.target.expr.ident,
+                    var shell = cst.CstType{ .span = item.span, .kind = .{ .named = .{ .tok = cst.syntheticToken("any", item.span) } } };
+                    const synth = SpecAlias{
+                        .name = bt.kind.ident.tok.text,
                         .name_span = item.span,
-                        .type_expr = &shell,
+                        .segs = &[_][]const u8{bt.kind.ident.tok.text},
+                        .declare_tps = &.{},
+                        .type = &shell,
+                        .doc = bdoc,
                     };
-                    try specs.append(alloc, try declSpecRaw(alloc, synth, doc));
+                    try specs.append(alloc, try declSpecRaw(alloc, synth, bdoc));
                 }
             },
             else => {},
@@ -610,74 +607,72 @@ pub fn collectSpecs(alloc: std.mem.Allocator, node: *const revo.lang.Node, iface
 }
 
 /// `pub type` aliases, type-namespace, never strict, even for fn rhs
-fn typeSpec(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u8) !FnSpec {
+fn typeSpec(alloc: std.mem.Allocator, alias: SpecAlias, doc: ?[]const u8) !FnSpec {
     return declSpecInner(alloc, alias, doc, false, true);
 }
 
 fn expandTableDeclare(
     alloc: std.mem.Allocator,
     specs: *std.ArrayList(FnSpec),
-    t: ast.TypeAlias,
+    alias: SpecAlias,
     iface: bool,
     module_doc: ?[]const u8,
 ) !void {
-    if (t.declare_tps.len > 0) return error.DuplicateGenericParams;
-    const parent = t.name;
+    if (alias.declare_tps.len > 0) return error.DuplicateGenericParams;
+    const parent = alias.name;
 
-    for (t.type_expr.kind.record) |f| {
-        // positional array entries (`{ number, number }`) are not members
-        if (f.name.len == 0) continue;
+    const record = alias.type.kind.record;
+    for (record.fields) |fld| {
+        // positional array entries (no name) are not members
+        const nt = fld.name_tok orelse continue;
         var all_digits = true;
-        for (f.name) |c| if (!std.ascii.isDigit(c)) {
+        for (nt.text) |c| if (!std.ascii.isDigit(c)) {
             all_digits = false;
             break;
         };
-
         if (all_digits) continue;
         const segs = try alloc.alloc([]const u8, 2);
         defer alloc.free(segs);
         segs[0] = parent;
-        segs[1] = f.name;
+        segs[1] = nt.text;
 
-        const synth = ast.TypeAlias{
-            .name = f.name,
-            .name_span = t.name_span,
-            .type_expr = f.type_expr,
-            .doc = f.doc,
-            .declare_head = .{ .module = segs },
+        const fdoc = if (fld.doc_tok) |dt| std.mem.trim(u8, dt.text, " \t\n\r") else null;
+        const synth = SpecAlias{
+            .name = nt.text,
+            .name_span = nt.span(),
+            .segs = segs,
+            .declare_tps = &.{},
+            .type = fld.type,
+            .doc = fdoc,
         };
         // borrowed from src
-        var spec = if (f.type_expr.kind == .function)
-            try declSpec(alloc, synth, f.doc, iface)
+        var spec = if (fld.type.kind == .function)
+            try declSpec(alloc, synth, fdoc, iface)
         else
             // nested alias (`Stat: {...}`); same as `pub type MOD.Stat`
-            try typeSpec(alloc, synth, f.doc);
+            try typeSpec(alloc, synth, fdoc);
         spec.module_doc = module_doc orelse "";
         try specs.append(alloc, spec);
     }
 }
 
 /// the single way declarations enter a spec
-fn declSpec(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u8, strict: bool) !FnSpec {
+fn declSpec(alloc: std.mem.Allocator, alias: SpecAlias, doc: ?[]const u8, strict: bool) !FnSpec {
     return declSpecInner(alloc, alias, doc, strict, false);
 }
 
-fn declSpecInner(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u8, strict: bool, force_type: bool) !FnSpec {
-    // bare member name is shared logic (ast.bareName)
-    // ; the parser always produces 2+ segments for module heads
-    // , so no length guard here
-    const name: []const u8 = ast.bareName(alias);
+fn declSpecInner(alloc: std.mem.Allocator, alias: SpecAlias, doc: ?[]const u8, strict: bool, force_type: bool) !FnSpec {
+    // segs always start with the name; dotted iff longer
+    const name: []const u8 = alias.name;
     var head: Head = .{ .kind = .global };
-    if (alias.declare_head) |dh| switch (dh) {
-        .module => |segs| {
-            head = .{ .kind = .namespaced, .module = try std.mem.join(alloc, ".", segs[0 .. segs.len - 1]) };
-        },
-    };
+    if (alias.segs.len > 1) {
+        head = .{ .kind = .namespaced, .module = try std.mem.join(alloc, ".", alias.segs[0 .. alias.segs.len - 1]) };
+    }
     errdefer if (head.module) |m| alloc.free(m);
 
-    if (strict and alias.type_expr.kind == .function) {
-        for (alias.type_expr.kind.function.params) |p| {
-            if (p.type_name == null) return error.IfaceParamNotTyped;
+    if (strict and alias.type.kind == .function) {
+        for (alias.type.kind.function.params) |p| {
+            if (p.type == null) return error.IfaceParamNotTyped;
         }
     }
 
@@ -692,19 +687,28 @@ fn declSpecInner(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u
 
     // tps live on the head (`f<T> = ...`) or, for bare fn types, on the
     // type itself (`f = fn<T>(...)`); both is an error
-    const fn_tps: []const []const u8 = if (alias.type_expr.kind == .function)
-        alias.type_expr.kind.function.type_params
-    else
-        &.{};
+    var fn_tps_buf: [8][]const u8 = undefined;
+    var fn_tps_len: usize = 0;
+    if (alias.type.kind == .function) {
+        for (alias.type.kind.function.tps) |tp| {
+            if (fn_tps_len >= fn_tps_buf.len) break;
+            fn_tps_buf[fn_tps_len] = tp.text;
+            fn_tps_len += 1;
+        }
+    }
+
+    const fn_tps: []const []const u8 = fn_tps_buf[0..fn_tps_len];
     if (alias.declare_tps.len > 0 and fn_tps.len > 0) return error.DuplicateGenericParams;
+
     const src_tps = if (alias.declare_tps.len > 0) alias.declare_tps else fn_tps;
     const owned_tps = try alloc.alloc([]const u8, src_tps.len);
     errdefer alloc.free(owned_tps);
+
     for (src_tps, owned_tps) |tp, *dst| dst.* = try alloc.dupe(u8, tp);
     errdefer for (owned_tps) |tp| alloc.free(tp);
 
-    const type_tree = try revo.lang.ast.cloneTypeExpr(alloc, alias.type_expr);
-    errdefer revo.lang.ast.freeTypeExpr(alloc, type_tree);
+    const type_tree = try cst.cloneCstType(alloc, alias.type);
+    errdefer cst.freeCstType(alloc, type_tree);
 
     const is_type = force_type or type_tree.kind != .function;
     var doc_text: []const u8 = "";
@@ -713,7 +717,7 @@ fn declSpecInner(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u
         defer doc_buf.deinit();
         try doc_buf.writer.writeAll("alias for\n```revo\n");
 
-        try revo.lang.ast.printTypeExpr(type_tree, &doc_buf.writer);
+        try cst.printCstType(type_tree, &doc_buf.writer);
         try doc_buf.writer.writeAll("\n```");
 
         if (doc) |d| {
@@ -750,7 +754,7 @@ fn declSpecInner(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u
 }
 
 /// docs-mode const values (`const a = 5` with `#*`)
-fn declSpecRaw(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u8) !FnSpec {
+fn declSpecRaw(alloc: std.mem.Allocator, alias: SpecAlias, doc: ?[]const u8) !FnSpec {
     var doc_text: []const u8 = "";
     if (doc) |d| {
         var doc_buf = std.ArrayList(u8).empty;
@@ -767,7 +771,7 @@ fn declSpecRaw(alloc: std.mem.Allocator, alias: ast.TypeAlias, doc: ?[]const u8)
         .name = try alloc.dupe(u8, alias.name),
         .head = .{ .kind = .global },
         .type_params = &.{},
-        .type = try revo.lang.ast.cloneTypeExpr(alloc, alias.type_expr),
+        .type = try cst.cloneCstType(alloc, alias.type),
         .is_type = true,
         .doc = doc_text,
         .f = undefined,
@@ -965,11 +969,11 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
         try testing.expectEqualStrings("iter.range(bound: num, rest: num...) -> function", sig);
     }
     try testing.expectEqual(@as(usize, 2), range.type.kind.function.params.len);
-    try testing.expectEqualStrings("bound", range.type.kind.function.params[0].name);
-    try testing.expectEqualStrings("num", range.type.kind.function.params[0].type_name.?.kind.named);
-    try testing.expectEqualStrings("rest", range.type.kind.function.params[1].name);
-    try testing.expect(range.type.kind.function.params[1].variadic);
-    try testing.expectEqualStrings("num", range.type.kind.function.params[1].type_name.?.kind.named);
+    try testing.expectEqualStrings("bound", range.type.kind.function.params[0].name_tok.text);
+    try testing.expectEqualStrings("num", range.type.kind.function.params[0].type.?.kind.named.tok.text);
+    try testing.expectEqualStrings("rest", range.type.kind.function.params[1].name_tok.text);
+    try testing.expect(range.type.kind.function.params[1].dots.len == 2);
+    try testing.expectEqualStrings("num", range.type.kind.function.params[1].type.?.kind.named.tok.text);
     try testing.expect(isVariadic(&range));
     try testing.expectEqualStrings("single-line doc", range.doc);
 
@@ -996,10 +1000,10 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     try testing.expectEqualStrings("unwrap_err", unwrap_err.name);
     var ubuf = std.Io.Writer.Allocating.init(testing.allocator);
     defer ubuf.deinit();
-    try revo.lang.ast.printTypeExpr(unwrap_err.type.kind.function.params[0].type_name.?, &ubuf.writer);
+    try cst.printCstType(unwrap_err.type.kind.function.params[0].type.?, &ubuf.writer);
     try testing.expectEqualStrings("{:err, T}", ubuf.written());
     ubuf.clearRetainingCapacity();
-    try revo.lang.ast.printTypeExpr(unwrap_err.type.kind.function.return_type.?, &ubuf.writer);
+    try cst.printCstType(unwrap_err.type.kind.function.ret.?, &ubuf.writer);
     try testing.expectEqualStrings("T", ubuf.written());
     try testing.expect(!isVariadic(&unwrap_err));
 
@@ -1018,13 +1022,13 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
         defer testing.allocator.free(sig);
         try testing.expectEqualStrings("maybe(?opts: table...) -> !string", sig);
     }
-    try testing.expectEqualStrings("opts", maybe.type.kind.function.params[0].name);
-    try testing.expect(maybe.type.kind.function.params[0].optional);
-    try testing.expect(maybe.type.kind.function.params[0].variadic);
+    try testing.expectEqualStrings("opts", maybe.type.kind.function.params[0].name_tok.text);
+    try testing.expect(maybe.type.kind.function.params[0].qmark_tok != null);
+    try testing.expect(maybe.type.kind.function.params[0].dots.len == 2);
     try testing.expect(isVariadic(&maybe));
     var mbuf = std.Io.Writer.Allocating.init(testing.allocator);
     defer mbuf.deinit();
-    try revo.lang.ast.printTypeExpr(maybe.type.kind.function.params[0].type_name.?, &mbuf.writer);
+    try cst.printCstType(maybe.type.kind.function.params[0].type.?, &mbuf.writer);
     try testing.expectEqualStrings("table", mbuf.written());
 }
 
@@ -1041,8 +1045,8 @@ test "parseGroup accepts resource params and nested methods" {
         testing.allocator.free(specs);
     }
     try testing.expectEqual(@as(usize, 2), specs.len);
-    try testing.expectEqualStrings("handle", specs[0].type.kind.function.params[0].name);
-    try testing.expectEqualStrings("resource", specs[0].type.kind.function.params[0].type_name.?.kind.named);
+    try testing.expectEqualStrings("handle", specs[0].type.kind.function.params[0].name_tok.text);
+    try testing.expectEqualStrings("resource", specs[0].type.kind.function.params[0].type.?.kind.named.tok.text);
     try testing.expectEqualStrings("close", specs[1].name);
 }
 
@@ -1151,7 +1155,7 @@ test "parseGroup collects pub type as type-only alias" {
     try testing.expect(port.is_type);
     var pbuf = std.Io.Writer.Allocating.init(testing.allocator);
     defer pbuf.deinit();
-    try revo.lang.ast.printTypeExpr(port.type, &pbuf.writer);
+    try cst.printCstType(port.type, &pbuf.writer);
     try testing.expectEqualStrings("num", pbuf.written());
 
     const open = specs[1];
@@ -1273,18 +1277,6 @@ test "moduleDoc finds table docs in the single file" {
     try testing.expectEqualStrings("command-line arguments parsing", moduleDoc("argparse"));
     try testing.expectEqualStrings("", moduleDoc("nosuchmod"));
     try testing.expectEqualStrings("", moduleDoc("root"));
-}
-
-test "collectMacroSpans finds pub procs only" {
-    const src =
-        \\pub proc uri.asdf!(m) do m end
-        \\proc private!(m) do m end
-        \\pub declare x = fn() -> num
-    ;
-    const spans = try collectMacroSpans(testing.allocator, src);
-    defer testing.allocator.free(spans);
-    try testing.expectEqual(@as(usize, 1), spans.len);
-    try testing.expect(std.mem.find(u8, src[spans[0].start..spans[0].end], "uri.asdf!") != null);
 }
 
 test "loadAllSpecs pairs every spec with its impl" {

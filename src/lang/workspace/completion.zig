@@ -5,9 +5,10 @@ const std = @import("std");
 const revo = @import("revo");
 const VM = revo.VM;
 
-const ast = @import("../ast.zig");
+const cst = @import("../cst.zig");
 const common = @import("common.zig");
 const diagnostic = @import("../diagnostic.zig");
+const hir = @import("../hir.zig");
 const Lexer = @import("../Lexer.zig");
 const pipeline = @import("../pipeline.zig");
 const semantic = @import("../semantic.zig");
@@ -149,10 +150,13 @@ fn completionTargetType(
     var anchor: u8 = 0;
     var dropped_warn: ?diagnostic.Report = null;
 
-    _ = semantic.analyze(arena, root, snap.name, truncated, known_globals, &type_map, null, null, .{
+    // semantic requires lowered input; truncation may leave this failing
+    // , so there may be no type to complete
+    const lowered = hir.lower(arena, root) catch return null;
+    _ = semantic.analyze(arena, lowered, snap.name, truncated, known_globals, &type_map, null, null, .{
         .ptr = @ptrCast(&anchor),
         .resolveFn = nullResolve,
-    }, null, &dropped_warn) catch return null;
+    }, &dropped_warn) catch return null;
 
     return type_map.get(target);
 }
@@ -226,23 +230,6 @@ fn addFieldCompletions(
                     seen.put(arena, spec.name, {}) catch return;
                 }
             }
-            // manifest macros scoped to this module (`uri.asdf!`
-            // completes as `asdf!` under `uri.`); globals complete bare
-            // above, never qualified
-            for (self.baselibMacroNamesCached()) |name| {
-                if (!std.mem.startsWith(u8, name, target)) continue;
-
-                const rest = name[target.len..];
-                if (rest.len < 2 or rest[0] != '.') continue;
-
-                const member = rest[1..];
-                if (!std.mem.startsWith(u8, member, prefix)) continue;
-
-                items.append(arena, .{
-                    .label = member,
-                    .kind = .function,
-                }) catch return;
-            }
             return;
         }
     }
@@ -276,19 +263,6 @@ fn addGeneralCompletions(
         if (std.mem.startsWith(u8, kw, prefix)) {
             items.append(arena, .{ .label = kw, .kind = .keyword }) catch return;
         }
-    }
-
-    // manifest macros
-    // , derived from the same sources the build merges
-    //   (analysis parses without them by design, so names come from here
-    //      instead of the inspect cache
-    //      ; a cached list per workspace, no reparse per keystroke)
-    // . dotted names stay scoped
-    //   : only bare macros complete bare
-    for (self.baselibMacroNamesCached()) |name| {
-        if (std.mem.findScalar(u8, name, '.') != null) continue;
-        if (!std.mem.startsWith(u8, name, prefix)) continue;
-        items.append(arena, .{ .label = name, .kind = .function }) catch return;
     }
 
     // note:
@@ -326,11 +300,11 @@ fn addGeneralCompletions(
                     const param_types = try arena.alloc([]const u8, ft.params.len);
 
                     for (ft.params, 0..) |p, i| {
-                        names[i] = p.name;
+                        names[i] = p.name_tok.text;
                         var type_buf = std.Io.Writer.Allocating.init(arena);
                         defer type_buf.deinit();
-                        if (p.type_name) |tn| try ast.printTypeExpr(tn, &type_buf.writer);
-                        if (p.variadic) try type_buf.writer.writeAll("...");
+                        if (p.type) |tn| try cst.printCstType(tn, &type_buf.writer);
+                        if (p.dots.len == 2) try type_buf.writer.writeAll("...");
                         param_types[i] = try type_buf.toOwnedSlice();
                     }
 
@@ -339,10 +313,10 @@ fn addGeneralCompletions(
                         name,
                         names,
                         param_types,
-                        if (ft.return_type) |r| blk: {
+                        if (ft.ret) |r| blk: {
                             var ret_buf = std.Io.Writer.Allocating.init(arena);
                             defer ret_buf.deinit();
-                            try ast.printTypeExpr(r, &ret_buf.writer);
+                            try cst.printCstType(r, &ret_buf.writer);
                             break :blk try ret_buf.toOwnedSlice();
                         } else null,
                     );
@@ -367,7 +341,7 @@ fn addGeneralCompletions(
         for (entry.symbols) |sym| {
             if (!std.mem.startsWith(u8, sym.name, prefix)) continue;
             const kind: CompletionKind = switch (sym.kind) {
-                .function, .macro => .function,
+                .function => .function,
                 .type_alias => .class,
                 .binding, .param => .variable,
             };
@@ -443,26 +417,4 @@ test "baselib dot completion unions runtime table w declared aliases" {
         if (std.mem.eql(u8, it.label, "decode")) decodes += 1;
     }
     try std.testing.expectEqual(@as(usize, 1), decodes);
-}
-
-test "template prelude macros complete no more" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var vm = try VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
-    defer vm.deinit();
-    var ws = try Workspace.initWithVm(&vm, alloc);
-    defer ws.deinit();
-
-    const text = "ok?";
-    const id = try ws.open("<test>", text, .{});
-    const items = try ws.completions(arena.allocator(), id, text, text.len);
-    for (items) |it| try std.testing.expect(!std.mem.eql(u8, it.label, "ok?!"));
-
-    const text2 = "pr";
-    const id2 = try ws.open("<test2>", text2, .{});
-    const items2 = try ws.completions(arena.allocator(), id2, text2, text2.len);
-    try expectCompletion(items2, "print", .function);
-    for (items2) |it| try std.testing.expect(!std.mem.eql(u8, it.label, "print!"));
 }

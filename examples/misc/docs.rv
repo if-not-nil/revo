@@ -6,10 +6,15 @@ adds two numbers
 fn add(a, b) a + b
 
 #* greets by name *#
+
+
 const greet = fn(name) "hi " ~ name
 
 #* method style docs also work *#
+
+
 fn math:twice(x) x * 2
+
 
 print(add(2, 3))
 print(greet("revo"))

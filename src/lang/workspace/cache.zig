@@ -5,6 +5,7 @@ const std = @import("std");
 const common = @import("common.zig");
 const diagnostic = @import("../diagnostic.zig");
 const pipeline = @import("../pipeline.zig");
+const store = @import("store.zig");
 
 const W = @import("../Workspace.zig");
 const Workspace = W.Workspace;
@@ -34,7 +35,7 @@ pub fn putCache(
     if (self.cache.getPtr(id)) |slot| {
         common.deinitBytecode(self.alloc, slot.bytecode);
         common.freeSymbols(self.alloc, slot.symbols);
-        if (slot.warnings) |*w| w.deinit(self.alloc);
+        if (slot.warnings) |*w| w.deinit();
         slot.* = entry;
     } else {
         try self.cache.put(id, entry);
@@ -57,16 +58,17 @@ pub fn invalidateCacheImpl(
     if (visited.contains(id)) return;
     visited.put(id, {}) catch return;
 
+    store.dropParsed(self, id);
+
     if (self.cache.fetchRemove(id)) |kv| {
         var val = kv.value;
         common.deinitBytecode(self.alloc, val.bytecode);
         common.freeSymbols(self.alloc, val.symbols);
-        if (val.warnings) |*w| w.deinit(self.alloc);
+        if (val.warnings) |*w| w.deinit();
     }
     if (self.inspect_cache.fetchRemove(id)) |kv| {
         common.freeSymbols(self.alloc, kv.value.symbols);
-        self.alloc.free(kv.value.dependencies);
-        if (kv.value.diagnostics) |diag| pipeline.deinitError(self.alloc, diag);
+        if (kv.value.diagnostics) |diag| pipeline.deinitError(diag);
         var e = kv.value;
         e.deinit(self.alloc);
     }
@@ -82,18 +84,20 @@ pub fn clearCache(self: *Workspace) void {
     while (it.next()) |entry| {
         common.deinitBytecode(self.alloc, entry.value_ptr.bytecode);
         common.freeSymbols(self.alloc, entry.value_ptr.symbols);
-        if (entry.value_ptr.warnings) |*w| w.deinit(self.alloc);
+        if (entry.value_ptr.warnings) |*w| w.deinit();
     }
     var inspect_it = self.inspect_cache.iterator();
     while (inspect_it.next()) |entry| {
         common.freeSymbols(self.alloc, entry.value_ptr.symbols);
-        self.alloc.free(entry.value_ptr.dependencies);
         if (entry.value_ptr.diagnostics) |diag| {
-            pipeline.deinitError(self.alloc, diag);
+            pipeline.deinitError(diag);
         }
         var e = entry.value_ptr.*;
         e.deinit(self.alloc);
     }
+    var parsed_it = self.parsed_cache.iterator();
+    while (parsed_it.next()) |entry| entry.value_ptr.*.deinit(self.alloc);
+    self.parsed_cache.clearRetainingCapacity();
 }
 
 /// store results in the inspect cache (symbols + deps + diagnostics)
@@ -103,7 +107,6 @@ pub fn putInspectCache(
     version: u32,
     opts: pipeline.BuildOptions,
     symbols: []Symbol,
-    dependencies: []FileId,
     diag: ?pipeline.Error,
     sig_map: std.StringHashMapUnmanaged(FnSig),
     docs: std.StringHashMap([]const u8),
@@ -112,15 +115,13 @@ pub fn putInspectCache(
         .version = version,
         .opts = opts,
         .symbols = symbols,
-        .dependencies = dependencies,
         .diagnostics = diag,
         .sig_map = sig_map,
         .docs = docs,
     };
     if (self.inspect_cache.getPtr(id)) |slot| {
         common.freeSymbols(self.alloc, slot.symbols);
-        self.alloc.free(slot.dependencies);
-        if (slot.diagnostics) |cached_d| pipeline.deinitError(self.alloc, cached_d);
+        if (slot.diagnostics) |cached_d| pipeline.deinitError(cached_d);
         slot.deinit(self.alloc);
         slot.* = entry;
     } else {

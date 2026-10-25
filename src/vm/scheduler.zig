@@ -53,7 +53,7 @@ pub const ChannelWaiter = struct {
 /// , cap 0 means rendezvous, nothing ever sits in the queue
 pub const ChannelState = struct {
     cap: usize = 0,
-    /// ring buf; items.len is the capacity, the count lives in queue_count
+    /// ring buf; items.len is the capacity
     queue: std.ArrayList(Value),
     queue_head: usize = 0,
     queue_count: usize = 0,

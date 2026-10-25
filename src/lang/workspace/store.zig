@@ -8,6 +8,8 @@ const FileId = W.FileId;
 const Snapshot = W.Snapshot;
 const OpenOptions = W.OpenOptions;
 const FileEntry = W.FileEntry;
+const ParsedEntry = W.ParsedEntry;
+const pipeline = @import("../pipeline.zig");
 
 pub fn open(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOptions) !FileId {
     if (self.file_names.get(name)) |id| {
@@ -55,7 +57,7 @@ pub fn open(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOpti
     errdefer _ = self.file_names.remove(name_copy);
 
     self.symbol_index_dirty = true;
-    // query inputs track by content hash; todo legacy caches still serve reads
+    // query inputs track by content hash
     try self.query_db.track(id, text_copy);
     return id;
 }
@@ -70,7 +72,6 @@ pub fn change(self: *Workspace, id: FileId, text: []const u8) !void {
     self.alloc.free(entry.text);
     entry.text = text_copy;
     entry.version += 1;
-    _ = self.query_db.bump();
     try self.query_db.track(id, text_copy);
     self.invalidateCache(id);
     self.symbol_index_dirty = true;
@@ -108,6 +109,40 @@ pub fn snapshot(self: *Workspace, id: FileId) ?Snapshot {
         .name = entry.name,
         .text = entry.text,
     };
+}
+
+/// lex + parse on first use, then reuse for this content version
+/// ; returned tree/report live until change/close
+pub fn parsed(self: *Workspace, id: FileId, repl_mode: bool) !*ParsedEntry {
+    const snap = self.snapshot(id) orelse return error.FileNotOpen;
+    if (self.parsed_cache.get(id)) |entry| {
+        if (entry.version == snap.version and entry.repl_mode == repl_mode) return entry;
+        dropParsed(self, id);
+    }
+
+    const entry = try self.alloc.create(ParsedEntry);
+    errdefer self.alloc.destroy(entry);
+    entry.* = .{
+        .version = snap.version,
+        .repl_mode = repl_mode,
+        .arena = std.heap.ArenaAllocator.init(self.alloc),
+        .result = undefined,
+        .warnings = null,
+    };
+    errdefer entry.arena.deinit();
+
+    entry.result = try pipeline.parseWithWarnings(entry.arena.allocator(), .{
+        .name = snap.name,
+        .text = snap.text,
+    }, .{ .repl_mode = repl_mode }, &entry.warnings);
+
+    try self.parsed_cache.put(id, entry);
+    return entry;
+}
+
+/// drop a cached parse, freeing its arena
+pub fn dropParsed(self: *Workspace, id: FileId) void {
+    if (self.parsed_cache.fetchRemove(id)) |kv| kv.value.deinit(self.alloc);
 }
 
 /// stale when cached version lags
@@ -152,4 +187,28 @@ test "workspace stale version tracking" {
     const v2 = ws.snapshot(id).?.version;
     try std.testing.expectEqual(@as(u32, 2), v2);
     try std.testing.expect(!ws.isStale(id, v2));
+}
+
+test "workspace parse is lazy and cached per version" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var ws = try Workspace.init(alloc);
+    defer ws.deinit();
+
+    const id = try ws.open("<lazy>", "1 + 1", .{});
+    // opening must not lex or parse
+    try std.testing.expectEqual(@as(usize, 0), ws.parsed_cache.count());
+
+    const first = try ws.parsed(id, false);
+    try std.testing.expectEqual(@as(usize, 1), ws.parsed_cache.count());
+    const again = try ws.parsed(id, false);
+    try std.testing.expect(first == again);
+
+    // edits drop the tree; next use reparses
+    try ws.change(id, "1 + 2");
+    try std.testing.expectEqual(@as(usize, 0), ws.parsed_cache.count());
+    const next = try ws.parsed(id, false);
+    try std.testing.expect(next != first);
 }

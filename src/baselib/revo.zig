@@ -85,31 +85,50 @@ pub const Impl = struct {
         const src = vm.stringValue(@backingInt(source));
         var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);
         defer arena.deinit();
-        const lexed = try revo.lang.lexReportAt(arena.allocator(), src, .{});
 
-        switch (lexed) {
-            .err => |failure| {
-                const rep: diagnostic.Report = .{
-                    .message = failure.message,
-                    .parts = &.{
-                        .{ .@"error" = failure.message },
-                        .{ .span = .{ .span = failure.span } },
-                    },
-                };
-                return HostResult.errValue(vm, try diagnostic.evalErrorTable(vm, rep, "<lex>", src, "lex", null, &.{}));
-            },
-            .ok => |tokens| {
-                const tid = try vm.tables.create();
-                for (tokens) |tok| {
-                    if (tok.type == .eof) continue;
-                    const tok_val = try tokenTable(vm, src, tok);
-                    // re-fetch per write so the table pointer never goes stale
-                    const ptr = try vm.tables.get(tid);
-                    try ptr.array.append(vm.runtime.alloc, tok_val);
-                }
-                return HostResult.Ok(vm, Value.new.table(tid));
-            },
+        // cst lexer reports errors inline
+        const out = try revo.lang.Lexer.lexAll(arena.allocator(), src);
+        defer revo.lang.Lexer.freeLexOutput(arena.allocator(), out);
+
+        if (out.errors.len > 0) {
+            const failure = out.errors[0];
+            const rep: diagnostic.Report = .{
+                .message = failure.message,
+                .parts = &.{
+                    .{ .@"error" = failure.message },
+                    .{ .span = .{ .span = failure.span } },
+                },
+            };
+
+            return HostResult.errValue(
+                vm,
+                try diagnostic.evalErrorTable(vm, rep, "<lex>", src, "lex", null, &.{}),
+            );
         }
+        const tid = try vm.tables.create();
+
+        // comments have trivia but lex like tokens, in source order
+        var ti: usize = 0;
+        var si: usize = 0;
+
+        while (ti < out.trivia.len or si < out.tokens.len) {
+            const tok = if (si >= out.tokens.len or
+                (ti < out.trivia.len and out.trivia[ti].start < out.tokens[si].start))
+            blk: {
+                defer ti += 1;
+                break :blk out.trivia[ti];
+            } else blk: {
+                defer si += 1;
+                break :blk out.tokens[si];
+            };
+            if (tok.type == .eof) continue;
+            const tok_val = try tokenTable(vm, src, tok);
+
+            // if you dont re-fetch per write, the table pointer becomew stale
+            const ptr = try vm.tables.get(tid);
+            try ptr.array.append(vm.runtime.alloc, tok_val);
+        }
+        return HostResult.Ok(vm, Value.new.table(tid));
     }
 
     pub fn version(vm: *VM) !HostResult {
@@ -205,17 +224,17 @@ test "eval diags" {
         \\ match revo.eval("1 + * 2") | {:ok, _} => -1 | {:err, e} => e.column
     , 7);
     try testing.topAtom(
-        \\ match revo.eval("1 + * 2") | {:ok, _} => :unexpected_ok | {:err, e} => e.rendered:contains?("-->")
+        \\ match revo.eval("1 + * 2") | {:ok, _} => :unexpected_ok | {:err, e} => e.rendered:contains?("1 + * 2")
     , "true");
-    try testing.topAtom(
-        \\ match revo.eval("let x = )") | {:ok, _} => :unexpected_ok | {:err, e} => e.line == :nil
-    , "true");
+    try testing.topNumber(
+        \\ match revo.eval("let x = )") | {:ok, _} => :unexpected_ok | {:err, e} => e.line
+    , 1);
     try testing.topAtom(
         \\ match revo.eval("let x = )") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase
     , "parse");
     try testing.topAtom(
-        \\ match revo.eval("nosuchmacro!(1)") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase
-    , "expand");
+        \\ match revo.eval("nosuchname(1)") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase
+    , "semantic");
     try testing.topAtom(
         \\ match revo.eval("1/0") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase
     , "runtime");

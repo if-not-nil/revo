@@ -363,7 +363,6 @@ test "workspace hover shows record field values" {
     ;
     const id = try ws.open("<test>", source, .{});
     const query_opts: pipeline.BuildOptions = .{
-        .include_baselib_macros = false,
         .install_debug_info = false,
         .test_mode = false,
     };
@@ -379,7 +378,6 @@ test "workspace hover over bare fn definition" {
     defer arena.deinit();
     const alloc = arena.allocator();
     const query_opts: pipeline.BuildOptions = .{
-        .include_baselib_macros = false,
         .install_debug_info = false,
         .test_mode = true,
     };
@@ -400,7 +398,6 @@ test "workspace hover over baselib module name shows member card" {
     defer arena.deinit();
     const alloc = arena.allocator();
     const query_opts: pipeline.BuildOptions = .{
-        .include_baselib_macros = false,
         .install_debug_info = false,
         .test_mode = true,
     };
@@ -424,7 +421,6 @@ test "workspace hover over qualified member prefers its module" {
     defer arena.deinit();
     const alloc = arena.allocator();
     const query_opts: pipeline.BuildOptions = .{
-        .include_baselib_macros = false,
         .install_debug_info = false,
         .test_mode = true,
     };

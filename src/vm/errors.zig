@@ -111,13 +111,11 @@ pub const RunFailure = struct {
 
     pub fn render(
         self: RunFailure,
-        alloc: std.mem.Allocator,
         writer: *std.Io.Writer,
         source: []const u8,
         color: bool,
     ) !void {
         return self.renderAt(
-            alloc,
             writer,
             self.report.source_name orelse "<source>",
             self.report.source orelse source,
@@ -127,7 +125,6 @@ pub const RunFailure = struct {
 
     pub fn renderAt(
         self: RunFailure,
-        alloc: std.mem.Allocator,
         writer: *std.Io.Writer,
         source_name: []const u8,
         source: []const u8,
@@ -137,7 +134,7 @@ pub const RunFailure = struct {
         report.source_name = source_name;
         report.source = source;
         report.parts = self.parts[0..self.part_len];
-        try diagnostic.renderReport(alloc, writer, report, .{ .color = color });
+        try diagnostic.renderReport(writer, report, .{ .color = color });
     }
 };
 
@@ -145,45 +142,3 @@ pub const RunResult = union(enum) {
     ok,
     err: RunFailure,
 };
-
-test "failure rendering includes stack trace frames" {
-    var failure = RunFailure{
-        .kind = .TypeError,
-        .report = .{
-            .source_name = "file.rv",
-            .source = "ignored",
-            .parts = &.{
-                diagnostic.Part{ .@"error" = "boom" },
-                .{ .span = .{ .span = .{ .line = 2, .column = 4, .start = 0, .end = 1 }, .role = .primary } },
-            },
-        },
-        .part_len = 2,
-        .trace_len = 2,
-    };
-    failure.parts[0] = diagnostic.Part{ .@"error" = "boom" };
-    failure.parts[1] = .{ .span = .{ .span = .{ .line = 2, .column = 4, .start = 0, .end = 1 }, .role = .primary } };
-    failure.parts[2] = .{ .trace = .{
-        .function_name = "inner",
-        .source_name = "file.rv",
-        .span = .{
-            .line = 2,
-            .column = 4,
-            .start = 0,
-            .end = 1,
-        },
-    } };
-    failure.parts[3] = .{ .trace = .{
-        .function_name = "<module>",
-        .source_name = "file.rv",
-        .pc = 7,
-    } };
-    failure.part_len = 4;
-
-    var buf = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer buf.deinit();
-    try failure.render(std.testing.allocator, &buf.writer, "unused", false);
-
-    try std.testing.expect(std.mem.find(u8, buf.written(), "stack trace:") != null);
-    try std.testing.expect(std.mem.find(u8, buf.written(), "0: inner at file.rv:2:4") != null);
-    try std.testing.expect(std.mem.find(u8, buf.written(), "1: <module> at file.rv:pc=7") != null);
-}

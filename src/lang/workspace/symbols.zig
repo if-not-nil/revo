@@ -4,7 +4,8 @@ const std = @import("std");
 
 const revo = @import("revo");
 
-const ast = @import("../ast.zig");
+const cst = @import("../cst.zig");
+const Lexer = @import("../Lexer.zig");
 const common = @import("common.zig");
 const pipeline = @import("../pipeline.zig");
 const txt = @import("text.zig");
@@ -98,64 +99,10 @@ pub fn documentSymbols(
 }
 
 ///
-/// walk ast & collect
+/// walk cst & collect
 ///     bindings, functions, type aliases
 ///
-/// full dotted macro names from baselib manifests
-///     (`uri.asdf!`)
-///
-/// names borrow the embedded sources (static)
-/// ; only the list is owned
-/// . callers split scope from member
-/// ; the parser caps heads at one dot.
-///
-pub fn baselibMacroNames(self: *Workspace, arena: std.mem.Allocator) [][]const u8 {
-    var out = std.ArrayList([]const u8).empty;
-    const srcs = revo.baselib.specs.macroSources(arena) catch return out.items;
-
-    for (srcs) |src| {
-        const parsed = pipeline.parse(arena, .{ .name = "<baselib-macros>", .text = src }, .{ .include_baselib_macros = false }) catch continue;
-        if (parsed != .ok) continue;
-        const syms = collectSymbolsFromParsed(self, parsed.ok.root, src) catch continue;
-        defer common.freeSymbols(self.alloc, @constCast(syms));
-
-        for (syms) |sym| {
-            if (sym.kind != .macro) continue;
-            const owned = arena.dupe(u8, sym.name) catch return out.items;
-            out.append(arena, owned) catch return out.items;
-        }
-    }
-    return out.items;
-}
-
-/// cached variant: parsed once, reused per keystroke
-///   names owned by `ws.alloc`;
-///   caller must not free
-///   same content as `baselibMacroNames`
-pub fn baselibMacroNamesCached(self: *Workspace) [][]const u8 {
-    if (self.macro_names_cache) |cached| return cached;
-    // parse with scratch arena, then re-own names in ws.alloc
-    var arena = std.heap.ArenaAllocator.init(self.alloc);
-    defer arena.deinit();
-
-    const fresh = self.baselibMacroNames(arena.allocator());
-    const owned = self.alloc.alloc([]const u8, fresh.len) catch return &.{};
-    var done: usize = 0;
-
-    for (fresh) |src| {
-        owned[done] = self.alloc.dupe(u8, src) catch {
-            for (owned[0..done]) |n| self.alloc.free(n);
-            self.alloc.free(owned);
-            return &.{};
-        };
-        done += 1;
-    }
-
-    self.macro_names_cache = owned;
-    return owned;
-}
-
-pub fn collectSymbolsFromParsed(self: *Workspace, root: *ast.Node, text: []const u8) ![]Symbol {
+pub fn collectSymbolsFromParsed(self: *Workspace, root: *cst.CstNode, text: []const u8) ![]Symbol {
     var out = try std.ArrayList(Symbol).initCapacity(self.alloc, 8);
     errdefer out.deinit(self.alloc);
     var visitor = SymbolVisitor{ .alloc = self.alloc, .out = &out, .text = text };
@@ -163,10 +110,10 @@ pub fn collectSymbolsFromParsed(self: *Workspace, root: *ast.Node, text: []const
     return out.toOwnedSlice(self.alloc);
 }
 
-/// walk AST for fn_expr bindings and populate sig_map with ParamInfo slices
+/// walk cst for fn_expr bindings and populate sig_map with ParamInfo slices
 pub fn collectSigsFromParsed(
     self: *Workspace,
-    root: *const ast.Node,
+    root: *const cst.CstNode,
     sig_map: *std.StringHashMapUnmanaged(FnSig),
 ) void {
     var visitor = SigVisitor{
@@ -182,73 +129,80 @@ const SigVisitor = struct {
     sig_map: *std.StringHashMapUnmanaged(FnSig),
     alloc: std.mem.Allocator,
 
-    /// evalTypeExpr can return shared comptime sentinels or types borrowing ast
+    /// evalTypeExpr can return shared comptime sentinels or types borrowing cst
     /// sig_map can outlive both so we need deepcopy
-    fn ownedType(self: *@This(), te: *const ast.TypeExpr) ?types.TypeInfo {
+    fn ownedType(self: *@This(), te: *const cst.CstType) ?types.TypeInfo {
         const t = types.evalBare(self.alloc, te) catch return null;
         return types.clone(t, self.alloc) catch null;
     }
 
-    fn paramInfos(self: *@This(), fn_expr: anytype) ?[]ParamInfo {
-        const params = self.alloc.alloc(ParamInfo, fn_expr.params.len) catch return null;
-        errdefer self.alloc.free(params);
-        for (fn_expr.params, params) |src, *dst| {
+    fn paramInfos(self: *@This(), params: []const cst.CstParam) ?[]ParamInfo {
+        const out = self.alloc.alloc(ParamInfo, params.len) catch return null;
+        errdefer self.alloc.free(out);
+        for (params, out) |src, *dst| {
             dst.* = .{
-                .name = self.alloc.dupe(u8, src.name) catch return null,
-                .type_name = if (src.type_name) |te| self.ownedType(te) else null,
-                .optional = src.optional or src.default_value != null,
+                .name = self.alloc.dupe(u8, src.name_tok.text) catch return null,
+                .type_name = if (src.type) |te| self.ownedType(te) else null,
+                .optional = src.qmark_tok != null or src.default != null,
             };
         }
-        return params;
+        return out;
     }
 
-    pub fn visit(self: *@This(), node: *const ast.Node) void {
-        switch (node.expr) {
+    fn typeParamTexts(self: *@This(), toks: []const revo.lang.Token) ?[]const u8 {
+        const texts = self.alloc.alloc([]const u8, toks.len) catch return null;
+        for (toks, texts) |tok, *dst| dst.* = tok.text;
+        return common.formatTypeParams(self.alloc, texts) catch return null;
+    }
+
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
+        const u = cst.unwrapParen(node) orelse return;
+        switch (u.kind) {
             .type_alias => |t| {
-                switch (t.type_expr.kind) {
-                    .function => |f| {
-                        const name = t.name;
+                if (t.segs.len == 0) return;
+                if (t.type.kind != .function) return;
+                const f = t.type.kind.function;
+                const name = t.segs[t.segs.len - 1].text;
 
-                        const params = self.alloc.alloc(ParamInfo, f.params.len) catch return;
-                        errdefer self.alloc.free(params);
-                        for (f.params, params) |src, *dst| {
-                            dst.* = .{
-                                .name = self.alloc.dupe(u8, src.name) catch return,
-                                .type_name = if (src.type_name) |te| self.ownedType(te) else null,
-                                .optional = src.optional or src.default_value != null,
-                            };
-                        }
-
-                        const return_type: ?types.TypeInfo = if (f.return_type) |rt| self.ownedType(rt) else null;
-
-                        const name_owned = self.alloc.dupe(u8, name) catch return;
-                        self.sig_map.put(self.alloc, name_owned, .{
-                            .params = params,
-                            .return_type = return_type,
-                        }) catch return;
-                    },
-                    else => {},
+                const params = self.alloc.alloc(ParamInfo, f.params.len) catch return;
+                errdefer self.alloc.free(params);
+                for (f.params, params) |src, *dst| {
+                    dst.* = .{
+                        .name = self.alloc.dupe(u8, src.name_tok.text) catch return,
+                        .type_name = if (src.type) |te| self.ownedType(te) else null,
+                        .optional = src.qmark_tok != null or src.dots.len > 0,
+                    };
                 }
+
+                const return_type: ?types.TypeInfo = if (f.ret) |rt| self.ownedType(rt) else null;
+
+                const name_owned = self.alloc.dupe(u8, name) catch return;
+                self.sig_map.put(self.alloc, name_owned, .{
+                    .params = params,
+                    .return_type = return_type,
+                }) catch return;
             },
             .binding => |b| {
-                if (b.target.expr != .ident) return;
-                const name = b.target.expr.ident;
-                if (b.value.expr == .fn_expr) {
-                    const fn_expr = b.value.expr.fn_expr;
+                const bt = cst.unwrapParen(b.target) orelse return;
+                if (bt.kind != .ident) return;
+                const name = bt.kind.ident.tok.text;
+                const bv = cst.unwrapParen(b.value) orelse return;
+                if (bv.kind == .fn_def) {
+                    const f = bv.kind.fn_def;
 
-                    const params = self.paramInfos(fn_expr) orelse return;
+                    const params = self.paramInfos(f.params) orelse return;
 
                     const name_owned = self.alloc.dupe(u8, name) catch return;
                     self.sig_map.put(self.alloc, name_owned, .{
                         .params = params,
                         .return_type = null,
-                        .type_params_text = common.formatTypeParams(self.alloc, fn_expr.type_params) catch return,
+                        .type_params_text = self.typeParamTexts(f.type_params),
                     }) catch return;
                     return;
                 }
                 // ascribed re-export:
                 // the value isn't a literal fn, so the sig comes from the annotation instead
-                const tn = b.type_name orelse return;
+                const tn = b.type orelse return;
                 const ft_owned = self.ownedType(tn) orelse return;
                 var ft = ft_owned;
 
@@ -275,34 +229,38 @@ const SigVisitor = struct {
                     .type_params_text = common.formatTypeParams(self.alloc, fsig.type_params) catch return,
                 }) catch return;
             },
-            .assign_expr => |ae| {
-                if (ae.value.expr != .fn_expr) return;
-                const fn_expr = ae.value.expr.fn_expr;
-                if (fn_expr.doc == null) return;
+            .assign => |ae| {
+                const av = cst.unwrapParen(ae.value) orelse return;
+                if (av.kind != .fn_def) return;
+                const at = cst.unwrapParen(ae.target) orelse return;
 
-                const name: []const u8 = switch (ae.target.expr) {
-                    .field => |f| f.name,
-                    .ident => |i| i,
+                const name: []const u8 = switch (at.kind) {
+                    .field => |f| f.name_tok.text,
+                    .ident => |i| i.tok.text,
                     else => return,
                 };
 
-                const params = self.paramInfos(fn_expr) orelse return;
+                const params = self.paramInfos(av.kind.fn_def.params) orelse return;
 
                 const return_type: ?types.TypeInfo = null;
                 const name_owned = self.alloc.dupe(u8, name) catch return;
                 self.sig_map.put(self.alloc, name_owned, .{
                     .params = params,
                     .return_type = return_type,
-                    .type_params_text = common.formatTypeParams(self.alloc, fn_expr.type_params) catch return,
+                    .type_params_text = self.typeParamTexts(av.kind.fn_def.type_params),
                 }) catch return;
             },
-            else => ast.walkAST(@This(), self, node),
+            .fn_def => |f| {
+                // anon fns contribute no named sig; named ones arrive via binding
+                _ = f;
+            },
+            else => cst.walkCst(@This(), self, node),
         }
     }
 };
 
-/// walk AST for import expressions and resolve them to FileIds
-pub fn collectDepsFromParsed(self: *Workspace, snap: Snapshot, root: *ast.Node) ![]FileId {
+/// walk cst for import expressions and resolve them to FileIds
+pub fn collectDepsFromParsed(self: *Workspace, snap: Snapshot, root: *cst.CstNode) ![]FileId {
     var out = try std.ArrayList(FileId).initCapacity(self.alloc, 4);
     errdefer out.deinit(self.alloc);
     const file_entry = self.entryPtr(snap.id) catch return out.toOwnedSlice(self.alloc);
@@ -326,47 +284,59 @@ const SymbolVisitor = struct {
     /// a binding like `const x = import "foo"` names the module itself
     import_named: bool = false,
 
-    pub fn visit(self: *@This(), node: *const ast.Node) void {
-        switch (node.expr) {
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
+        const u = cst.unwrapParen(node) orelse return;
+        switch (u.kind) {
             .binding => |b| self.addBinding(b),
-            .fn_expr => |f| for (f.params) |p| self.addName(p.name, .param, p.name_span),
-            .type_alias => |t| self.addName(ast.bareName(t), .type_alias, t.name_span),
-            // proc macros take the .macro kind
-            // ; node span lands on the decl start (no name span)
-            // . bare member names, like type aliases: `q.macc!`
-            //   in a dep file completes as `macc!` under import name
-            .proc_macro => |pm| self.addName(ast.bareMacroName(pm.name), .macro, node.span),
-            .import_stmt => |is| {
+            .fn_def => |f| for (f.params) |param| self.addName(param.name_tok.text, .param, param.name_tok.span()),
+            .type_alias => |t| if (t.segs.len > 0) self.addName(t.segs[t.segs.len - 1].text, .type_alias, t.segs[0].span()),
+            .import => |im| {
                 if (self.import_named) {
                     self.import_named = false;
+                    if (im.items.len != 1) {
+                        for (im.items) |item| {
+                            const nm: []const u8 = if (item.name_tok) |nt| nt.text else std.Io.Dir.path.stem(item.path.text);
+                            self.addName(nm, .binding, self.importNameSpan(node, nm));
+                        }
+                    }
                 } else {
-                    self.addName(is.name, .binding, self.importNameSpan(node, is.name));
+                    for (im.items) |item| {
+                        const nm: []const u8 = if (item.name_tok) |nt| nt.text else std.Io.Dir.path.stem(item.path.text);
+                        self.addName(nm, .binding, self.importNameSpan(node, nm));
+                    }
                 }
             },
             else => {},
         }
-        // decls fall through - walkAST reaches every binding exactly once
-        ast.walkAST(SymbolVisitor, self, node);
+        // decls fall through
+        // walkCst reaches every binding exactly once
+        cst.walkCst(SymbolVisitor, self, node);
     }
 
-    fn addBinding(self: *@This(), b: ast.Binding) void {
-        self.import_named = b.value.expr == .import_stmt;
-        switch (b.target.expr) {
-            .ident => |name| {
+    fn addBinding(self: *@This(), b: @FieldType(cst.CstKind, "binding")) void {
+        const bv = cst.unwrapParen(b.value);
+        self.import_named = if (bv) |v| v.kind == .import else false;
+        const bt = cst.unwrapParen(b.target) orelse return;
+        switch (bt.kind) {
+            .ident => |n| {
+                const name = n.tok.text;
                 const before = self.out.items.len;
                 self.addName(name, .binding, b.target.span);
                 // table literals carry hover previews on the just-added
                 // symbol (append-only, so a failed addName leaves len alone)
-                if (b.value.expr == .table and self.out.items.len > before) {
-                    if (self.tableFieldPreviews(b.value.expr.table)) |previews| {
+                if (bv != null and bv.?.kind == .table and self.out.items.len > before) {
+                    if (self.tableFieldPreviews(bv.?.kind.table.entries)) |previews| {
                         self.out.items[self.out.items.len - 1].field_values = previews;
                     }
                 }
             },
-            .table_pattern => |items| {
-                for (items) |item| {
-                    if (item.expr == .ident and !ast.isDiscardName(item.expr.ident))
-                        self.addName(item.expr.ident, .binding, item.span);
+            .table => |tbl| {
+                for (tbl.entries) |entry| {
+                    if (entry != .bare) continue;
+                    const item = entry.bare.value;
+                    const iu = cst.unwrapParen(item) orelse continue;
+                    if (iu.kind == .ident and !cst.isDiscardName(iu.kind.ident.tok.text))
+                        self.addName(iu.kind.ident.tok.text, .binding, item.span);
                 }
             },
             else => {},
@@ -375,18 +345,40 @@ const SymbolVisitor = struct {
 
     /// condensed `{k = v}` source slices for single-line literal fields;
     /// null when nothing previewable
-    fn tableFieldPreviews(self: *@This(), entries: []const ast.TableEntry) ?[]type_syntax.FieldPreview {
+    fn tableFieldPreviews(self: *@This(), entries: []const cst.CstEntry) ?[]type_syntax.FieldPreview {
         var out = std.ArrayList(type_syntax.FieldPreview).initCapacity(self.alloc, entries.len) catch return null;
         var implicit_idx: u32 = 0;
         for (entries) |entry| {
-            if (entry.key == null and entry.value.expr == .decl and
-                entry.value.expr.decl.inner.expr == .binding and
-                entry.value.expr.decl.inner.expr.binding.value.expr == .fn_expr)
-                continue;
+            if (entry == .bare) {
+                const bu = cst.unwrapParen(entry.bare.value);
+                if (bu != null and bu.?.kind == .decl) {
+                    const inner = cst.unwrapParen(bu.?.kind.decl.inner);
+                    if (inner != null and inner.?.kind == .binding) {
+                        const bv = cst.unwrapParen(inner.?.kind.binding.value);
+                        if (bv != null and bv.?.kind == .fn_def) continue;
+                    }
+                }
+            }
 
-            const name = ast.staticFieldName(entry);
+            const name: ?[]const u8 = switch (entry) {
+                .computed => null,
+                .keyed => |k| blk: {
+                    const ku = cst.unwrapParen(k.key) orelse break :blk null;
+                    break :blk switch (ku.kind) {
+                        .ident => |n| n.tok.text,
+                        .atom => |a| cst.atomName(a.tok.text),
+                        else => null,
+                    };
+                },
+                .bare => null,
+            };
             if (name) |n| {
-                const span = entry.value.span;
+                const vnode = switch (entry) {
+                    .computed => |cc| cc.value,
+                    .keyed => |k| k.value,
+                    .bare => |b| b.value,
+                };
+                const span = vnode.span;
                 if (span.end > self.text.len or span.start > span.end) continue;
                 const slice = self.text[span.start..span.end];
                 if (slice.len == 0 or std.mem.findScalar(u8, slice, '\n') != null) continue;
@@ -398,7 +390,12 @@ const SymbolVisitor = struct {
             } else {
                 const idx = implicit_idx;
                 implicit_idx += 1;
-                const span = entry.value.span;
+                const vnode2 = switch (entry) {
+                    .computed => |cc| cc.value,
+                    .keyed => |k| k.value,
+                    .bare => |b| b.value,
+                };
+                const span = vnode2.span;
 
                 if (span.end > self.text.len or span.start > span.end) continue;
                 const slice = self.text[span.start..span.end];
@@ -416,7 +413,7 @@ const SymbolVisitor = struct {
 
     /// module name = right after the path's opening quote; fall back to the
     /// whole statement (subdir paths, table form)
-    fn importNameSpan(self: *@This(), node: *const ast.Node, name: []const u8) ast.Span {
+    fn importNameSpan(self: *@This(), node: *const cst.CstNode, name: []const u8) Lexer.Span {
         var q = node.span.start;
         while (q < node.span.end and self.text[q] != '\'' and self.text[q] != '"') q += 1;
         const start = q + 1;
@@ -440,7 +437,7 @@ const SymbolVisitor = struct {
         return .{ .start = start, .end = start + name.len, .line = line, .column = column };
     }
 
-    fn addName(self: *@This(), name: []const u8, kind: SymbolKind, span: ast.Span) void {
+    fn addName(self: *@This(), name: []const u8, kind: SymbolKind, span: Lexer.Span) void {
         const owned = self.alloc.dupe(u8, name) catch return;
         self.out.append(self.alloc, .{
             .name = owned,
@@ -466,10 +463,11 @@ const ImportVisitor = struct {
     project_root: []const u8,
     failed: bool,
 
-    // walk the AST; collect import statements and resolve them
-    pub fn visit(self: *@This(), node: *const ast.Node) void {
-        if (node.expr == .import_stmt) {
-            const raw = node.expr.import_stmt.path;
+    // walk the cst; collect import statements and resolve them
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
+        const u = cst.unwrapParen(node) orelse return;
+        if (u.kind == .import) {
+            const raw = if (u.kind.import.items.len > 0) u.kind.import.items[0].path.text else "";
             if (raw.len != 0) {
                 const id = self.ws.resolveOpenImport(self.base, raw, self.mode, self.project_root) orelse
                     self.ws.resolveOpenImportOrOpen(self.base, raw, self.mode, self.project_root);
@@ -482,7 +480,7 @@ const ImportVisitor = struct {
                 }
             }
         }
-        ast.walkAST(ImportVisitor, self, node);
+        cst.walkCst(ImportVisitor, self, node);
     }
 };
 

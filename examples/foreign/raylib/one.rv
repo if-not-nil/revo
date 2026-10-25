@@ -24,18 +24,19 @@ let speed = 4.0
 let size = 30.0
 
 while not rl.window_should_close() do
-  if rl.is_key_down(68) x = x + speed
-  if rl.is_key_down(65) x = x - speed
-  if rl.is_key_down(83) y = y + speed
-  if rl.is_key_down(87) y = y - speed
+  if (rl.is_key_down(68)) x = x + speed
+  if (rl.is_key_down(65)) x = x - speed
+  if (rl.is_key_down(83)) y = y + speed
+  if (rl.is_key_down(87)) y = y - speed
 
-  rl.begin_drawing() do
-		rl.clear_background(30, 30, 30) # yeah the vscode color thats right
-		rl.draw_rectangle(x, y, size, size, 0, 0, 0)
-		rl.draw_text("wasd to move", 10, 10, 20, 186, 194, 222)
-		rl.draw_text("esc to quit", 10, 36, 20, 186, 194, 222)
-		rl.draw_fps(10, 420)
-	end; rl.end_drawing()
+  rl.begin_drawing()
+  do
+    rl.clear_background(30, 30, 30)  # yeah the vscode color thats right
+    rl.draw_rectangle(x, y, size, size, 0, 0, 0)
+    rl.draw_text("wasd to move", 10, 10, 20, 186, 194, 222)
+    rl.draw_text("esc to quit", 10, 36, 20, 186, 194, 222)
+    rl.draw_fps(10, 420)
+  end; rl.end_drawing()
 end
 
 rl.close_window()

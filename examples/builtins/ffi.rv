@@ -10,7 +10,7 @@ let libc = ffi.load("")
 
 # strlen takes a string, returns a u64
 let strlen = ffi.func(libc, "strlen", :u64, {:string})
-print(strlen("hello")) # 5
+print(strlen("hello"))  # 5
 
 #* 
  * variadic call
@@ -20,7 +20,7 @@ print(strlen("hello")) # 5
 *#
 let printf = ffi.varfunc(libc, "printf", :i32, {:string}, 2)
 let n = printf("hello %s\n", "world")
-print(n) # 12
+print(n)  # 12
 
 # errno from the last call on this vm
 print(ffi.errno())

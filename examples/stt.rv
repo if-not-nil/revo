@@ -1,10 +1,11 @@
 let a = {
-	hello = "world",
-	world = 4
+  hello = "world",
+  world = 4
 }
 
+
 fn hi(p: {world: num, hello: string}) do
-	
 end
+
 
 hi(a)

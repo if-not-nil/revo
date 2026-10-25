@@ -1,2 +1,0 @@
-# TMPL: pub macro double! `%e:expr` `%e * 2`
-pub const description = "macro module"

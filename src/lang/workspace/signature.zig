@@ -37,17 +37,17 @@ pub fn signatureHelp(
 
             for (ft.params, 0..) |p, i| {
                 // evalBare can hand back shared comptime sentinels, clone em
-                const pt: ?types.TypeInfo = if (p.type_name) |tn| pt: {
+                const pt: ?types.TypeInfo = if (p.type) |tn| pt: {
                     const t = try types.evalBare(alloc, tn);
                     break :pt try types.clone(t, alloc);
                 } else null;
                 params[i] = .{
-                    .name = try alloc.dupe(u8, p.name),
+                    .name = try alloc.dupe(u8, p.name_tok.text),
                     .type_name = pt,
                 };
             }
 
-            const ret: ?types.TypeInfo = if (ft.return_type) |r| ret: {
+            const ret: ?types.TypeInfo = if (ft.ret) |r| ret: {
                 const t = try types.evalBare(alloc, r);
                 break :ret try types.clone(t, alloc);
             } else null;

@@ -12,6 +12,7 @@ test "compiles unary operators and atom equality" {
 }
 
 test "hash starts comments only" {
+    // comments are trivia now
     try t.expectTypes(
         \\do
         \\    # whole line comment
@@ -19,11 +20,9 @@ test "hash starts comments only" {
         \\end
     , &.{
         .kw_do,
-        .comment,
         .kw_let,
         .ident,
         .assign,
-        .comment,
         .number,
         .kw_end,
         .eof,

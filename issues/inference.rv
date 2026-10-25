@@ -17,8 +17,8 @@ fn or_else_msg(trolley, track) match trolley
 
 fn bind_http(trolley, track) match trolley
   | {:ok, ok} when (ok.status >= 400) => do
-      track(ok)
-    end
+    track(ok)
+  end
   | {:ok, ok} => {:ok, ok}
   | {:err, e} => {:err, e}
   | _ => panic("not result")

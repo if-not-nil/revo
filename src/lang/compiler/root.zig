@@ -11,9 +11,9 @@ const VM = revo.VM;
 const LocalSlot = revo.LocalSlot;
 const ProgramCounter = revo.ProgramCounter;
 
-const ast = @import("../ast.zig");
-const Node = ast.Node;
-const Binding = ast.Binding;
+const cst = @import("../cst.zig");
+const Node = cst.CstNode;
+const Lexer = @import("../Lexer.zig");
 const control = @import("control.zig");
 const ir = @import("../ir/root.zig");
 const opt = @import("../ir/opt.zig");
@@ -41,12 +41,25 @@ pub const CompileResult = union(enum) {
 
 pub const Bytecode = struct {
     instructions: []Instruction,
-    spans: []ast.Span,
+    spans: []Lexer.Span,
 };
 
 pub const BytecodeResult = union(enum) {
     ok: Bytecode,
     err: CompileFailure,
+};
+
+/// synthesized nodes legitimately miss, source nodes should not
+pub const AnnotationMiss = struct {
+    kind: []const u8,
+    span: Lexer.Span,
+};
+
+/// debug ctrs for the annotation-only compiler
+/// populated by compileExprReportStats, zero-ish calls are free otherwise
+pub const CompileStats = struct {
+    annotation_misses: usize = 0,
+    first_annotation_miss: ?AnnotationMiss = null,
 };
 
 pub const CompileError = error{
@@ -66,6 +79,20 @@ pub fn compileExprReport(
     test_mode: bool,
     annotations: ?types.Annotations,
 ) !BytecodeResult {
+    return compileExprReportStats(vm, expr, test_mode, annotations, null, null);
+}
+
+/// compile and optionally report annotation coverage
+///   stats are filled even when compilation fails after init
+pub fn compileExprReportStats(
+    vm: *VM,
+    expr: *const Node,
+    test_mode: bool,
+    annotations: ?types.Annotations,
+    stats: ?*CompileStats,
+    source_text: ?[]const u8,
+) !BytecodeResult {
+    // expr must be lowered (hir.lower): paren/pipe arms below are unreachable
     var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);
     defer arena.deinit();
 
@@ -76,7 +103,12 @@ pub fn compileExprReport(
         vm.runtime.alloc,
     );
     compiler.annotations = annotations;
+    compiler.source_text = source_text;
+
     defer compiler.deinit();
+    defer {
+        if (stats) |out| out.* = compiler.stats();
+    }
 
     compiler.compileRoot(expr) catch |err| switch (err) {
         error.CompileFailed => {
@@ -108,8 +140,8 @@ pub const Compiler = struct {
     test_suite_names: std.ArrayList([]const u8),
     in_loop_depth: usize = 0,
     failure_reports: std.ArrayList(CompileFailure),
-    spans: std.ArrayList(ast.Span),
-    active_span: ast.Span = .{
+    spans: std.ArrayList(Lexer.Span),
+    active_span: Lexer.Span = .{
         .start = 0,
         .end = 0,
         .line = 1,
@@ -123,6 +155,10 @@ pub const Compiler = struct {
     upvalue_cache: std.AutoHashMap(usize, usize),
     type_aliases: std.StringHashMap(types.Alias),
     annotations: ?types.Annotations = null,
+    annotation_misses: usize = 0,
+    first_annotation_miss: ?AnnotationMiss = null,
+    /// debug ctx for annotation-miss logs, never used for sema
+    source_text: ?[]const u8 = null,
     pending_templates: std.ArrayList(revo.TemplateID),
     declared_globals: std.StringHashMap(void),
     current_template: revo.TemplateID = 0,
@@ -146,7 +182,7 @@ pub const Compiler = struct {
             .functions = try std.ArrayList(FunctionState).initCapacity(arena, 4),
             .slot_allocators = try std.ArrayList(LocalSlot).initCapacity(arena, 4),
             .failure_reports = try std.ArrayList(CompileFailure).initCapacity(arena, 4),
-            .spans = try std.ArrayList(ast.Span).initCapacity(arena, 32),
+            .spans = try std.ArrayList(Lexer.Span).initCapacity(arena, 32),
             .loop_stack = try std.ArrayList(state_mod.LoopFrame).initCapacity(arena, 8),
             .test_suite_names = try std.ArrayList([]const u8).initCapacity(arena, 4),
             .ir_builder = try ir.IrBuilder.init(arena),
@@ -182,6 +218,7 @@ pub const Compiler = struct {
     pub fn check(self: *Compiler) types.CheckCtx {
         var ctx = types.CheckCtx.init(self, self.alloc);
         ctx.annotations = self.annotations;
+        ctx.annotations_only = self.annotations != null;
         ctx.scope = self.aliasScope();
         return ctx;
     }
@@ -197,6 +234,9 @@ pub const Compiler = struct {
 
     pub fn inferExprType(self: *Compiler, node: *const Node) types.TypeInfo {
         if (self.lookupAnnotation(node)) |ti| return ti;
+        // annotations are authoritative in pipeline builds
+        //   only the public no-annotation API keeps live inference
+        if (self.annotations != null) return .{ .tag = .any };
         return types.inferExprType(self.check(), node);
     }
 
@@ -208,8 +248,34 @@ pub const Compiler = struct {
 
     fn lookupAnnotation(self: *Compiler, node: *const Node) ?types.TypeInfo {
         const ann = self.annotations orelse return null;
-        const id = ann.map.get(node) orelse return null;
+        const id = ann.map.get(node) orelse {
+            self.noteAnnotationMiss(node);
+            return null;
+        };
         return ann.table.get(id);
+    }
+
+    fn noteAnnotationMiss(self: *Compiler, node: *const Node) void {
+        self.annotation_misses += 1;
+        if (self.first_annotation_miss == null) {
+            self.first_annotation_miss = .{
+                .kind = @tagName(std.meta.activeTag(node.kind)),
+                .span = node.span,
+            };
+        }
+    }
+
+    fn spanText(self: *const Compiler, span: Lexer.Span) []const u8 {
+        const source = self.source_text orelse return "";
+        if (span.start >= span.end or span.end > source.len) return "";
+        return source[span.start..span.end];
+    }
+
+    pub fn stats(self: *const Compiler) CompileStats {
+        return .{
+            .annotation_misses = self.annotation_misses,
+            .first_annotation_miss = self.first_annotation_miss,
+        };
     }
 
     pub fn inferIdentType(self: *Compiler, name: []const u8) types.TypeInfo {
@@ -228,7 +294,7 @@ pub const Compiler = struct {
     pub fn inferCallReturnType(
         self: *Compiler,
         callee: *const Node,
-        args: []const *Node,
+        args: []const *const Node,
         type_args: []const []const u8,
         implicit_self: bool,
     ) types.TypeInfo {
@@ -241,16 +307,24 @@ pub const Compiler = struct {
                 return types.substCallReturn(self.check(), fn_sig, callee, args, type_args, implicit_self);
             if (ret.tag != .any) return ret;
 
-            if (callee.expr == .fn_expr and callee.expr.fn_expr.return_type == null)
-                return self.inferExprType(callee.expr.fn_expr.body);
+            const cu = cst.unwrapParen(callee);
+            if (cu != null and cu.?.kind == .fn_def and cu.?.kind.fn_def.return_type == null)
+                return self.inferExprType(cu.?.kind.fn_def.body);
         }
 
-        if (callee.expr == .ident) {
-            const fn_name = callee.expr.ident;
-            const sig = state_mod.findFnSignature(self, fn_name) orelse return .{ .tag = .any };
-            if (sig.type_params.len > 0 and sig.return_type.tag != .any)
-                return types.substCallReturn(self.check(), sig, callee, args, type_args, implicit_self);
-            return sig.return_type;
+        // local sigs are only a fallback for the public no-annotation api
+        //   pipeline builds always trust semantic
+        if (self.annotations != null) return .{ .tag = .any };
+
+        {
+            const cu = cst.unwrapParen(callee);
+            if (cu != null and cu.?.kind == .ident) {
+                const fn_name = cu.?.kind.ident.tok.text;
+                const sig = state_mod.findFnSignature(self, fn_name) orelse return .{ .tag = .any };
+                if (sig.type_params.len > 0 and sig.return_type.tag != .any)
+                    return types.substCallReturn(self.check(), sig, callee, args, type_args, implicit_self);
+                return sig.return_type;
+            }
         }
 
         return .{ .tag = .any };
@@ -271,11 +345,12 @@ pub const Compiler = struct {
 
     pub fn inferFnType(
         self: *Compiler,
-        params: []const ast.FnParam,
-        return_type: ?*ast.TypeExpr,
+        params: []const cst.CstParam,
+        return_type: ?*const cst.CstType,
         type_params: []const []const u8,
         doc: ?[]const u8,
     ) types.TypeInfo {
+        if (self.annotations != null) return .{ .tag = .any };
         const sig = types.buildFnSig(
             self.alloc,
             self,
@@ -290,6 +365,20 @@ pub const Compiler = struct {
     }
 
     pub fn finishBytecode(self: *Compiler) !Bytecode {
+        if (self.annotation_misses > 0) {
+            if (self.first_annotation_miss) |miss| {
+                std.log.scoped(.compiler).debug(
+                    "annotation misses: {d}; first {s} at {d}:{d} `{s}`",
+                    .{
+                        self.annotation_misses,
+                        miss.kind,
+                        miss.span.line,
+                        miss.span.column,
+                        self.spanText(miss.span),
+                    },
+                );
+            }
+        }
         // if (self.ir_builder.instructions.items.len < 40) {
         //     std.debug.print("[RAWFN]\n", .{});
         //     for (self.ir_builder.instructions.items) |inst| {
@@ -310,7 +399,7 @@ pub const Compiler = struct {
             self.pending_templates.items.len = 0;
         }
 
-        const spans_copy = try self.runtime_alloc.dupe(ast.Span, self.spans.items);
+        const spans_copy = try self.runtime_alloc.dupe(Lexer.Span, self.spans.items);
         return .{ .instructions = instr_copy, .spans = spans_copy };
     }
 
@@ -458,8 +547,8 @@ pub const Compiler = struct {
         state_mod.popRegister(self);
     }
 
-    pub fn validateName(self: *Compiler, name: []const u8, span: ast.Span) InternalCompileError!void {
-        if (ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>")) return;
+    pub fn validateName(self: *Compiler, name: []const u8, span: Lexer.Span) InternalCompileError!void {
+        if (cst.isDiscardName(name) or std.mem.eql(u8, name, "<fn>")) return;
         if (std.mem.findAny(u8, name[0..name.len -| 1], "!?") != null) {
             try self.appendFailureReport(.ParseError, &.{
                 .{ .@"error" = "! and ? are only allowed at the end of names" },
@@ -469,7 +558,7 @@ pub const Compiler = struct {
         }
         if (std.mem.endsWith(u8, name, "!")) {
             try self.appendFailureReport(.ParseError, &.{
-                .{ .@"error" = "name with ! is reserved for macros" },
+                .{ .@"error" = "macros are gone, but not forever" },
                 .{ .span = .{ .span = span, .role = .primary, .message = name } },
             });
             return error.CompileFailed;
@@ -498,8 +587,8 @@ pub const Compiler = struct {
     }
 
     /// emit bind_local/store_local that reads from source_reg directly,
-    /// bypassing the value_stack. avoids a redundant move in patterns like
-    /// `move Rsrc,Rdst + bind_local slot,Rdst` -> `bind_local slot,Rsrc`.
+    /// , bypassing the value_stack. avoids a redundant move in patterns like
+    /// , `move Rsrc,Rdst + bind_local slot,Rdst` -> `bind_local slot,Rsrc`
     pub fn emitBind(self: *Compiler, op: Opcode, slot: Operand, source_reg: Register) !void {
         try self.spans.append(self.alloc, self.active_span);
         _ = try self.record(op, &.{}, false, source_reg, slot);
@@ -661,8 +750,13 @@ pub const Compiler = struct {
         return self.alloc.print("{s}::{s}", .{ prefix, test_name });
     }
 
+    /// atom text without a leading colon (`:nil` and `nil` both give `nil`)
+    fn atomText(text: []const u8) []const u8 {
+        return if (text.len > 0 and text[0] == ':') text[1..] else text;
+    }
+
     pub fn compileValue(self: *Compiler, expr: *const Node) InternalCompileError!void {
-        switch (expr.expr) {
+        switch (expr.kind) {
             .binding => unreachable, // all bindings arrive wrapped in .decl
             .number => |n| {
                 const value = n.value;
@@ -678,11 +772,16 @@ pub const Compiler = struct {
                     );
                 } else try self.@"const"(Value.new.num(value));
             },
-            .string => |s| try self.@"const"(try self.vm.ownValueString(s)),
-            .multiline_string => |s| try self.@"const"(try self.vm.ownValueString(s)),
-            .atom => |name| try self.@"const"(Value.new.atom(try self.vm.internAtom(name))),
-            .nil => try self.@"const"(Value.new.atom(revo.CoreAtoms.nil.atomId())),
-            .ident => |name| {
+            .string => |s| try self.@"const"(try self.vm.ownValueString(s.tok.text)),
+            .interpolated => return self.fail(
+                .UnsupportedSyntax,
+                expr,
+                "interpolated string must be lowered before compilation",
+            ),
+            .atom => |a| try self.@"const"(Value.new.atom(try self.vm.internAtom(atomText(a.tok.text)))),
+            .err => try self.@"const"(Value.new.atom(revo.CoreAtoms.nil.atomId())),
+            .ident => |n| {
+                const name = n.tok.text;
                 if (state_mod.resolveLocal(self, name)) |slot| {
                     try self.emit(.load_local, slot);
                 } else if (try state_mod.resolveUpvalue(self, name)) |upval_id| {
@@ -714,6 +813,10 @@ pub const Compiler = struct {
                     return self.fail(.ParseError, expr, msg);
                 } else try self.emit(.load_user_global, try self.vm.internAtom(name));
             },
+            .yield => {
+                try self.emit(.yield, 0);
+                try self.pushNil();
+            },
             .unary => |u| switch (u.op) {
                 .negate => {
                     try self.compile(u.expr, true);
@@ -727,51 +830,101 @@ pub const Compiler = struct {
                     try self.emit(.yield, 0);
                     try self.pushNil();
                 },
-                .spawn => switch (u.expr.expr) {
-                    .call => |call| {
-                        var spawn_args: []const *Node = call.args;
-                        var spawn_expanded: ?[]const *Node = null;
-                        defer if (spawn_expanded) |ea| if (ea.ptr != call.args.ptr) self.alloc.free(ea);
-                        switch (call.callee.expr) {
-                            .ident => |nm| {
-                                const ra = try validateCallArgs(self, nm, call.args);
+                .spawn => {
+                    const su = cst.unwrapParen(u.expr) orelse return self.fail(
+                        .UnsupportedSyntax,
+                        u.expr,
+                        "spawn takes a function call, e.g. spawn f(x)",
+                    );
+                    switch (su.kind) {
+                        .call => |call| {
+                            var spawn_args: []const *Node = call.args;
+                            var spawn_expanded: ?[]const *Node = null;
+                            defer if (spawn_expanded) |ea| if (ea.ptr != call.args.ptr) self.alloc.free(ea);
+                            const cu = cst.unwrapParen(call.callee);
+                            if (cu != null and cu.?.kind == .ident) {
+                                const ra = try validateCallArgs(self, cu.?.kind.ident.tok.text, cu.?.span, call.args);
                                 if (ra.ptr != call.args.ptr) {
                                     spawn_expanded = ra;
                                     spawn_args = ra;
                                 }
-                            },
-                            .fn_expr => |fe| {
-                                const ea = try expandDirectFnArgs(self, fe.params, call.args);
+                            } else if (cu != null and cu.?.kind == .fn_def) {
+                                const ea = try expandDirectFnArgs(self, cu.?.kind.fn_def.params, call.args);
                                 if (ea.ptr != call.args.ptr) {
                                     spawn_expanded = ea;
                                     spawn_args = ea;
                                 }
-                            },
-                            else => {},
-                        }
-                        try self.compile(call.callee, true);
-                        if (call.implicit_self) switch (call.callee.expr) {
-                            .field => |field| try self.compile(field.object, true),
-                            .index => |index| try self.compile(index.object, true),
-                            else => {},
-                        };
-                        for (spawn_args) |arg| {
-                            if (arg.expr == .assign_expr) try self.compile(arg.expr.assign_expr.value, true) else try self.compile(arg, true);
-                        }
-                        try self.emit(
-                            .spawn,
-                            @intCast(
-                                spawn_args.len + @intFromBool(call.implicit_self),
-                            ),
-                        );
-                    },
-                    else => {
-                        return self.fail(
-                            .UnsupportedSyntax,
-                            u.expr,
-                            "spawn takes a function call, e.g. spawn f(x)",
-                        );
-                    },
+                            }
+                            try self.compile(call.callee, true);
+                            for (spawn_args) |arg| {
+                                if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
+                            }
+                            try self.emit(.spawn, @intCast(spawn_args.len));
+                        },
+                        .bare_call => |b| {
+                            const one = [_]*Node{b.arg};
+                            var spawn_args: []const *Node = one[0..];
+                            var spawn_expanded: ?[]const *Node = null;
+
+                            defer if (spawn_expanded) |ea|
+                                if (ea.ptr != one[0..].ptr)
+                                    self.alloc.free(ea);
+
+                            const cu = cst.unwrapParen(b.callee);
+
+                            if (cu != null and cu.?.kind == .ident) {
+                                const ra =
+                                    try validateCallArgs(self, cu.?.kind.ident.tok.text, cu.?.span, one[0..]);
+
+                                if (ra.ptr != one[0..].ptr) {
+                                    spawn_expanded = ra;
+                                    spawn_args = ra;
+                                }
+                            } else if (cu != null and cu.?.kind == .fn_def) {
+                                const ea =
+                                    try expandDirectFnArgs(self, cu.?.kind.fn_def.params, one[0..]);
+
+                                if (ea.ptr != one[0..].ptr) {
+                                    spawn_expanded = ea;
+                                    spawn_args = ea;
+                                }
+                            }
+
+                            try self.compile(b.callee, true);
+
+                            for (spawn_args) |arg| {
+                                if (cst.namedArgValue(arg)) |v|
+                                    try self.compile(v, true)
+                                else
+                                    try self.compile(arg, true);
+                            }
+                            try self.emit(.spawn, @intCast(spawn_args.len));
+                        },
+                        .method_call => |m| {
+                            try self.compile(m.object, true);
+                            const mname = atomText(m.atom_tok.text);
+                            try self.@"const"(Value.new.atom(try self.vm.internAtom(mname)));
+                            for (m.args) |arg| {
+                                if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
+                            }
+                            const argc = m.args.len | (@as(usize, 1) << 7);
+                            try self.emit(.spawn, @intCast(argc));
+                        },
+                        .generic_call => |g| {
+                            try self.compile(g.receiver, true);
+                            for (g.args) |arg| {
+                                if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
+                            }
+                            try self.emit(.spawn, @intCast(g.args.len));
+                        },
+                        else => {
+                            return self.fail(
+                                .UnsupportedSyntax,
+                                u.expr,
+                                "spawn takes a function call, e.g. spawn f(x)",
+                            );
+                        },
+                    }
                 },
             },
             .binary => |b| {
@@ -813,10 +966,8 @@ pub const Compiler = struct {
                     inline else => |tag| @field(Opcode, @tagName(tag)),
                 };
 
-                // a constant int RHS folds into the opcode as an immediate,
-                // skipping its materialization (and a dispatch at runtime).
-                // when both operands are literals, keep the two-register form
-                // so the constant fold pass still collapses them at compile time
+                // a constant int rhs folds into the opcode as an immediate
+                // , both literals keep two-reg form so fold pass still collapses
                 if (both_numeric and immInt(b.left) == null) {
                     if (immOpFor(b.op)) |op_imm| {
                         if (immInt(b.right)) |k| {
@@ -831,50 +982,103 @@ pub const Compiler = struct {
                 try self.compile(b.right, true);
                 try self.emit(specialized_op, 0);
             },
-            .and_expr => |v| try control.compileAnd(self, v.left, v.right),
-            .or_expr => |v| try control.compileOr(self, v.left, v.right),
-            .call => |call| try self.compileCall(call),
+            .logical => |l| switch (l.op) {
+                .and_op => try control.compileAnd(self, l.left, l.right),
+                .or_op => try control.compileOr(self, l.left, l.right),
+                .orelse_op => {
+                    try self.compile(l.left, true);
+                    const fail_jump = try self.jump(.jump_err);
+                    try self.compile(l.right, true);
+                    self.patchJump(fail_jump);
+                    try self.emit(.unwrap_result, 1);
+                },
+            },
+            .call => |c| try self.compileCallCst(c.callee, c.args),
+            // bare calls are exactly one-argument calls; share arg fixup so
+            // defaults/optional params behave the same
+            .bare_call => |b| try self.compileCallCst(b.callee, &[_]*Node{b.arg}),
+            // type args erase at runtime; dispatch on the receiver
+            .generic_call => |g| try self.compileCallCst(g.receiver, g.args),
+            .method_call => |m| try self.compileMethodCall(m),
             .field => |field| {
                 try self.compile(field.object, true);
-                try self.emit(.table_get_atom, try self.vm.internAtom(field.name));
+                try self.emit(.table_get_atom, try self.vm.internAtom(field.name_tok.text));
+            },
+            .dotted_index => |d| {
+                try self.compile(d.object, true);
+                const key = try cst.allocNode(self.alloc, d.num_tok.span(), .{ .number = .{ .tok = d.num_tok, .value = d.value, .is_float = false } });
+                try self.compile(key, true);
+                try self.emit(.table_get, 0);
             },
             .index => |index| {
                 try self.compile(index.object, true);
-                if (index.key.expr == .range_literal) {
-                    const range = index.key.expr.range_literal;
-                    try self.compile(range.start, true);
-                    try self.compile(range.step, true);
-                    try self.compile(range.end, true);
+                const ku = cst.unwrapParen(index.key);
+                if (ku != null and ku.?.kind == .range) {
+                    const r = ku.?.kind.range;
+                    if (r.dot2_tok != null) {
+                        const end = r.end orelse return self.fail(.UnsupportedSyntax, index.key, "open range needs an end");
+                        try self.compile(r.start, true);
+                        try self.compile(r.mid, true);
+                        try self.compile(end, true);
+                    } else {
+                        // `a..b` slices start..end with nil step
+                        try self.compile(r.start, true);
+                        try self.emit(.load_nil, 0);
+                        try self.compile(r.mid, true);
+                    }
                     try self.emit(.slice, 0);
-                } else if (index.key.expr == .slice_literal) {
-                    const slice = index.key.expr.slice_literal;
-                    if (slice.start) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
-                    if (slice.step) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
-                    if (slice.end) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                } else if (ku != null and (ku.?.kind == .slice or ku.?.kind == .for_range)) {
+                    if (ku.?.kind == .slice) {
+                        const slice = ku.?.kind.slice;
+                        if (slice.start) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                        if (slice.mid) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                        if (slice.end) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                    } else {
+                        // for_range bounds as slice bounds (nils for missing)
+                        const fr = ku.?.kind.for_range;
+                        if (fr.start) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                        if (fr.mid) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                        if (fr.end) |n| try self.compile(n, true) else try self.emit(.load_nil, 0);
+                    }
                     try self.emit(.slice, 0);
-                } else if (index.key.expr == .atom) try self.emit(
+                } else if (ku != null and ku.?.kind == .atom) try self.emit(
                     .table_get_atom,
-                    try self.vm.internAtom(index.key.expr.atom),
+                    try self.vm.internAtom(atomText(ku.?.kind.atom.tok.text)),
                 ) else {
                     try self.compile(index.key, true);
                     try self.emit(.table_get, 0);
                 }
             },
-            .if_expr => |v| try control.compileIf(self, v.condition, v.then_expr, v.else_expr),
-            .unless_expr => |v| try control.compileUnless(self, v.condition, v.then_expr, v.else_expr),
+            .if_expr => |c| {
+                if (c.unless) {
+                    try control.compileUnless(self, c.cond, c.then, c.else_);
+                } else {
+                    try control.compileIf(self, c.cond, c.then, c.else_);
+                }
+            },
             .decl => |d| {
-                switch (d.inner.expr) {
+                const inner = cst.unwrapParen(d.inner) orelse return self.pushNil();
+                switch (inner.kind) {
                     .binding => |*b| {
-                        if (b.value.expr == .import_stmt and b.target.expr == .ident) {
+                        const bv = cst.unwrapParen(b.value);
+                        const bt = cst.unwrapParen(b.target);
+                        if (bv != null and bv.?.kind == .import and bt != null and bt.?.kind == .ident) {
                             // imports must be const, no type annotations
-                            const user_name = b.target.expr.ident;
+                            const user_name = bt.?.kind.ident.tok.text;
                             if (d.kind != .@"const") {
                                 return self.fail(.ParseError, expr, "import binding must be const");
                             }
-                            // compile import_stmt directly so it handles its own slot
+                            // compile import directly so it handles its own slot
                             // then also bind the user-specified name if it differs
+                            // (single autobind items already carry the target
+                            // name from bindImportNames, so this is usually a no-op)
                             try self.compile(b.value, true);
-                            if (!std.mem.eql(u8, user_name, b.value.expr.import_stmt.name)) {
+                            const im = bv.?.kind.import;
+                            const first_name = if (im.items.len > 0)
+                                importItemName(im.items[0])
+                            else
+                                user_name;
+                            if (!std.mem.eql(u8, user_name, first_name)) {
                                 const slot = try state_mod.declareLocal(self, user_name, false);
                                 state_mod.reserveLocalSlots(self);
                                 try self.regDupe();
@@ -891,104 +1095,127 @@ pub const Compiler = struct {
                         };
                         return try self.compileBinding(b.*, kind);
                     },
-                    .type_alias => |t| {
-                        _ = t;
+                    .type_alias => {
                         if (d.kind == .declare_decl) {
                             try self.pushNil();
                             return;
                         }
                     },
+                    .fn_def => |f| {
+                        // named fn declarations bind like `const name = fn ...`
+                        const fname: []const u8 = switch (f.head) {
+                            .named => |n| n.name,
+                            else => "<fn>",
+                        };
+                        const kind: bindings.BindingKind = switch (d.kind) {
+                            .@"const" => .@"const",
+                            .let => .let,
+                            .global => .global,
+                            .global_const => .global_const,
+                            else => .@"const",
+                        };
+                        const target = try cst.allocIdent(self.alloc, inner.span, fname);
+                        const bind = try cst.allocNode(self.alloc, inner.span, .{ .binding = .{
+                            .kind_tok = cst.syntheticToken("const", inner.span),
+                            .kind = .@"const",
+                            .target = target,
+                            .colon_tok = null,
+                            .type = null,
+                            .eq_tok = null,
+                            .value = d.inner,
+                        } });
+                        return try self.compileBinding(bind.kind.binding, kind);
+                    },
                     else => {},
                 }
                 return self.compile(d.inner, true);
             },
-            .assign_expr => |assign| try bindings.compileAssign(self, assign.target, assign.value),
-            .compound_assign => |assign| try bindings.compileCompound(self, assign.target, assign.op, assign.value),
-            .block => |exprs| try self.compileBlock(exprs),
-            .table => |entries| try bindings.compileTable(self, entries),
-            .return_expr => |val| {
-                if (val) |v| {
+            .assign => |a| try bindings.compileAssign(self, a.target, a.value),
+            .compound => |c| try bindings.compileCompound(self, c.target, c.op, c.value),
+            .block => |b| try self.compileBlock(b.stmts),
+            .root => |r| try self.compileBlock(r.stmts),
+            .do_block => |d| {
+                if (d.label_tok) |lt| {
+                    const body = try cst.allocNode(self.alloc, expr.span, .{ .block = .{
+                        .stmts = d.stmts,
+                        .semis = d.semis,
+                    } });
+                    try control.compileLabeledBlock(self, lt.text, body);
+                } else try self.compileBlock(d.stmts);
+            },
+            .paren => |p| {
+                // stripped by hir.lower; only `()` survives this far
+                if (p.expr) |_| unreachable else try self.pushNil();
+            },
+            .pipe => unreachable, // desugared by hir.lower
+            .table => |tbl| try bindings.compileTable(self, tbl.entries),
+            .return_expr => |r| {
+                if (r.value) |v| {
                     try self.compile(v, true);
                 } else try self.pushNil();
                 try self.emit(.ret, 1);
             },
-            .import_stmt => |is| {
-                const fn_state = state_mod.currentFunctionState(self) orelse return self.fail(
-                    .ParseError,
-                    expr,
-                    "import statement outside function context",
-                );
-                if (state_mod.findLocalInCurrentScope(self, is.name)) |_| {
-                    const msg = try self.alloc.print("name `{s}` is already defined", .{is.name});
-                    return self.fail(.ParseError, expr, msg);
+            .import => |im| {
+                for (im.items) |item| {
+                    try self.compileImportItem(item);
                 }
-                // also check import_locals to prevent double import of same name
-                for (fn_state.import_locals.items) |il| {
-                    if (std.mem.eql(u8, il.name, is.name)) {
-                        const msg = try self.alloc.print("name `{s}` is already defined by another import", .{is.name});
-                        return self.fail(.ParseError, expr, msg);
-                    }
-                }
-                const slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
-                self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
-
-                const import_local = LocalVar{ .name = is.name, .slot = slot, .mutable = false, .initialized = true };
-                try fn_state.import_locals.append(self.alloc, import_local);
-                try fn_state.all_locals.append(self.alloc, import_local);
-
-                state_mod.reserveLocalSlots(self);
-
-                try self.emit(.load_user_global, revo.CoreAtoms.import.atomId());
-                try self.@"const"(try self.vm.ownValueString(is.path));
-
-                try self.emit(.call, 1);
-                try self.regDupe();
-
-                try self.emit(.bind_local, slot);
+                // importing is a statement; leave the last value on top
+                // (single imports leave one value, matching old behavior)
             },
             .comp_block => |cb| try self.compileComp(cb.expr),
-            .loop_expr => |v| try control.compileLoop(self, v.body, v.label),
-            .for_loop => |v| try control.compileFor(self, v.params, v.body, v.iter, v.label),
-            .while_loop => |v| try control.compileWhile(self, v.predicate, v.body, v.label),
-            .break_expr => |b| try control.compileBreak(self, expr, b.value, b.label),
-            .continue_expr => |c| try control.compileContinue(self, expr, c.value, c.label),
-            .labeled_block => |lb| try control.compileLabeledBlock(self, lb.label, lb.body),
-            .fn_expr => |fn_expr| try self.compileFn(fn_expr.params, fn_expr.return_type, fn_expr.body, "<fn>", null, fn_expr.type_params),
-            .match_expr => |v| try control.compileMatch(self, v.subject, v.arms),
-            .table_pattern => return self.fail(
-                .UnsupportedSyntax,
-                expr,
-                "table patterns do not compile as values",
-            ),
+            .loop_expr => |v| try control.compileLoop(self, v.body, cst.labelText(v.label_tok)),
+            .for_loop => |v| try control.compileFor(self, v.params, v.body, v.iter, cst.labelText(v.label_tok)),
+            .while_loop => |v| try control.compileWhile(self, v.pred, v.body, cst.labelText(v.label_tok)),
+            .break_expr => |b| {
+                const value = if (b.value) |vv| vv else try self.nilNode();
+                try control.compileBreak(self, expr, value, cst.labelText(b.label_tok));
+            },
+            .continue_expr => |c| try control.compileContinue(self, expr, null, cst.labelText(c.label_tok)),
+            .fn_def => |f| {
+                const fname: []const u8 = switch (f.head) {
+                    .named => |n| n.name,
+                    else => "<fn>",
+                };
+                const tps = try cst.tokenTexts(self.alloc, f.type_params);
+                try self.compileFn(f.params, f.return_type, f.body, fname, null, tps);
+            },
+            .fn_method => |f| try self.compileFnMethod(f),
+            .match => |v| {
+                const subject = if (v.subject) |st| st else try self.trueNode();
+                // the synthesized `:true` subject has no semantic annotation
+                const subject_type: types.TypeInfo = if (v.subject) |st|
+                    self.annotatedType(st)
+                else
+                    .{ .tag = .any };
+                try control.compileMatch(self, subject, v.arms, subject_type);
+            },
             .ascribed => return self.fail(
                 .UnsupportedSyntax,
                 expr,
                 "type ascriptions only go in match patterns",
             ),
-            .range_literal => return self.fail(
+            .range => return self.fail(
                 .UnsupportedSyntax,
                 expr,
                 "range literals only go in forloops for now",
             ),
-            .slice_literal => return self.fail(
+            .for_range => return self.fail(
+                .UnsupportedSyntax,
+                expr,
+                "range literals only go in forloops for now",
+            ),
+            .slice => return self.fail(
                 .UnsupportedSyntax,
                 expr,
                 "slice literals only appear inside index expressions",
             ),
-            .try_expr => |expr_ptr| {
-                try self.compile(expr_ptr, true);
+            .try_expr => |t| {
+                try self.compile(t.expr, true);
                 try self.emit(.unwrap_result, 0);
             },
-            .orelse_expr => |v| {
-                try self.compile(v.left, true);
-                const fail_jump = try self.jump(.jump_err);
-                try self.compile(v.right, true);
-                self.patchJump(fail_jump);
-                try self.emit(.unwrap_result, 1);
-            },
             .test_block => |block| {
-                if (self.test_mode and !block.skip) {
-                    const test_label = try self.formatSuiteTestName(block.name);
+                if (self.test_mode and block.skip_tok == null) {
+                    const test_label = try self.formatSuiteTestName(block.name.text);
                     defer self.alloc.free(test_label);
                     try self.emit(
                         .load_user_global,
@@ -997,7 +1224,7 @@ pub const Compiler = struct {
                     try self.@"const"(
                         try self.vm.ownValueString(test_label),
                     );
-                    try self.compile(block.body, true);
+                    try self.compileTestBody(block.body);
                     try self.emit(.call, 2);
                     try self.regRelease();
                 }
@@ -1005,7 +1232,7 @@ pub const Compiler = struct {
             },
             .test_suite => |suite| {
                 if (self.test_mode) {
-                    const suite_label = try self.formatSuiteTestName(suite.name);
+                    const suite_label = try self.formatSuiteTestName(suite.name.text);
                     defer self.alloc.free(suite_label);
                     try self.emit(
                         .load_user_global,
@@ -1014,145 +1241,242 @@ pub const Compiler = struct {
                     try self.@"const"(
                         try self.vm.ownValueString(suite_label),
                     );
-                    try self.test_suite_names.append(self.alloc, suite.name);
+                    try self.test_suite_names.append(self.alloc, suite.name.text);
                     defer _ = self.test_suite_names.pop();
-                    try self.compile(suite.body, true);
+                    try self.compileTestBody(suite.body);
                     try self.emit(.call, 2);
                     try self.regRelease();
                 }
                 try self.pushNil();
             },
             .type_alias => |t| {
-                const type_info = types.evalTypeExpr(self.aliasScope(), t.type_expr) catch |err| switch (err) {
+                const type_info = types.evalTypeExpr(self.aliasScope(), t.type) catch |err| switch (err) {
                     error.OutOfMemory => return error.OutOfMemory,
                 };
-                try self.type_aliases.put(ast.bareName(t), .{ .info = type_info });
+                const tname = if (t.segs.len > 0) t.segs[t.segs.len - 1].text else "?";
+                try self.type_aliases.put(tname, .{ .info = type_info });
                 try self.pushNil();
             },
-            .proc_macro => return self.fail(
-                .UnsupportedSyntax,
-                expr,
-                "proc must be expanded before compilation",
-            ),
-            .quasiquote => return self.fail(
-                .UnsupportedSyntax,
-                expr,
-                "quasiquote must be expanded before compilation",
-            ),
         }
     }
 
-    pub fn compileCall(
+    /// `true` atom node for subject-less matches
+    fn trueNode(self: *Compiler) !*Node {
+        return cst.allocNode(self.alloc, self.active_span, .{ .atom = .{ .tok = cst.syntheticToken(":true", self.active_span) } });
+    }
+
+    /// `nil` node for bare break/return
+    fn nilNode(self: *Compiler) !*Node {
+        return cst.allocNode(self.alloc, self.active_span, .{ .err = .{ .toks = &.{} } });
+    }
+
+    fn compileImportItem(self: *Compiler, item: cst.CstImportItem) !void {
+        const name = importItemName(item);
+        const path = item.path.text;
+        const err_node = try cst.allocNode(self.alloc, item.span, .{ .err = .{ .toks = &.{} } });
+        const cur = state_mod.currentFunctionState(self) orelse return self.fail(
+            .ParseError,
+            err_node,
+            "import statement outside function context",
+        );
+        if (state_mod.findLocalInCurrentScope(self, name)) |_| {
+            const msg = try self.alloc.print("name `{s}` is already defined", .{name});
+            return self.fail(.ParseError, err_node, msg);
+        }
+        // also check import_locals to prevent double import of same name
+        for (cur.import_locals.items) |il| {
+            if (std.mem.eql(u8, il.name, name)) {
+                const msg = try self.alloc.print("name `{s}` is already defined by another import", .{name});
+                return self.fail(.ParseError, err_node, msg);
+            }
+        }
+        const slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
+        self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
+
+        const import_local = LocalVar{ .name = name, .slot = slot, .mutable = false, .initialized = true };
+        try cur.import_locals.append(self.alloc, import_local);
+        try cur.all_locals.append(self.alloc, import_local);
+
+        state_mod.reserveLocalSlots(self);
+
+        try self.emit(.load_user_global, revo.CoreAtoms.import.atomId());
+        try self.@"const"(try self.vm.ownValueString(path));
+
+        try self.emit(.call, 1);
+        try self.regDupe();
+
+        try self.emit(.bind_local, slot);
+    }
+
+    /// `fn obj:m() ...` / `fn obj.m() ...`: compile fn, store into index
+    fn compileFnMethod(self: *Compiler, f: @FieldType(cst.CstKind, "fn_method")) InternalCompileError!void {
+        const span = self.active_span;
+        const obj_text: []const u8 = switch (f.head) {
+            .method_colon => |m| m.obj_tok.text,
+            .method_dot => |m| m.obj_tok.text,
+            else => return self.fail(.UnsupportedSyntax, f.body, "bad method head"),
+        };
+        const key_text: []const u8 = switch (f.head) {
+            .method_colon => |m| atomText(m.atom_tok.text),
+            .method_dot => |m| m.name_tok.text,
+            else => return self.fail(.UnsupportedSyntax, f.body, "bad method head"),
+        };
+        // colon methods get an explicit `self` first param
+        var params: []const cst.CstParam = f.params;
+        var owned: []cst.CstParam = &.{};
+        if (f.head == .method_colon) {
+            owned = try self.alloc.alloc(cst.CstParam, f.params.len + 1);
+            owned[0] = .{ .name_tok = cst.syntheticToken("self", span) };
+            @memcpy(owned[1..], f.params);
+            params = owned;
+        }
+        defer if (owned.len > 0) self.alloc.free(owned);
+        const tps = try cst.tokenTexts(self.alloc, f.type_params);
+        // compile the fn value onto the stack
+        try self.compileFn(params, f.return_type, f.body, key_text, null, tps);
+        // store into obj[key], keep value on top like assignment
+        const obj_node = try cst.allocIdent(self.alloc, span, obj_text);
+        try self.compile(obj_node, true);
+        try self.regDupe();
+        const key_atom = try self.vm.internAtom(key_text);
+        try self.emit(.table_set_atom, key_atom);
+        try self.emit(.table_get_atom, key_atom);
+    }
+
+    /// wrap a test body in a zero-param closure and compile it
+    fn compileTestBody(self: *Compiler, body: *const Node) !void {
+        try self.compileFn(&.{}, null, body, "<test>", null, &.{});
+    }
+
+    /// bound name of an import item (explicit or path stem)
+    fn importItemName(item: cst.CstImportItem) []const u8 {
+        if (item.name_tok) |nt| return nt.text;
+        return std.Io.Dir.path.stem(item.path.text);
+    }
+
+    pub fn compileCallCst(
         self: *Compiler,
-        call: anytype,
+        callee: *const Node,
+        args: []const *Node,
     ) InternalCompileError!void {
-        switch (call.callee.expr) {
+        const cu = cst.unwrapParen(callee) orelse callee;
+        switch (cu.kind) {
             .field => |field| {
-                // method call desugar: obj:method(args)
-                const desugared = call.args.len > 0 and
-                    call.args[0] == field.object;
-                if (desugared) {
-                    try self.compile(call.callee, true);
-                    for (call.args) |arg| try self.compile(arg, true);
-                    try self.emit(
-                        .call,
-                        @intCast(
-                            call.args.len + @intFromBool(call.implicit_self),
-                        ),
-                    );
-                } else {
-                    if (try self.tryCompileBoundMethodCall(
-                        field,
-                        call.args,
-                        call.implicit_self,
-                    )) return;
-                    try self.compile(field.object, true);
-                    try self.@"const"(
-                        Value.new.atom(try self.vm.internAtom(field.name)),
-                    );
-                    for (call.args) |arg| try self.compile(arg, true);
-                    const argc = call.args.len |
-                        (@as(usize, @intFromBool(call.implicit_self)) << 7);
-                    try self.emit(.call_field, @intCast(argc));
-                }
+                const fname = field.name_tok.text;
+                if (try self.tryCompileBoundMethodCall(
+                    field.object,
+                    fname,
+                    args,
+                    false,
+                )) return;
+                try self.compile(field.object, true);
+                try self.@"const"(
+                    Value.new.atom(try self.vm.internAtom(fname)),
+                );
+                for (args) |arg| try self.compile(arg, true);
+                const argc = args.len;
+                try self.emit(.call_field, @intCast(argc));
             },
             .index => |index| {
                 try self.compile(index.object, true);
                 try self.compile(index.key, true);
-                for (call.args) |arg| try self.compile(arg, true);
-                const argc = call.args.len |
-                    (@as(usize, @intFromBool(call.implicit_self)) << 7);
+                for (args) |arg| try self.compile(arg, true);
+                const argc = args.len;
                 try self.emit(.call_field, @intCast(argc));
             },
-            .ident => |fn_name| {
+            .ident => |n| {
+                const fn_name = n.tok.text;
                 const reordered_args = try validateCallArgs(
                     self,
                     fn_name,
-                    call.args,
+                    callee.span,
+                    args,
                 );
-                try self.compile(call.callee, true);
+                try self.compile(callee, true);
 
                 // use reordered args if named params were used
-                const args_to_compile = if (reordered_args.ptr != call.args.ptr)
+                const args_to_compile = if (reordered_args.ptr != args.ptr)
                     reordered_args
                 else
-                    call.args;
+                    args;
 
                 for (args_to_compile) |arg| {
-                    if (arg.expr == .assign_expr) {
+                    if (cst.namedArgValue(arg)) |v| {
                         // in call context, assignment expressions should only compile their values
-                        try self.compile(arg.expr.assign_expr.value, true);
+                        try self.compile(v, true);
                     } else {
                         try self.compile(arg, true);
                     }
                 }
-                if (reordered_args.ptr != call.args.ptr) self.alloc.free(
+                if (reordered_args.ptr != args.ptr) self.alloc.free(
                     reordered_args,
                 );
                 try self.emit(
                     .call,
                     @intCast(
-                        args_to_compile.len + @intFromBool(call.implicit_self),
+                        args_to_compile.len,
                     ),
                 );
             },
-            .fn_expr => {
-                const params = call.callee.expr.fn_expr.params;
-                const expanded = try expandDirectFnArgs(self, params, call.args);
-                defer if (expanded.ptr != call.args.ptr) self.alloc.free(expanded);
-                try self.compile(call.callee, true);
+            .fn_def => |f| {
+                const expanded = try expandDirectFnArgs(self, f.params, args);
+                defer if (expanded.ptr != args.ptr) self.alloc.free(expanded);
+                try self.compile(callee, true);
                 for (expanded) |arg| {
-                    if (arg.expr == .assign_expr) {
-                        try self.compile(arg.expr.assign_expr.value, true);
+                    if (cst.namedArgValue(arg)) |v| {
+                        try self.compile(v, true);
                     } else try self.compile(arg, true);
                 }
                 try self.emit(
                     .call,
                     @intCast(
-                        expanded.len + @intFromBool(call.implicit_self),
+                        expanded.len,
                     ),
                 );
             },
+            .paren => |pr| {
+                // stripped by hir.lower; only `()` survives, which cannot call
+                if (pr.expr) |_| unreachable;
+                return self.fail(.UnsupportedSyntax, callee, "cannot call nothing");
+            },
             else => {
-                try self.compile(call.callee, true);
-                for (call.args) |arg| try self.compile(arg, true);
+                try self.compile(callee, true);
+                for (args) |arg| try self.compile(arg, true);
                 try self.emit(
                     .call,
                     @intCast(
-                        call.args.len + @intFromBool(call.implicit_self),
+                        args.len,
                     ),
                 );
             },
         }
     }
 
+    /// `obj:method(args)`:
+    ///   object is arg 0 at runtime
+    pub fn compileMethodCall(
+        self: *Compiler,
+        m: @FieldType(cst.CstKind, "method_call"),
+    ) InternalCompileError!void {
+        const mname = atomText(m.atom_tok.text);
+        if (try self.tryCompileBoundMethodCall(m.object, mname, m.args, true)) return;
+        try self.compile(m.object, true);
+        try self.@"const"(Value.new.atom(try self.vm.internAtom(mname)));
+        for (m.args) |arg| {
+            if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
+        }
+        const argc = m.args.len | (@as(usize, 1) << 7);
+        try self.emit(.call_field, @intCast(argc));
+    }
+
     fn tryCompileBoundMethodCall(
         self: *Compiler,
-        field: anytype,
+        object: *const Node,
+        name: []const u8,
         args: []const *Node,
         implicit_self: bool,
     ) InternalCompileError!bool {
-        const object_type = self.annotatedType(field.object);
+        const object_type = self.annotatedType(object);
         // same module table the semantic lookup resolves through, for every
         // module-backed primitive; unannotated receivers stay on call_field
         const module_name = switch (object_type.tag) {
@@ -1163,13 +1487,13 @@ pub const Compiler = struct {
         };
 
         if (std.mem.eql(u8, module_name, "table") and
-            std.mem.eql(u8, field.name, "add")) return false;
+            std.mem.eql(u8, name, "add")) return false;
 
         // a known field shadows the baselib method of the same name;
         // works for any table expression with a known shape, not just locals
         if (object_type.tag == .table) {
             if (object_type.tag.table.fields) |fs| {
-                if (types.findField(fs, field.name) != null) return false;
+                if (types.findField(fs, name) != null) return false;
             }
         }
 
@@ -1178,24 +1502,19 @@ pub const Compiler = struct {
         const module_table_id = module.asTable() orelse return false;
         const module_table = self.vm.tables.get(module_table_id) catch return false;
 
-        const method_atom = try self.vm.internAtom(field.name);
+        const method_atom = try self.vm.internAtom(name);
         const method = module_table.getRawAtom(method_atom, self.vm) orelse return false;
         if (!method.isFunction()) return false;
 
         try self.emit(.load_builtin_global, module_atom);
         try self.emit(.table_get_atom, method_atom);
         if (implicit_self)
-            try self.compile(field.object, true);
-        for (args) |arg| try self.compile(arg, true);
+            try self.compile(object, true);
+        for (args) |arg| {
+            if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
+        }
         try self.emit(.call, @intCast(args.len + @intFromBool(implicit_self)));
         return true;
-    }
-
-    fn isNamedParam(arg: *const Node) ?[]const u8 {
-        if (arg.expr != .assign_expr) return null;
-        const assign = arg.expr.assign_expr;
-        if (assign.target.expr != .ident) return null;
-        return assign.target.expr.ident;
     }
 
     fn tryReorderNamedParams(
@@ -1206,7 +1525,7 @@ pub const Compiler = struct {
         var has_named = false;
         var had_error = false;
         for (args) |arg| {
-            if (isNamedParam(arg) != null) {
+            if (cst.namedArgName(arg) != null) {
                 has_named = true;
             } else if (has_named) {
                 const msg = try self.alloc.print(
@@ -1236,7 +1555,7 @@ pub const Compiler = struct {
         var positional_idx: usize = 0;
 
         for (args) |arg| {
-            if (isNamedParam(arg)) |param_name| {
+            if (cst.namedArgName(arg)) |param_name| {
                 var found = false;
                 for (sig.param_names, 0..) |sig_name, param_idx| {
                     if (std.mem.eql(u8, sig_name, param_name)) {
@@ -1312,6 +1631,7 @@ pub const Compiler = struct {
     fn validateCallArgs(
         self: *Compiler,
         fn_name: []const u8,
+        callee_span: Lexer.Span,
         args: []const *Node,
     ) InternalCompileError![]const *Node {
         const sig = state_mod.findFnSignature(self, fn_name) orelse return args;
@@ -1319,15 +1639,6 @@ pub const Compiler = struct {
         var had_error = false;
 
         if (reordered_args.len < sig.required_count or reordered_args.len > sig.params.len) {
-            var extra_parts = try std.ArrayList(diagnostic.Part).initCapacity(self.alloc, 1);
-            defer extra_parts.deinit(self.alloc);
-            if (reordered_args.len > sig.params.len) {
-                try self.appendUnexpectedArgPart(
-                    reordered_args,
-                    sig.params.len,
-                    &extra_parts,
-                );
-            }
             const msg = if (sig.required_count == sig.params.len)
                 try self.alloc.print(
                     "call to `{s}` wants {d} arg(s), got {d}",
@@ -1338,9 +1649,26 @@ pub const Compiler = struct {
                     "call to `{s}` wants at least {d} arg(s), got {d}",
                     .{ fn_name, sig.required_count, reordered_args.len },
                 );
+
+            // the caret goes on the arguments that don't fit
+            // with too few there is nothing specific to underline
+            // , so the call itself is it
+            var span = callee_span;
+            var label: []const u8 = "";
+            if (reordered_args.len > sig.params.len) {
+                span = reordered_args[sig.params.len].span;
+
+                for (reordered_args[sig.params.len + 1 ..]) |arg|
+                    span = Lexer.Span.merge(span, arg.span);
+
+                // single-line calls keep the header at the callee
+                // , so `file:line:col` still points at the call
+                if (span.line == callee_span.line) span.column = callee_span.column;
+                label = "extra args";
+            }
             try self.appendFailureReport(.ParseError, &.{
                 .{ .@"error" = msg },
-                if (extra_parts.items.len > 0) extra_parts.items[0] else .{ .@"error" = "" },
+                .{ .span = .{ .span = span, .role = .primary, .message = label } },
             });
             had_error = true;
         }
@@ -1349,9 +1677,11 @@ pub const Compiler = struct {
         for (0..min_args) |i| {
             const expected_type = sig.params[i];
             if (expected_type.tag == .any) continue;
-            const actual_type = self.annotatedType(
-                reordered_args[i],
-            );
+
+            // named args are `name = value`; the value carries the type
+            const arg = cst.namedArgValue(reordered_args[i]) orelse reordered_args[i];
+            const actual_type = self.annotatedType(arg);
+
             // type params (generics) are .type_var, skip type check
             if (expected_type.tag == .type_var) continue;
             types.ensureCoercible(
@@ -1402,13 +1732,11 @@ pub const Compiler = struct {
             for (reordered_args, 0..) |arg, idx| full_args[idx] = arg;
             for (reordered_args.len..sig.params.len) |idx| {
                 if (sig.default_values[idx]) |def_node| {
-                    full_args[idx] = def_node;
+                    full_args[idx] = @constCast(def_node);
                 } else {
                     // bare `?a` without explicit default defaults to :none
-                    const span = if (reordered_args.len > 0) reordered_args[0].span else if (args.len > 0) args[0].span else ast.Span{ .start = 0, .end = 0, .line = 1, .column = 1 };
-                    const none_node = try self.alloc.create(ast.Node);
-                    none_node.* = .{ .span = span, .expr = .{ .atom = "none" } };
-                    full_args[idx] = none_node;
+                    const span = if (reordered_args.len > 0) reordered_args[0].span else if (args.len > 0) args[0].span else Lexer.Span{ .start = 0, .end = 0, .line = 1, .column = 1 };
+                    full_args[idx] = try cst.allocNode(self.alloc, span, .{ .atom = .{ .tok = cst.syntheticToken("none", span) } });
                 }
             }
             // type-check the inserted defaults
@@ -1417,9 +1745,10 @@ pub const Compiler = struct {
                 if (expected_type.tag == .any or expected_type.tag == .type_var) continue;
                 // defaults analyze once in semantic; synthesized nones are
                 // always atom literals, no scope needed to type them
-                const actual_type = switch (full_args[idx].expr) {
-                    .atom => |name| types.TypeInfo{ .tag = .{ .atom = name } },
-                    else => self.annotatedType(full_args[idx]),
+                const actual_type = blk: {
+                    const fu = cst.unwrapParen(full_args[idx]);
+                    if (fu != null and fu.?.kind == .atom) break :blk types.TypeInfo{ .tag = .{ .atom = atomText(fu.?.kind.atom.tok.text) } };
+                    break :blk self.annotatedType(full_args[idx]);
                 };
                 types.ensureCoercible(expected_type, actual_type) catch |err| switch (err) {
                     error.TypeError => {
@@ -1444,13 +1773,13 @@ pub const Compiler = struct {
 
     fn expandDirectFnArgs(
         self: *Compiler,
-        params: []const ast.FnParam,
+        params: []const cst.CstParam,
         args: []const *Node,
     ) InternalCompileError![]const *Node {
         if (args.len >= params.len) return args;
         var required: usize = 0;
         for (params) |p| {
-            if (!p.optional and p.default_value == null) required += 1;
+            if (p.qmark_tok == null and p.default == null) required += 1;
         }
 
         if (args.len < required) return args;
@@ -1459,17 +1788,15 @@ pub const Compiler = struct {
 
         for (args, 0..) |a, i| full[i] = a;
         for (args.len..params.len) |i| {
-            if (params[i].default_value) |def| {
+            if (params[i].default) |def| {
                 full[i] = def;
             } else {
                 const span = if (args.len > 0)
                     args[0].span
                 else
-                    ast.Span{ .start = 0, .end = 0, .line = 1, .column = 1 };
+                    Lexer.Span{ .start = 0, .end = 0, .line = 1, .column = 1 };
 
-                const n = try self.alloc.create(ast.Node);
-                n.* = .{ .span = span, .expr = .{ .atom = "none" } };
-                full[i] = n;
+                full[i] = try cst.allocNode(self.alloc, span, .{ .atom = .{ .tok = cst.syntheticToken("none", span) } });
             }
         }
         return full;
@@ -1496,6 +1823,10 @@ pub const Compiler = struct {
         const bytecode = try temp_compiler.finishBytecode();
         defer self.vm.runtime.alloc.free(bytecode.instructions);
         defer self.vm.runtime.alloc.free(bytecode.spans);
+
+        self.annotation_misses += temp_compiler.annotation_misses;
+        if (self.first_annotation_miss == null)
+            self.first_annotation_miss = temp_compiler.first_annotation_miss;
         const result = try VM.run.runBytecodeReport(
             self.vm,
             "<comp>",
@@ -1511,8 +1842,11 @@ pub const Compiler = struct {
             parts[0] = diagnostic.Part{ .@"error" = msg };
             if (parts.len > 1) {
                 if (parts[1] == .span) {
+                    // parens are transparent (the old parser stripped them),
+                    // so attribute to the inner expression
+                    const inner = cst.unwrapParen(expr) orelse expr;
                     parts[1].span = .{
-                        .span = expr.span,
+                        .span = inner.span,
                         .role = .primary,
                     };
                 }
@@ -1559,40 +1893,45 @@ pub const Compiler = struct {
 
     pub fn compileBinding(
         self: *Compiler,
-        binding: Binding,
+        binding: @FieldType(cst.CstKind, "binding"),
         kind: BindingKind,
     ) InternalCompileError!void {
-        if (binding.target.expr == .ident and kind != .global and kind != .global_const) {
+        const target_u = cst.unwrapParen(binding.target);
+        const target_is_ident = if (target_u) |u| u.kind == .ident else false;
+        if (target_is_ident and kind != .global and kind != .global_const) {
             return bindings.compileLocalBinding(
                 self,
-                binding.target.expr.ident,
+                target_u.?.kind.ident.tok.text,
                 binding.value,
                 kind != .@"const",
-                binding.type_name,
+                binding.type,
             );
         }
 
-        if (binding.target.expr == .ident) {
-            const name = binding.target.expr.ident;
+        if (target_is_ident) {
+            const name = target_u.?.kind.ident.tok.text;
             try self.validateName(name, binding.target.span);
-            if (binding.value.expr == .fn_expr) {
+            const vu = cst.unwrapParen(binding.value);
+            if (vu != null and vu.?.kind == .fn_def) {
+                const f = vu.?.kind.fn_def;
+                const tps = try cst.tokenTexts(self.alloc, f.type_params);
                 try self.compileFn(
-                    binding.value.expr.fn_expr.params,
-                    binding.value.expr.fn_expr.return_type,
-                    binding.value.expr.fn_expr.body,
+                    f.params,
+                    f.return_type,
+                    f.body,
                     name,
                     null,
-                    binding.value.expr.fn_expr.type_params,
+                    tps,
                 );
             } else try self.compile(binding.value, true);
 
-            const inferred_type = if (binding.type_name) |tn|
+            const inferred_type = if (binding.type) |tn|
                 try types.evalTypeExpr(self.aliasScope(), tn)
             else
                 self.annotatedType(binding.value);
             try state_mod.setLocalTypeHint(self, name, inferred_type);
 
-            if (ast.isDiscardName(name)) return;
+            if (cst.isDiscardName(name)) return;
             try self.regDupe();
             try self.declared_globals.put(name, {});
             try self.emit(
@@ -1602,16 +1941,13 @@ pub const Compiler = struct {
             return;
         }
 
-        if (binding.target.expr == .table_pattern) {
-            switch (binding.target.expr) {
-                .table_pattern => |items| try bindings.validateTablePatternShape(
-                    self,
-                    items,
-                    binding.value,
-                    "binding",
-                ),
-                else => {},
-            }
+        if (cst.isTablePattern(binding.target)) {
+            if (cst.patternBareEntries(binding.target)) |items| try bindings.validateTablePatternShape(
+                self,
+                items,
+                binding.value,
+                "binding",
+            );
             if (kind == .global or kind == .global_const) {
                 try bindings.declareGlobalPattern(self, binding.target);
             } else {
@@ -1621,11 +1957,17 @@ pub const Compiler = struct {
                     kind != .@"const",
                 );
             }
-        } else if (binding.target.expr == .table) {
+        } else if (target_u != null and target_u.?.kind == .table) {
             return self.fail(
                 .UnsupportedSyntax,
                 binding.target,
                 "keyed tables do not destructure yet :( use keyless `{a, b}`",
+            );
+        } else {
+            return self.fail(
+                .InvalidAssignmentTarget,
+                binding.target,
+                "cannot bind to this target",
             );
         }
 
@@ -1633,7 +1975,7 @@ pub const Compiler = struct {
         // `let {a, b} = {b, a}` reads the outer a/b, not the
         // uninitialized shadows (same as single `let x = x + 1`)
         const mask_start = self.masking_stack.items.len;
-        if (kind != .global and binding.target.expr == .table_pattern) {
+        if (kind != .global and cst.isTablePattern(binding.target)) {
             try bindings.collectPatternNames(binding.target, &self.masking_stack, self.alloc);
         }
 
@@ -1651,8 +1993,8 @@ pub const Compiler = struct {
 
     pub fn compileFn(
         self: *Compiler,
-        params: []const ast.FnParam,
-        return_type: ?*ast.TypeExpr,
+        params: []const cst.CstParam,
+        return_type: ?*const cst.CstType,
         body: *const Node,
         name: []const u8,
         loop_sym: ?revo.AtomID,
@@ -1673,7 +2015,7 @@ pub const Compiler = struct {
             self.fn_depth -= 1;
         }
 
-        const own_sig = !(ast.isDiscardName(name) or std.mem.eql(u8, name, "<fn>"));
+        const own_sig = !(cst.isDiscardName(name) or std.mem.eql(u8, name, "<fn>"));
 
         var s = try FunctionState.init(self.alloc);
         s.type_params = try types.combinedTypeParams(self.alloc, type_params, params);
@@ -1705,19 +2047,20 @@ pub const Compiler = struct {
         // set up params on the function state in the array
         const fn_state = &self.functions.items[self.functions.items.len - 1];
         for (params, 0..) |param, idx| {
+            const pname = param.name_tok.text;
             const local: LocalVar = .{
-                .name = param.name,
+                .name = pname,
                 .slot = @intCast(idx),
                 .mutable = true,
                 .initialized = true,
-                .type_info = if (param.type_name) |tn| try types.evalTypeExpr(self.aliasScope(), tn) else null,
-                .type_explicit = param.type_name != null,
+                .type_info = if (param.type) |tn| try types.evalTypeExpr(self.aliasScope(), tn) else null,
+                .type_explicit = param.type != null,
             };
             try fn_state.locals.append(self.alloc, local);
             try fn_state.all_locals.append(self.alloc, local);
-            if (param.type_name) |type_name| {
+            if (param.type) |type_name| {
                 try fn_state.type_hints.append(self.alloc, .{
-                    .name = param.name,
+                    .name = pname,
                     .type_info = try types.evalTypeExpr(self.aliasScope(), type_name),
                 });
             }
@@ -1809,27 +2152,6 @@ pub const Compiler = struct {
         state_pushed = false;
     }
 
-    fn appendUnexpectedArgPart(
-        self: *Compiler,
-        args: []const *const Node,
-        start_idx: usize,
-        parts: *std.ArrayList(diagnostic.Part),
-    ) !void {
-        if (start_idx >= args.len) return;
-        const merged = blk: {
-            var span = args[start_idx].span;
-            for (args[start_idx + 1 ..]) |arg| span = ast.Span.merge(span, arg.span);
-            break :blk span;
-        };
-        try parts.append(self.alloc, .{
-            .span = .{
-                .span = merged,
-                .role = .secondary,
-                .message = "unexpected args",
-            },
-        });
-    }
-
     pub fn appendFailureReport(
         self: *Compiler,
         kind: CompileErrorKind,
@@ -1885,19 +2207,19 @@ pub const Compiler = struct {
     }
 };
 
-/// if `node` is an int literal in 0..=u32::MAX, return its value, else null.
-/// the fold range matches what load_small_int/load_const cover, so folding
-/// into an immediate operand never changes the value the op sees
+/// if `node` is an int literal in 0..=u32::MAX, return its value, else null
+/// , fold range matches load_small_int/load_const cover, value unchanged
 pub fn immInt(node: *const Node) ?u32 {
-    if (node.expr != .number or node.expr.number.is_float) return null;
-    const n = node.expr.number.value;
+    const u = cst.unwrapParen(node) orelse return null;
+    if (u.kind != .number or u.kind.number.is_float) return null;
+    const n = u.kind.number.value;
     if (n < 0 or n > std.math.maxInt(u32) or @trunc(n) != n) return null;
     return @intFromFloat(n);
 }
 
-/// the immediate-operand opcode for a binop that folds a constant int RHS.
-/// returns null for float/`div`/`pow`/`concat` (no imm form, or float math)
-pub fn immOpFor(op: ast.BinOp) ?Opcode {
+/// the immediate-operand opcode for a binop that folds a constant int rhs
+/// , returns null for float/`div`/`pow`/`concat` (no imm form, or float math)
+pub fn immOpFor(op: cst.BinOp) ?Opcode {
     return switch (op) {
         .add => .add_imm,
         .sub => .sub_imm,

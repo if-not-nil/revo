@@ -54,11 +54,13 @@ let Counter = set_meta({
         let val = self[idx]
         idx += 1
         val
-    end
+      end
   end
 })
 
 for entry in Counter do print(entry) end
+
+
 # {:zero, "none"} {:one, "singular"} {:two, "pair"} {:three, "crowd"}
 
 fn data_fn(self) do
@@ -67,11 +69,12 @@ fn data_fn(self) do
   fn() match idx
     | x when (x >= n) => :done
     | _ => do
-        let val = self[idx] * 2
-        idx += 1
-        val
+      let val = self[idx] * 2
+      idx += 1
+      val
     end
 end
+
 
 let data = set_meta({10, 20, 30, 40}, { __iter = data_fn })
 

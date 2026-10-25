@@ -1,4 +1,4 @@
-const ast = @import("../ast.zig");
+const cst = @import("../cst.zig");
 const std = @import("std");
 
 pub const UnionVariant = struct {
@@ -37,7 +37,7 @@ pub const TypeInfo = struct {
     doc: ?[]const u8 = null,
 
     pub const Tag = union(enum) {
-        bool, // TODO: remove, make this be atom union of :true | :false
+        bool, // todo: remove, make this be atom union of :true | :false
         number,
         string,
         resource,
@@ -61,7 +61,7 @@ pub const TypeInfo = struct {
             .number => other.tag == .number,
             .resource => other.tag == .resource,
             .string => other.tag == .string,
-            .atom => |a| if (other.tag == .atom) std.mem.eql(u8, ast.atomName(a), ast.atomName(other.tag.atom)) else false,
+            .atom => |a| if (other.tag == .atom) std.mem.eql(u8, cst.atomName(a), cst.atomName(other.tag.atom)) else false,
             .@"union" => |us| if (other.tag == .@"union") blk: {
                 if (us.len != other.tag.@"union".len) break :blk false;
                 for (us, other.tag.@"union") |a, b| {
@@ -116,12 +116,12 @@ pub const FunctionSignature = struct {
     is_any_fn_sig: bool = false,
     required_count: usize = 0,
     type_params: []const []const u8 = &.{},
-    default_values: []const ?*ast.Node = &.{},
+    default_values: []const ?*const cst.CstNode = &.{},
     doc: ?[]const u8 = null,
 };
 
 /// resolved pieces for one FunctionSignature; every builder (compiler
-/// allocFnSig, semantic make/newSig, type_syntax eval) walks its own AST
+/// allocFnSig, semantic make/newSig, type_syntax eval) walks its own cst
 /// because error handling differs, then funnels through here
 pub const SignatureParts = struct {
     param_names: []const []const u8,
@@ -129,7 +129,7 @@ pub const SignatureParts = struct {
     return_type: TypeInfo = .{ .tag = .any },
     required_count: usize = 0,
     type_params: []const []const u8 = &.{},
-    default_values: []const ?*ast.Node = &.{},
+    default_values: []const ?*const cst.CstNode = &.{},
     doc: ?[]const u8 = null,
 };
 
@@ -157,24 +157,25 @@ pub fn newSignature(alloc: std.mem.Allocator, parts: SignatureParts) std.mem.All
 pub fn combinedTypeParams(
     alloc: std.mem.Allocator,
     explicit: []const []const u8,
-    params: []const ast.FnParam,
+    params: []const cst.CstParam,
 ) std.mem.Allocator.Error![]const []const u8 {
     var extra: usize = 0;
 
     for (params, 0..) |p, pi| {
-        if (p.type_name != null) continue;
-        if (ast.isDiscardName(p.name)) continue;
+        const pname = p.name_tok.text;
+        if (p.type != null) continue;
+        if (cst.isDiscardName(pname)) continue;
         var found = false;
 
-        for (explicit) |e| if (std.mem.eql(u8, e, p.name)) {
+        for (explicit) |e| if (std.mem.eql(u8, e, pname)) {
             found = true;
             break;
         };
 
         if (!found) for (params[0..pi]) |prev| {
-            if (prev.type_name != null) continue;
+            if (prev.type != null) continue;
 
-            if (std.mem.eql(u8, prev.name, p.name)) {
+            if (std.mem.eql(u8, prev.name_tok.text, pname)) {
                 found = true;
                 break;
             }
@@ -190,43 +191,45 @@ pub fn combinedTypeParams(
     var idx: usize = explicit.len;
 
     for (params) |p| {
-        if (p.type_name != null) continue;
-        if (ast.isDiscardName(p.name)) continue;
+        const pname = p.name_tok.text;
+        if (p.type != null) continue;
+        if (cst.isDiscardName(pname)) continue;
         var found = false;
 
-        for (out[0..idx]) |e| if (std.mem.eql(u8, e, p.name)) {
+        for (out[0..idx]) |e| if (std.mem.eql(u8, e, pname)) {
             found = true;
             break;
         };
 
         if (found) continue;
-        out[idx] = p.name;
+        out[idx] = pname;
         idx += 1;
     }
     return out[0..idx];
 }
 
 /// param without annotation becomes `type_var(name)`, else `any` for `_`
-pub fn implicitParamType(p: ast.FnParam) TypeInfo {
-    if (p.type_name != null) unreachable;
-    if (ast.isDiscardName(p.name)) return .{ .tag = .any };
+pub fn implicitParamType(p: cst.CstParam) TypeInfo {
+    if (p.type != null) unreachable;
+    const pname = p.name_tok.text;
+    if (cst.isDiscardName(pname)) return .{ .tag = .any };
 
-    return .{ .tag = .{ .type_var = p.name } };
+    return .{ .tag = .{ .type_var = pname } };
 }
 
 /// params needing values at call time, one formula for all four sig loops
 ///   replaces `+= 1` and `len -= 1` spellings, same count either way
-pub fn requiredCount(params: []const ast.FnParam) usize {
+pub fn requiredCount(params: []const cst.CstParam) usize {
     var n: usize = 0;
     for (params) |p| {
-        if (!p.optional and p.default_value == null) n += 1;
+        if (p.qmark_tok == null and p.default == null) n += 1;
     }
 
     return n;
 }
 
 /// shared eval for scopes needing no validation
-fn evalInScope(ctx: anytype, te: *const ast.TypeExpr) !TypeInfo {
+fn evalInScope(ctx: anytype, te: *const cst.CstType) !TypeInfo {
     return evalTypeExpr(ctx.aliasScope(), te);
 }
 
@@ -243,8 +246,8 @@ pub const SigOpt = struct {
 pub fn buildFnSig(
     alloc: std.mem.Allocator,
     ctx: anytype,
-    params: []const ast.FnParam,
-    return_type: ?*ast.TypeExpr,
+    params: []const cst.CstParam,
+    return_type: ?*const cst.CstType,
     type_params: []const []const u8,
     doc: ?[]const u8,
     opt: SigOpt,
@@ -256,9 +259,9 @@ pub fn buildFnSig(
     errdefer param_types.deinit(alloc);
 
     for (params) |p| {
-        try param_names.append(alloc, p.name);
+        try param_names.append(alloc, p.name_tok.text);
 
-        const t = if (p.type_name) |tn| evalInScope(ctx, tn) catch |e| blk: {
+        const t = if (p.type) |tn| evalInScope(ctx, tn) catch |e| blk: {
             if (opt.degrade_param) break :blk TypeInfo{ .tag = .any };
 
             return e;
@@ -267,9 +270,9 @@ pub fn buildFnSig(
     }
 
     const default_values = if (opt.want_defaults) blk: {
-        var defaults = try std.ArrayList(?*ast.Node).initCapacity(alloc, params.len);
+        var defaults = try std.ArrayList(?*const cst.CstNode).initCapacity(alloc, params.len);
         errdefer defaults.deinit(alloc);
-        for (params) |p| try defaults.append(alloc, p.default_value);
+        for (params) |p| try defaults.append(alloc, p.default);
 
         break :blk try defaults.toOwnedSlice(alloc);
     } else &.{};
@@ -298,19 +301,21 @@ pub const CheckCtx = struct {
     /// annotations to consult before live inference, set only by Compiler
     ///   semantic and import scopes analyze with null and infer everything
     annotations: ?Annotations = null,
+    /// annotations are authoritative
+    ///   an unannotated node is any
+    ///   set only by Compiler when it has semantic annotations
+    annotations_only: bool = false,
     /// eval data for the scope, filled by check() from producer maps
     scope: AliasScope,
 
     pub const VTable = struct {
         inferIdentType: *const fn (ptr: *anyopaque, name: []const u8) TypeInfo,
-        inferCallReturnType: *const fn (ptr: *anyopaque, callee: *const ast.Node, args: []const *ast.Node, type_args: []const []const u8, implicit_self: bool) TypeInfo,
-        inferFieldType: *const fn (ptr: *anyopaque, object: *const ast.Node, name: []const u8) TypeInfo,
-        inferFnType: *const fn (ptr: *anyopaque, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8, doc: ?[]const u8) TypeInfo,
+        inferCallReturnType: *const fn (ptr: *anyopaque, callee: *const cst.CstNode, args: []const *const cst.CstNode, type_args: []const []const u8, implicit_self: bool) TypeInfo,
+        inferFieldType: *const fn (ptr: *anyopaque, object: *const cst.CstNode, name: []const u8) TypeInfo,
+        inferFnType: *const fn (ptr: *anyopaque, params: []const cst.CstParam, return_type: ?*const cst.CstType, type_params: []const []const u8, doc: ?[]const u8) TypeInfo,
     };
 
     /// wrap any scope implementing the four vtable methods
-    /// scope must be a pointer; receivers may be mutable or const
-    /// the vtable lives in static storage per scope type, never on the stack
     pub fn init(scope: anytype, alloc: std.mem.Allocator) CheckCtx {
         const S = @TypeOf(scope);
         const V = struct {
@@ -318,15 +323,15 @@ pub const CheckCtx = struct {
                 const s: S = @ptrCast(@alignCast(p));
                 return s.inferIdentType(name);
             }
-            fn vtInferCallReturnType(p: *anyopaque, callee: *const ast.Node, args: []const *ast.Node, type_args: []const []const u8, implicit_self: bool) TypeInfo {
+            fn vtInferCallReturnType(p: *anyopaque, callee: *const cst.CstNode, args: []const *const cst.CstNode, type_args: []const []const u8, implicit_self: bool) TypeInfo {
                 const s: S = @ptrCast(@alignCast(p));
                 return s.inferCallReturnType(callee, args, type_args, implicit_self);
             }
-            fn vtInferFieldType(p: *anyopaque, object: *const ast.Node, name: []const u8) TypeInfo {
+            fn vtInferFieldType(p: *anyopaque, object: *const cst.CstNode, name: []const u8) TypeInfo {
                 const s: S = @ptrCast(@alignCast(p));
                 return s.inferFieldType(object, name);
             }
-            fn vtInferFnType(p: *anyopaque, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8, doc: ?[]const u8) TypeInfo {
+            fn vtInferFnType(p: *anyopaque, params: []const cst.CstParam, return_type: ?*const cst.CstType, type_params: []const []const u8, doc: ?[]const u8) TypeInfo {
                 const s: S = @ptrCast(@alignCast(p));
                 return s.inferFnType(params, return_type, type_params, doc);
             }
@@ -349,21 +354,21 @@ pub const CheckCtx = struct {
         return self.vtable.inferIdentType(self.ptr, name);
     }
 
-    pub fn inferCallReturnType(self: CheckCtx, callee: *const ast.Node, args: []const *ast.Node, type_args: []const []const u8, implicit_self: bool) TypeInfo {
+    pub fn inferCallReturnType(self: CheckCtx, callee: *const cst.CstNode, args: []const *const cst.CstNode, type_args: []const []const u8, implicit_self: bool) TypeInfo {
         return self.vtable.inferCallReturnType(self.ptr, callee, args, type_args, implicit_self);
     }
 
-    pub fn inferFieldType(self: CheckCtx, object: *const ast.Node, name: []const u8) TypeInfo {
+    pub fn inferFieldType(self: CheckCtx, object: *const cst.CstNode, name: []const u8) TypeInfo {
         return self.vtable.inferFieldType(self.ptr, object, name);
     }
 
-    pub fn inferFnType(self: CheckCtx, params: []const ast.FnParam, return_type: ?*ast.TypeExpr, type_params: []const []const u8, doc: ?[]const u8) TypeInfo {
+    pub fn inferFnType(self: CheckCtx, params: []const cst.CstParam, return_type: ?*const cst.CstType, type_params: []const []const u8, doc: ?[]const u8) TypeInfo {
         return self.vtable.inferFnType(self.ptr, params, return_type, type_params, doc);
     }
 };
 
 /// one-shot eval with no scope: tooling convenience (hover, sig previews)
-pub fn evalBare(alloc: std.mem.Allocator, te: *const ast.TypeExpr) !TypeInfo {
+pub fn evalBare(alloc: std.mem.Allocator, te: *const cst.CstType) !TypeInfo {
     return evalTypeExpr(.{ .alloc = alloc }, te);
 }
 
@@ -500,7 +505,7 @@ pub const TypeId = u32;
 /// annotations bundle: node -> TypeId map plus the table owning the types
 ///   map and table travel together; the table outlives every map reader
 pub const Annotations = struct {
-    map: *std.AutoHashMap(*const ast.Node, TypeId),
+    map: *std.AutoHashMap(*const cst.CstNode, TypeId),
     table: *TypeTable,
 };
 
@@ -714,7 +719,7 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
     }
     // :true and :false are bool
     if (to.tag == .bool and from.tag == .atom) {
-        const name = ast.atomName(from.tag.atom);
+        const name = cst.atomName(from.tag.atom);
         return std.mem.eql(u8, name, "true") or std.mem.eql(u8, name, "false");
     }
     if (to.tag == .@"union") {
@@ -722,7 +727,7 @@ pub fn canCoerce(from: TypeInfo, to: TypeInfo) bool {
         if (from.tag == .atom) {
             for (to.tag.@"union") |variant| {
                 if (variant.types.len == 1 and variant.types[0].tag == .atom) {
-                    if (std.mem.eql(u8, ast.atomName(variant.types[0].tag.atom), ast.atomName(from.tag.atom))) return true;
+                    if (std.mem.eql(u8, cst.atomName(variant.types[0].tag.atom), cst.atomName(from.tag.atom))) return true;
                 }
             }
         }
@@ -750,7 +755,7 @@ fn targetAcceptsVariant(variant: UnionVariant, target: TypeInfo) bool {
     return false;
 }
 
-pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
+pub fn inferBinaryOp(op: cst.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     return switch (op) {
         .@"union" => .{ .tag = .any },
         .concat => .{ .tag = .string },
@@ -762,7 +767,7 @@ pub fn inferBinaryOp(op: ast.BinOp, l: TypeInfo, r: TypeInfo) TypeInfo {
     };
 }
 
-pub fn inferUnaryOp(op: ast.UnaryOp, T: TypeInfo) TypeInfo {
+pub fn inferUnaryOp(op: cst.UnaryOp, T: TypeInfo) TypeInfo {
     return switch (op) {
         .negate => if (T.tag == .number) T else .{ .tag = .any },
         .not => .{ .tag = .bool },
@@ -788,8 +793,8 @@ pub fn unifyBranchType(acc: TypeInfo, branch: TypeInfo) TypeInfo {
     return .{ .tag = .any };
 }
 
-pub fn inferMatchType(ctx: CheckCtx, subject: *const ast.Node, arms: []const ast.MatchArm) TypeInfo {
-    const subject_type = inferExprType(ctx, subject);
+pub fn inferMatchType(ctx: CheckCtx, subject: ?*const cst.CstNode, arms: []const cst.CstArm) TypeInfo {
+    const subject_type: TypeInfo = if (subject) |s| inferExprType(ctx, s) else .{ .tag = .any };
     var result: TypeInfo = .{ .tag = .never };
     for (arms) |arm| {
         result = unifyBranchType(result, inferExprType(ctx, arm.then));
@@ -818,20 +823,19 @@ fn isOkTag(name: []const u8) bool {
 }
 
 /// tag of one union variant, table-style `{:ok, T}`
-///     : tags live in positional field "0", payload in "1", "2", ...
 pub fn unionVariantTagEql(variant: UnionVariant, tag: []const u8) bool {
     const pattern_tag = if (tag.len > 0 and tag[0] == ':') tag[1..] else tag;
     if (variant.types.len == 0) return false;
 
     if (variant.types[0].tag == .atom) {
-        return std.mem.eql(u8, ast.atomName(variant.types[0].tag.atom), pattern_tag);
+        return std.mem.eql(u8, cst.atomName(variant.types[0].tag.atom), pattern_tag);
     }
 
     if (variant.types[0].tag == .table) {
         const fields = variant.types[0].tag.table.fields orelse return false;
         if (fields.len == 0 or !std.mem.eql(u8, fields[0].name, "0")) return false;
         if (fields[0].field_type.tag != .atom) return false;
-        return std.mem.eql(u8, ast.atomName(fields[0].field_type.tag.atom), pattern_tag);
+        return std.mem.eql(u8, cst.atomName(fields[0].field_type.tag.atom), pattern_tag);
     }
 
     return false;
@@ -874,7 +878,7 @@ pub fn isResultType(ti: TypeInfo) bool {
         .table => |tbl| blk: {
             const fields = tbl.fields orelse break :blk false;
             if (fields.len == 0 or fields[0].field_type.tag != .atom) break :blk false;
-            break :blk isResultTag(ast.atomName(fields[0].field_type.tag.atom));
+            break :blk isResultTag(cst.atomName(fields[0].field_type.tag.atom));
         },
         else => false,
     };
@@ -900,7 +904,7 @@ pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
         .table => |tbl| blk: {
             const fields = tbl.fields orelse break :blk .{ .tag = .any };
             if (fields.len < 2 or fields[0].field_type.tag != .atom) break :blk .{ .tag = .any };
-            if (!isOkTag(ast.atomName(fields[0].field_type.tag.atom))) break :blk .{ .tag = .any };
+            if (!isOkTag(cst.atomName(fields[0].field_type.tag.atom))) break :blk .{ .tag = .any };
             if (!std.mem.eql(u8, fields[1].name, "1")) break :blk .{ .tag = .any };
             break :blk fields[1].field_type;
         },
@@ -942,7 +946,7 @@ pub fn resolveTypeName(scope: AliasScope, name: []const u8) TypeInfo {
     return .{ .tag = .any };
 }
 
-pub fn inferExprType(ctx: CheckCtx, node: *const ast.Node) TypeInfo {
+pub fn inferExprType(ctx: CheckCtx, node: *const cst.CstNode) TypeInfo {
     // annotated nodes answer from the table
     //   everything else infers live
     //   only Compiler sets annotations
@@ -950,54 +954,107 @@ pub fn inferExprType(ctx: CheckCtx, node: *const ast.Node) TypeInfo {
     if (ctx.annotations) |ann| {
         if (ann.map.get(node)) |id| return ann.table.get(id);
     }
-    return switch (node.expr) {
+    // compiler builds trust semantic completely
+    //   a miss is any semantic/import scopes leave this false and keep live inference
+    if (ctx.annotations_only) return .{ .tag = .any };
+    // parens are transparent in cst; empty `()` is nil
+    const uw = cst.unwrapParen(node) orelse return .{ .tag = .{ .atom = ":nil" } };
+    if (uw != node) return inferExprType(ctx, uw);
+    return switch (node.kind) {
         .number => .{ .tag = .number },
-        .string, .multiline_string => .{ .tag = .string },
-        .atom => |name| .{ .tag = .{ .atom = name } },
-        .nil => .{ .tag = .{ .atom = ":nil" } },
-        .ident => |name| ctx.inferIdentType(name),
+        // sugar lowers to a `fmt` call (string), answering directly keeps
+        // , this total for unlowered trees (tests, const-eval) too
+        .string, .interpolated => .{ .tag = .string },
+        .atom => |a| .{ .tag = .{ .atom = a.tok.text } },
+        .ident => |i| ctx.inferIdentType(i.tok.text),
+        .err => .{ .tag = .any },
         .unary => |u| inferUnaryOp(u.op, inferExprType(ctx, u.expr)),
+        .yield => .{ .tag = .any },
         .binary => |b| inferBinaryOp(b.op, inferExprType(ctx, b.left), inferExprType(ctx, b.right)),
-        .and_expr, .or_expr => .{ .tag = .bool },
-        .if_expr => |v| inferIfType(
-            inferExprType(ctx, v.then_expr),
-            if (v.else_expr) |e| inferExprType(ctx, e) else null,
-        ),
-        .unless_expr => |v| inferIfType(
-            inferExprType(ctx, v.then_expr),
-            if (v.else_expr) |e| inferExprType(ctx, e) else null,
-        ),
-
-        .table => |entries| inferTableType(ctx, entries),
-        .call => |call| ctx.inferCallReturnType(call.callee, @as([]const *ast.Node, call.args), call.type_args, call.implicit_self),
-        .field => |field| ctx.inferFieldType(field.object, field.name),
-        .index => |index| inferIndexType(ctx, index.object, index.key),
-        .fn_expr => |fn_expr| ctx.inferFnType(fn_expr.params, fn_expr.return_type, fn_expr.type_params, fn_expr.doc),
-        .block => |exprs| inferBlockResultType(ctx, exprs),
-        .return_expr => .{ .tag = .any },
-        .loop_expr => |v| if (v.label == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
-        .for_loop => |v| if (v.label == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
-        .while_loop => |v| if (v.label == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
-        .break_expr => |b| if (b.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
-        .continue_expr => |c| if (c.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
-        .labeled_block => |lb| inferExprType(ctx, lb.body),
-        .try_expr => |inner| blk: {
-            const it = inferExprType(ctx, inner);
+        .logical => |l| switch (l.op) {
+            .and_op, .or_op => .{ .tag = .bool },
+            .orelse_op => inferOrelseType(inferExprType(ctx, l.left), inferExprType(ctx, l.right)),
+        },
+        .compound => |c| inferExprType(ctx, c.value),
+        .assign => |a| inferExprType(ctx, a.value),
+        .field => |f| ctx.inferFieldType(f.object, f.name_tok.text),
+        .dotted_index => |d| switch (inferExprType(ctx, d.object).tag) {
+            .string => .{ .tag = .string },
+            else => .{ .tag = .any },
+        },
+        // `obj:method(args)` desugars to a call with implicit self; without a
+        // synthesized field node we answer `any` like an unknown call
+        .method_call => .{ .tag = .any },
+        .index => |ix| inferIndexType(ctx, ix.object, ix.key),
+        .generic_call => |g| blk: {
+            // `f<T>(args)`: convert token type args to strings on the stack;
+            // longer lists degrade to `any` rather than allocating here
+            var buf: [8][]const u8 = undefined;
+            if (g.type_args.len > buf.len) break :blk .{ .tag = .any };
+            for (g.type_args, 0..) |tok, i| buf[i] = tok.text;
+            break :blk ctx.inferCallReturnType(g.receiver, g.args, buf[0..g.type_args.len], false);
+        },
+        .call => |c| ctx.inferCallReturnType(c.callee, c.args, &.{}, false),
+        .bare_call => |b| blk: {
+            const one = [_]*const cst.CstNode{b.arg};
+            break :blk ctx.inferCallReturnType(b.callee, &one, &.{}, false);
+        },
+        .range, .for_range, .slice => .{ .tag = .number },
+        // `a |> f` desugars to a call or a temp block; answer `any`
+        .pipe => .{ .tag = .any },
+        .try_expr => |t| blk: {
+            const it = inferExprType(ctx, t.expr);
             break :blk switch (it.tag) {
                 .@"union", .table => okTypeFrom(it),
                 else => it,
             };
         },
-        .orelse_expr => |v| inferOrelseType(inferExprType(ctx, v.left), inferExprType(ctx, v.right)),
-        .comp_block => |cb| inferExprType(ctx, cb.expr),
-        .import_stmt, .test_block, .test_suite, .proc_macro, .quasiquote => .{ .tag = .any },
-        .match_expr => |v| inferMatchType(ctx, v.subject, v.arms),
-        .range_literal, .slice_literal => .{ .tag = .number },
-        .assign_expr, .compound_assign, .decl, .binding, .table_pattern, .ascribed, .type_alias => .{ .tag = .any },
+        .if_expr => |v| inferIfType(
+            inferExprType(ctx, v.then),
+            if (v.else_) |e| inferExprType(ctx, e) else null,
+        ),
+        .match => |m| inferMatchType(ctx, m.subject, m.arms),
+        .ascribed => |a| inferExprType(ctx, a.expr),
+        .table => |t| inferTableType(ctx, t.entries),
+        .paren => |p| if (p.expr) |e| inferExprType(ctx, e) else .{ .tag = .{ .atom = ":nil" } },
+        .block => |b| inferBlockResultType(ctx, b.stmts),
+        .do_block => |d| inferBlockResultType(ctx, d.stmts),
+        .root => |r| inferBlockResultType(ctx, r.stmts),
+        .fn_def => |f| blk: {
+            var tp_buf: [16][]const u8 = undefined;
+            if (f.type_params.len > tp_buf.len) break :blk .{ .tag = .any };
+            for (f.type_params, 0..) |tok, i| tp_buf[i] = tok.text;
+            break :blk ctx.inferFnType(f.params, f.return_type, tp_buf[0..f.type_params.len], null);
+        },
+        // `fn obj:m() ...` lowers to an index assign; the def itself is a statement
+        .fn_method => .{ .tag = .any },
+        .binding => |b| inferExprType(ctx, b.value),
+        .decl => |d| inferExprType(ctx, d.inner),
+        .import => .{ .tag = .any },
+        .test_block, .test_suite => .{ .tag = .any },
+        .type_alias => .{ .tag = .any },
+        .for_loop => |v| if (v.label_tok == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
+        .while_loop => |v| if (v.label_tok == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
+        .loop_expr => |v| if (v.label_tok == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },
+        .break_expr => |b| if (b.value) |v| inferExprType(ctx, v) else .{ .tag = .any },
+        .continue_expr => .{ .tag = .any },
+        .return_expr => .{ .tag = .any },
+        .comp_block => |c| inferExprType(ctx, c.expr),
     };
 }
 
-fn inferTableType(ctx: CheckCtx, entries: []const ast.TableEntry) TypeInfo {
+/// static `name = v` / `:name = v` key, or null for computed/dynamic keys
+/// , mirrors `ast.staticFieldName` over cst table keys; parens transparent
+fn staticCstFieldName(key: *const cst.CstNode) ?[]const u8 {
+    const uw = cst.unwrapParen(key) orelse return null;
+    return switch (uw.kind) {
+        .ident => |i| i.tok.text,
+        .atom => |a| cst.atomName(a.tok.text),
+        else => null,
+    };
+}
+
+fn inferTableType(ctx: CheckCtx, entries: []const cst.CstEntry) TypeInfo {
     var value_type: TypeInfo = .{ .tag = .any };
     var key_type: TypeInfo = .{ .tag = .any };
     var saw_explicit_key = false;
@@ -1007,43 +1064,68 @@ fn inferTableType(ctx: CheckCtx, entries: []const ast.TableEntry) TypeInfo {
     var array_index: u32 = 0;
 
     for (entries) |entry| {
-        // method defs are record fields with their fn type
-        // they carry no value type contribution
-        if (entry.key == null and entry.value.expr == .decl and
-            entry.value.expr.decl.inner.expr == .binding and
-            entry.value.expr.decl.inner.expr.binding.value.expr == .fn_expr)
-        {
-            const binding = entry.value.expr.decl.inner.expr.binding;
-            const method_name = if (binding.target.expr == .ident) binding.target.expr.ident else continue;
-            const fn_type = inferExprType(ctx, binding.value);
-
-            fields.append(ctx.alloc, .{ .name = method_name, .field_type = fn_type }) catch return .{ .tag = .any };
-            continue;
-        }
-        const field_type = inferExprType(ctx, entry.value);
-        value_type = mergeInferredType(value_type, field_type);
-        if (entry.key != null) {
-            const inferred_key = inferTableKeyType(ctx, entry);
-            key_type = if (saw_explicit_key) mergeInferredType(key_type, inferred_key) else inferred_key;
-            saw_explicit_key = true;
-            //
-            // static `name = v` keys become record fields; dupes replace,
-            // last wins like the runtime
-            if (ast.staticFieldName(entry)) |name| {
-                if (findFieldIndex(fields.items, name)) |i| {
-                    fields.items[i].field_type = field_type;
-                } else fields.append(ctx.alloc, .{ .name = name, .field_type = field_type }) catch return .{ .tag = .any };
-            } else {
-                // computed or non-ident keys hide dynamic content
-                // so a missing field cant prove absence
+        switch (entry) {
+            .computed => |cc| {
+                const field_type = inferExprType(ctx, cc.value);
+                value_type = mergeInferredType(value_type, field_type);
+                const inferred_key = inferExprType(ctx, cc.key);
+                key_type = if (saw_explicit_key) mergeInferredType(key_type, inferred_key) else inferred_key;
+                saw_explicit_key = true;
+                // computed keys hide dynamic content
                 saw_dynamic = true;
-            }
-        } else {
-            // keyless/implicit entries are numeric fields
-            const idx_name = ctx.alloc.print("{d}", .{array_index}) catch return .{ .tag = .any };
-            array_index += 1;
-            fields.append(ctx.alloc, .{ .name = idx_name, .field_type = field_type }) catch return .{ .tag = .any };
-            saw_implicit_key = true;
+            },
+            .keyed => |k| {
+                const field_type = inferExprType(ctx, k.value);
+                value_type = mergeInferredType(value_type, field_type);
+                const inferred_key = inferTableKeyType(ctx, entry);
+                key_type = if (saw_explicit_key) mergeInferredType(key_type, inferred_key) else inferred_key;
+                saw_explicit_key = true;
+                //
+                // static `name = v` keys become record fields; dupes replace,
+                // last wins like the runtime
+                if (staticCstFieldName(k.key)) |name| {
+                    if (findFieldIndex(fields.items, name)) |i| {
+                        fields.items[i].field_type = field_type;
+                    } else fields.append(ctx.alloc, .{ .name = name, .field_type = field_type }) catch return .{ .tag = .any };
+                } else {
+                    // computed or non-ident keys hide dynamic content
+                    // so a missing field cant prove absence
+                    saw_dynamic = true;
+                }
+            },
+            .bare => |b| {
+                // method defs are record fields with their fn type
+                // they carry no value type contribution
+                const bv = cst.unwrapParen(b.value) orelse {
+                    const field_type: TypeInfo = .{ .tag = .{ .atom = ":nil" } };
+                    value_type = mergeInferredType(value_type, field_type);
+                    const idx_name = ctx.alloc.print("{d}", .{array_index}) catch return .{ .tag = .any };
+                    array_index += 1;
+                    fields.append(ctx.alloc, .{ .name = idx_name, .field_type = field_type }) catch return .{ .tag = .any };
+                    saw_implicit_key = true;
+                    continue;
+                };
+                if (bv.kind == .decl and bv.kind.decl.inner.kind == .binding) {
+                    const binding = bv.kind.decl.inner.kind.binding;
+                    const bval = cst.unwrapParen(binding.value) orelse null;
+                    if (bval != null and bval.?.kind == .fn_def) {
+                        const bt = cst.unwrapParen(binding.target) orelse null;
+                        if (bt != null and bt.?.kind == .ident) {
+                            const method_name = bt.?.kind.ident.tok.text;
+                            const fn_type = inferExprType(ctx, binding.value);
+                            fields.append(ctx.alloc, .{ .name = method_name, .field_type = fn_type }) catch return .{ .tag = .any };
+                            continue;
+                        }
+                    }
+                }
+                const field_type = inferExprType(ctx, b.value);
+                value_type = mergeInferredType(value_type, field_type);
+                // keyless/implicit entries are numeric fields
+                const idx_name = ctx.alloc.print("{d}", .{array_index}) catch return .{ .tag = .any };
+                array_index += 1;
+                fields.append(ctx.alloc, .{ .name = idx_name, .field_type = field_type }) catch return .{ .tag = .any };
+                saw_implicit_key = true;
+            },
         }
     }
 
@@ -1066,10 +1148,12 @@ fn inferTableType(ctx: CheckCtx, entries: []const ast.TableEntry) TypeInfo {
     return makeTable(key_ptr, value_ptr, known_fields);
 }
 
-fn inferTableKeyType(ctx: CheckCtx, entry: ast.TableEntry) TypeInfo {
-    if (ast.staticFieldName(entry)) |_| return .{ .tag = .string };
-    if (entry.key) |key| return inferExprType(ctx, key);
-    return .{ .tag = .any };
+fn inferTableKeyType(ctx: CheckCtx, entry: cst.CstEntry) TypeInfo {
+    return switch (entry) {
+        .computed => |cc| inferExprType(ctx, cc.key),
+        .keyed => |k| if (staticCstFieldName(k.key) != null) .{ .tag = .string } else inferExprType(ctx, k.key),
+        .bare => .{ .tag = .any },
+    };
 }
 
 fn mergeInferredType(current: TypeInfo, next: TypeInfo) TypeInfo {
@@ -1080,12 +1164,14 @@ fn mergeInferredType(current: TypeInfo, next: TypeInfo) TypeInfo {
     return .{ .tag = .any };
 }
 
-pub fn inferIndexType(ctx: CheckCtx, object: *const ast.Node, key: *const ast.Node) TypeInfo {
-    if (key.expr == .range_literal or key.expr == .slice_literal) {
-        return switch (inferExprType(ctx, object).tag) {
-            .string => .{ .tag = .string },
-            else => .{ .tag = .any },
-        };
+pub fn inferIndexType(ctx: CheckCtx, object: *const cst.CstNode, key: *const cst.CstNode) TypeInfo {
+    if (cst.unwrapParen(key)) |uk| {
+        if (uk.kind == .range or uk.kind == .for_range or uk.kind == .slice) {
+            return switch (inferExprType(ctx, object).tag) {
+                .string => .{ .tag = .string },
+                else => .{ .tag = .any },
+            };
+        }
     }
     return switch (inferExprType(ctx, object).tag) {
         .string => .{ .tag = .string },
@@ -1093,19 +1179,22 @@ pub fn inferIndexType(ctx: CheckCtx, object: *const ast.Node, key: *const ast.No
     };
 }
 
-pub fn inferBlockResultType(ctx: CheckCtx, exprs: []const *ast.Node) TypeInfo {
+pub fn inferBlockResultType(ctx: CheckCtx, exprs: []const *const cst.CstNode) TypeInfo {
     if (exprs.len == 0) return .{ .tag = .any };
     return inferExprType(ctx, exprs[exprs.len - 1]);
 }
 
-/// type ast back into a TypeInfo
-/// every TypeExpr kind must be handled here; this is the single place where AST type
-/// nodes becomes semantic TypeInfo values. mirrors ast.printTypeExpr
+/// cst type syntax back into a TypeInfo
+/// every CstTypeKind must be handled here; this is the single place where CST type
+/// nodes become semantic TypeInfo values. mirrors ast.printTypeExpr via lowering folds:
+/// optional/qualified_optional fold to a nilable union, paren/slashed fold to inner,
+/// union_of flattens
 /// ctx is any CheckCtx scope: aliases resolve in the caller's scope
-pub fn evalTypeExpr(scope: AliasScope, te: *const ast.TypeExpr) !TypeInfo {
+pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
     switch (te.kind) {
         // "number" -> int (from type_name_map), unknown names -> any
-        .named => |name| {
+        .named => |n| {
+            const name = n.tok.text;
             if (scope.isTypeParam(name)) return .{ .tag = .{ .type_var = name } };
             if (type_name_map.get(name)) |res| return res;
             if (scope.resolveTypeAlias(name)) |aliased| return aliased;
@@ -1115,56 +1204,88 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const ast.TypeExpr) !TypeInfo {
         // compiler has no dep IO, so it always lands here; semantic
         // validates qualified names separately and errors first)
         .qualified => |q| {
-            if (scope.resolveImportAlias(q.module, q.name)) |t| return t;
+            if (scope.resolveImportAlias(q.mod_tok.text, q.name_tok.text)) |t| return t;
             return .{ .tag = .any };
         },
         // ":nil", ":ok" -> atom
-        .atom => |name| return .{ .tag = .{ .atom = name } },
+        .atom => |a| return .{ .tag = .{ .atom = a.tok.text } },
         // "int | :nil" -> union(@[{name="", types=@[int]}, {name="", types=@[:nil]}])
-        // "number?" -> union_of(named("number"), atom(":nil")) from parseAtom
-        .union_of => |variants| {
+        // "number?" folds like `union_of(named("number"), atom(":nil"))` from lowering
+        .union_of => |u| {
             var collected = try std.ArrayList(UnionVariant).initCapacity(scope.alloc, 4);
             errdefer collected.deinit(scope.alloc);
-            for (variants) |v| {
-                const inner = try evalTypeExpr(scope, v);
+            const first = try evalTypeExpr(scope, u.first);
+            try collectVariants(scope.alloc, first, &collected);
+            for (u.rest) |r| {
+                const inner = try evalTypeExpr(scope, r);
                 try collectVariants(scope.alloc, inner, &collected);
             }
+            return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(scope.alloc) } };
+        },
+        // `T?` suffix folds to `T | :nil`
+        // the `?` isglued on the name token
+        .optional => |o| {
+            const base: TypeInfo = if (o.inner.kind == .named) blk: {
+                const tok = o.inner.kind.named.tok;
+                const raw = tok.text;
+                const stripped = if (raw.len > 0 and raw[raw.len - 1] == '?') raw[0 .. raw.len - 1] else raw;
+
+                if (scope.isTypeParam(stripped)) break :blk .{ .tag = .{ .type_var = stripped } };
+                if (type_name_map.get(stripped)) |res| break :blk res;
+                if (scope.resolveTypeAlias(stripped)) |aliased| break :blk aliased;
+
+                break :blk .{ .tag = .any };
+            } else try evalTypeExpr(scope, o.inner);
+
+            var collected = try std.ArrayList(UnionVariant).initCapacity(scope.alloc, 2);
+            errdefer collected.deinit(scope.alloc);
+            try collectVariants(scope.alloc, base, &collected);
+            try collectVariants(scope.alloc, .{ .tag = .{ .atom = ":nil" } }, &collected);
+
             return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(scope.alloc) } };
         },
         // "fn(int) -> bool" -> function(param_types=@[int], return_type=bool)
         .function => |f| {
             var param_types = try std.ArrayList(TypeInfo).initCapacity(scope.alloc, f.params.len);
             errdefer param_types.deinit(scope.alloc);
+
             for (f.params) |p| {
-                try param_types.append(scope.alloc, if (p.type_name) |tn| try evalTypeExpr(scope, tn) else .{ .tag = .any });
+                try param_types.append(scope.alloc, if (p.type) |tn| try evalTypeExpr(scope, tn) else .{ .tag = .any });
             }
 
             var param_names = try std.ArrayList([]const u8).initCapacity(scope.alloc, f.params.len);
             errdefer param_names.deinit(scope.alloc);
-            for (f.params) |p| try param_names.append(scope.alloc, p.name);
-            const return_type = if (f.return_type) |rt| try evalTypeExpr(scope, rt) else TypeInfo{ .tag = .any };
+            for (f.params) |p| try param_names.append(scope.alloc, p.name_tok.text);
+            const return_type = if (f.ret) |rt| try evalTypeExpr(scope, rt) else TypeInfo{ .tag = .any };
 
             var required: usize = 0;
             for (f.params) |p| {
-                if (!p.optional) required += 1;
+                if (p.qmark_tok == null) required += 1;
             }
+
+            const tps = if (f.tps.len == 0) &[_][]const u8{} else blk: {
+                const owned = try scope.alloc.alloc([]const u8, f.tps.len);
+                for (f.tps, owned) |tok, *dst| dst.* = tok.text;
+                break :blk owned;
+            };
 
             const sig = try newSignature(scope.alloc, .{
                 .param_names = try param_names.toOwnedSlice(scope.alloc),
                 .params = try param_types.toOwnedSlice(scope.alloc),
                 .return_type = return_type,
                 .required_count = required,
+                .type_params = tps,
             });
 
             return .{ .tag = .{ .function = sig } };
         },
         // "table<int>" -> table(key=null, value=int), "table<string, int>" -> table(key=string, value=int)
         .parameterized => |p| {
-            var params = try std.ArrayList(TypeInfo).initCapacity(scope.alloc, p.params.len);
+            var params = try std.ArrayList(TypeInfo).initCapacity(scope.alloc, p.args.len);
             errdefer params.deinit(scope.alloc);
-            for (p.params) |param| try params.append(scope.alloc, try evalTypeExpr(scope, param));
+            for (p.args) |param| try params.append(scope.alloc, try evalTypeExpr(scope, param));
             const resolved = try params.toOwnedSlice(scope.alloc);
-            if (std.mem.eql(u8, p.name, "table")) {
+            if (std.mem.eql(u8, p.name_tok.text, "table")) {
                 if (resolved.len == 1) {
                     const v = try scope.alloc.create(TypeInfo);
                     v.* = resolved[0];
@@ -1180,23 +1301,53 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const ast.TypeExpr) !TypeInfo {
             }
             return .{ .tag = .any };
         },
-        // "{ name: string, age: num }" -> table with per-field types;
+        // `a.B?` with glued `?` folds to a nilable union like `optional`
+        .qualified_optional => |q| {
+            const raw = q.name_tok.text;
+            const stripped = if (raw.len > 0 and raw[raw.len - 1] == '?') raw[0 .. raw.len - 1] else raw;
+            const base: TypeInfo = if (scope.resolveImportAlias(q.mod_tok.text, stripped)) |t| t else .{ .tag = .any };
+
+            var collected = try std.ArrayList(UnionVariant).initCapacity(scope.alloc, 2);
+            errdefer collected.deinit(scope.alloc);
+
+            try collectVariants(scope.alloc, base, &collected);
+            try collectVariants(scope.alloc, .{ .tag = .{ .atom = ":nil" } }, &collected);
+
+            return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(scope.alloc) } };
+        },
+        .paren => |p| return evalTypeExpr(scope, p.inner),
+        // "{ name: string, age: num }" -> table with per-field types
         // names borrow source text like .named does, owners clone
-        .record => |fields| {
-            const owned = try scope.alloc.alloc(RecordField, fields.len);
-            for (fields, owned) |f, *dst| dst.* = .{
-                .name = f.name,
-                .field_type = try evalTypeExpr(scope, f.type_expr),
-                .optional = f.optional,
-            };
+        .record => |r| {
+            const owned = try scope.alloc.alloc(RecordField, r.fields.len);
+            var pos_idx: u32 = 0;
+            for (r.fields, owned) |f, *dst| {
+                if (f.name_tok) |nt| {
+                    dst.* = .{
+                        .name = nt.text,
+                        .field_type = try evalTypeExpr(scope, f.type),
+                        .optional = f.qmark_tok != null,
+                    };
+                } else {
+                    const idx_name = try scope.alloc.print("{d}", .{pos_idx});
+                    pos_idx += 1;
+                    dst.* = .{
+                        .name = idx_name,
+                        .field_type = try evalTypeExpr(scope, f.type),
+                        .optional = false,
+                    };
+                }
+            }
             const value = try scope.alloc.create(TypeInfo);
             value.* = .{ .tag = .any };
             return makeTable(null, value, owned);
         },
+        // `T/tag` carries a tag for lowering; the type is the inner one
+        .slashed => |s| return evalTypeExpr(scope, s.inner),
         // "!int" -> union(@[{name="", types=@[{:ok, int}]}, {name="", types=@[{:err, any}]}])
         // the same shape the literal `{:ok, int} | {:err, any}` produces
-        .error_union => |inner| {
-            const t = try evalTypeExpr(scope, inner);
+        .error_union => |e| {
+            const t = try evalTypeExpr(scope, e.inner);
             var collected = try std.ArrayList(UnionVariant).initCapacity(scope.alloc, 2);
             errdefer collected.deinit(scope.alloc);
             try collectVariants(scope.alloc, try makeResultTable(scope.alloc, ":ok", t), &collected);
@@ -1210,32 +1361,48 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const ast.TypeExpr) !TypeInfo {
 /// guardless arm coverage for match exhaustiveness
 /// , one cover per matcher, guards never count since a guard can fail
 ///
-fn patternCover(scope: AliasScope, node: *const ast.Node) MatchCover {
-    return switch (node.expr) {
+fn patternCover(scope: AliasScope, node: *const cst.CstNode) MatchCover {
+    const uw = cst.unwrapParen(node) orelse return .{ .atom = ":nil" };
+    // parens are transparent; empty `()` is nil
+    if (uw != node) return patternCover(scope, uw);
+    return switch (node.kind) {
         .ident => .wildcard,
-        .atom => |name| .{ .atom = name },
-        .nil => .{ .atom = ":nil" },
+        .atom => |a| .{ .atom = a.tok.text },
         .number => .number,
-        .string, .multiline_string => .string,
+        .string, .interpolated => .string,
 
-        .ascribed => |a| if (a.expr.expr == .ident)
-            .{ .ascribed = evalTypeExpr(scope, a.type_name) catch TypeInfo{ .tag = .any } }
-        else
-            patternCover(scope, a.expr),
+        .ascribed => |a| blk: {
+            const inner_uw = cst.unwrapParen(a.expr) orelse break :blk patternCover(scope, a.expr);
+            if (inner_uw.kind == .ident)
+                break :blk .{ .ascribed = evalTypeExpr(scope, a.type) catch TypeInfo{ .tag = .any } };
+            break :blk patternCover(scope, a.expr);
+        },
 
-        .table_pattern => |items| blk: {
-            const elems = scope.alloc.alloc(MatchCover, items.len) catch break :blk .other;
+        .table => |t| blk: {
+            // keyless `{...}` is an array pattern like the old `table_pattern`;
+            // keyed/computed entries are not positional shapes
+            for (t.entries) |entry| {
+                switch (entry) {
+                    .bare => {},
+                    .keyed, .computed => break :blk .other,
+                }
+            }
+            const elems = scope.alloc.alloc(MatchCover, t.entries.len) catch break :blk .other;
 
-            for (items, elems) |item, *dst| dst.* = patternCover(scope, item);
+            for (t.entries, elems) |entry, *dst| {
+                // checked above: all bare
+                dst.* = patternCover(scope, entry.bare.value);
+            }
 
             break :blk .{ .table = elems };
         },
+        .paren => |p| if (p.expr) |e| patternCover(scope, e) else .{ .atom = ":nil" },
 
         else => .other,
     };
 }
 
-fn matcherCover(scope: AliasScope, m: ast.MatchMatcher) MatchCover {
+fn matcherCover(scope: AliasScope, m: cst.CstMatcher) MatchCover {
     return switch (m) {
         .wildcard => .wildcard,
         .expr => |e| patternCover(scope, e),
@@ -1244,7 +1411,7 @@ fn matcherCover(scope: AliasScope, m: ast.MatchMatcher) MatchCover {
 
 /// one cover per guardless matcher
 /// , callers decide what guards mean
-pub fn buildArmCovers(scope: AliasScope, arm: ast.MatchArm) ![]MatchCover {
+pub fn buildArmCovers(scope: AliasScope, arm: cst.CstArm) ![]MatchCover {
     var covers = std.ArrayList(MatchCover).initCapacity(scope.alloc, arm.matchers.len) catch return &.{};
     errdefer covers.deinit(scope.alloc);
 
@@ -1252,7 +1419,7 @@ pub fn buildArmCovers(scope: AliasScope, arm: ast.MatchArm) ![]MatchCover {
     return covers.toOwnedSlice(scope.alloc);
 }
 
-pub fn buildCovers(scope: AliasScope, arms: []const ast.MatchArm) ![]MatchCover {
+pub fn buildCovers(scope: AliasScope, arms: []const cst.CstArm) ![]MatchCover {
     var covers = std.ArrayList(MatchCover).initCapacity(scope.alloc, arms.len) catch return &.{};
     errdefer covers.deinit(scope.alloc);
 
@@ -1268,7 +1435,7 @@ pub fn buildCovers(scope: AliasScope, arms: []const ast.MatchArm) ![]MatchCover 
     return covers.toOwnedSlice(scope.alloc);
 }
 
-pub fn matchCovers(scope: AliasScope, subject: TypeInfo, arms: []const ast.MatchArm) bool {
+pub fn matchCovers(scope: AliasScope, subject: TypeInfo, arms: []const cst.CstArm) bool {
     const covers = buildCovers(scope, arms) catch return false;
     defer scope.alloc.free(covers);
 
@@ -1287,10 +1454,8 @@ fn makeResultTable(alloc: std.mem.Allocator, tag: []const u8, payload: TypeInfo)
 }
 
 /// walk arg types against param types and bind each type_var found inside a
-/// param to the concrete type at the same position, e.g. `self: {:err, T}`
-/// against `{:err, string}` binds T -> string. best-effort: first binding per
-/// name wins, mismatched shapes are skipped
-/// subst is any type with `put(name: []const u8, t: TypeInfo)`
+/// param to the concrete type at the same position
+/// , e.g. `self: {:err, T}` against `{:err, string}` binds T -> string
 pub fn bindTypeParams(subst: anytype, params: []const TypeInfo, arg_types: []const TypeInfo) anyerror!void {
     const count = @min(params.len, arg_types.len);
     for (0..count) |i| try bindTypeParam(subst, params[i], arg_types[i]);
@@ -1326,7 +1491,7 @@ fn bindTypeParam(subst: anytype, param: TypeInfo, arg: TypeInfo) anyerror!void {
                 for (arg.tag.@"union") |av| {
                     if (av.types.len != pv.types.len) continue;
                     if (av.types[0].tag != .atom or av.types[0].tag.atom.len == 0) continue;
-                    if (!std.mem.eql(u8, ast.atomName(pv.types[0].tag.atom), ast.atomName(av.types[0].tag.atom))) continue;
+                    if (!std.mem.eql(u8, cst.atomName(pv.types[0].tag.atom), cst.atomName(av.types[0].tag.atom))) continue;
                     for (pv.types[1..], av.types[1..]) |p, a| try bindTypeParam(subst, p, a);
                     break;
                 }
@@ -1381,14 +1546,13 @@ pub fn substituteGenericReturn(
 }
 
 /// instantiate a generic fn signature at a call site: resolve explicit
-/// type args, infer the rest from arg types, substitute into the return.
-/// shared by the compiler and semantic (their scopes differ, the math
-/// does not); degrades to any on OOM
+/// , type args, infer rest from arg types, substitute into return
+/// , shared by compiler and semantic, degrades to any on oom
 pub fn substCallReturn(
     ctx: CheckCtx,
     sig: *const FunctionSignature,
-    callee: *const ast.Node,
-    args: []const *ast.Node,
+    callee: *const cst.CstNode,
+    args: []const *const cst.CstNode,
     type_args: []const []const u8,
     implicit_self: bool,
 ) TypeInfo {
@@ -1406,14 +1570,15 @@ pub fn substCallReturn(
 pub fn effectiveArgs(
     alloc: std.mem.Allocator,
     params_len: usize,
-    callee: *const ast.Node,
-    args: []const *ast.Node,
+    callee: *const cst.CstNode,
+    args: []const *const cst.CstNode,
     implicit_self: bool,
-) ![]const *ast.Node {
-    if (!implicit_self or callee.expr != .field or params_len == 0) return args;
+) ![]const *const cst.CstNode {
+    const uw = cst.unwrapParen(callee) orelse return args;
+    if (!implicit_self or uw.kind != .field or params_len == 0) return args;
     if (args.len != params_len - 1) return args;
-    const eff = try alloc.alloc(*ast.Node, args.len + 1);
-    eff[0] = callee.expr.field.object;
+    const eff = try alloc.alloc(*const cst.CstNode, args.len + 1);
+    eff[0] = uw.kind.field.object;
     for (args, 1..) |a, i| eff[i] = a;
     return eff;
 }
@@ -1526,7 +1691,7 @@ fn coversOne(subject: TypeInfo, cover: MatchCover) bool {
             if (subject.tag == .never) return true;
             if (subject.tag != .atom) return false;
 
-            return std.mem.eql(u8, ast.atomName(subject.tag.atom), ast.atomName(name));
+            return std.mem.eql(u8, cst.atomName(subject.tag.atom), cst.atomName(name));
         },
 
         .number, .string, .other => return subject.tag == .never,
@@ -1596,7 +1761,7 @@ pub fn matchCoversAll(subject: TypeInfo, covers: []const MatchCover) bool {
 
             for (covers) |c| switch (c) {
                 .atom => |name| {
-                    const bare = ast.atomName(name);
+                    const bare = cst.atomName(name);
                     if (std.mem.eql(u8, bare, "true")) saw_true = true;
                     if (std.mem.eql(u8, bare, "false")) saw_false = true;
                 },
@@ -1653,10 +1818,10 @@ pub fn matchOverlaps(subject: TypeInfo, cover: MatchCover) bool {
                 return false;
             },
             .bool => {
-                const bare = ast.atomName(name);
+                const bare = cst.atomName(name);
                 return std.mem.eql(u8, bare, "true") or std.mem.eql(u8, bare, "false");
             },
-            .atom => |s| return std.mem.eql(u8, ast.atomName(s), ast.atomName(name)),
+            .atom => |s| return std.mem.eql(u8, cst.atomName(s), cst.atomName(name)),
             else => return false,
         },
 
@@ -1758,7 +1923,7 @@ pub fn uncoveredTags(alloc: std.mem.Allocator, subject: TypeInfo, covers: []cons
                 if (variantCovered(v, covers)) continue;
 
                 if (v.types[0].tag == .atom) {
-                    try out.append(alloc, ast.atomName(v.types[0].tag.atom));
+                    try out.append(alloc, cst.atomName(v.types[0].tag.atom));
                 } else if (v.types[0].tag == .table) {
                     const fields = v.types[0].tag.table.fields orelse continue;
                     const alen = tableArrayLen(fields) orelse continue;
@@ -1767,7 +1932,7 @@ pub fn uncoveredTags(alloc: std.mem.Allocator, subject: TypeInfo, covers: []cons
                     const et = tableElemType(fields, 0) orelse continue;
                     if (et.tag != .atom) continue;
 
-                    try out.append(alloc, ast.atomName(et.tag.atom));
+                    try out.append(alloc, cst.atomName(et.tag.atom));
                 }
             }
         },
@@ -1778,7 +1943,7 @@ pub fn uncoveredTags(alloc: std.mem.Allocator, subject: TypeInfo, covers: []cons
 
             for (covers) |c| switch (c) {
                 .atom => |name| {
-                    const bare = ast.atomName(name);
+                    const bare = cst.atomName(name);
                     if (std.mem.eql(u8, bare, "true")) saw_true = true;
                     if (std.mem.eql(u8, bare, "false")) saw_false = true;
                 },
@@ -1792,12 +1957,12 @@ pub fn uncoveredTags(alloc: std.mem.Allocator, subject: TypeInfo, covers: []cons
         .atom => |name| {
             for (covers) |c| switch (c) {
                 .atom => |cover| {
-                    if (std.mem.eql(u8, ast.atomName(cover), ast.atomName(name))) return;
+                    if (std.mem.eql(u8, cst.atomName(cover), cst.atomName(name))) return;
                 },
                 else => {},
             };
 
-            try out.append(alloc, ast.atomName(name));
+            try out.append(alloc, cst.atomName(name));
         },
 
         else => {},

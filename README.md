@@ -92,6 +92,18 @@ revo
   revo doc --html <file or directory>
   ```
 
+- `fmt`
+
+  format `.rv` files
+
+  ```text
+  revo fmt                          format every .rv under the pwd
+  revo fmt script.rv dir/           format that in place
+  revo fmt --check .                list files whose formatting differs
+  revo fmt --diff .                 print a diff of the changes
+  revo fmt - < script.rv            format stdin to stdout
+  ```
+
 ### editors
 
 - [`vs code`](https://revo.lung.fyi/editors/#vscodecode-osscodium)
@@ -110,12 +122,14 @@ revo
 
 ### in c/zig/odin/what have you
 
-you can extend revo in (essentially) any language or embed it from any language
+you can extend or embed revo from (essentially) any language
 
-there are two APIs for two ABIs:
+four bindings for two ABIs, all of them embed revo and load extensions:
 
-- zig: [loadable extensions](https://github.com/if-not-nil/revo/tree/main/examples/foreign/zig) | todo: embedding
-- c: [loadable extensions](https://github.com/if-not-nil/revo/tree/main/examples/foreign/c) | todo: embedding
+- [zig](https://github.com/if-not-nil/revo/tree/main/examples/foreign/zig)
+- [c](https://github.com/if-not-nil/revo/tree/main/examples/foreign/c)
+- [rust](https://github.com/if-not-nil/revo/tree/main/extra/rust)
+- [odin](https://github.com/if-not-nil/revo/tree/main/extra/odin)
 
 ### credits
 

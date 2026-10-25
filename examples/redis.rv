@@ -9,6 +9,7 @@ let srv = net.listen(1337)?
 
 let data = {}
 
+
 fn handle(client) do
   loop do
     client:send(">> ")
@@ -17,33 +18,33 @@ fn handle(client) do
     msg = match msg[0]
     | "ping" => "pong"
     | "set" => do/a
-        if len(msg) != 3
-          break/a "nea #{len(msg)}/3"
-          
-        data[msg[1]] = msg[2]
-        "#{msg[1]:?} => #{msg[2]:?}"
-    end 
+      if (len(msg) != 3)
+        break/a "nea #{len(msg)}/3"
+
+      data[msg[1]] = msg[2]
+      "#{msg[1]:?} => #{msg[2]:?}"
+    end
     | "get" => do/a
-        if len(msg) != 2
-          break/a "nea #{len(msg)}/2"
-        print("#{data:?}, #{msg[1]:?}")
-        data[msg[1]]
-    end 
+      if (len(msg) != 2)
+        break/a "nea #{len(msg)}/2"
+      print("#{data:?}, #{msg[1]:?}")
+      data[msg[1]]
+    end
     # sl for store-list
     | "sl" => do/a
-        if len(msg) <= 3
-          break/a "nea #{len(msg)}/3.."
-        let t = {}
-        for k in 2..len(msg)
-          t:push(msg[k])
+      if (len(msg) <= 3)
+        break/a "nea #{len(msg)}/3.."
+      let t = {}
+      for k in 2..len(msg)
+        t:push(msg[k])
 
-        data[msg[1]] = t
-        "#{msg[1]} [=>] #{data[msg[1]]}"
-    end 
+      data[msg[1]] = t
+      "#{msg[1]} [=>] #{data[msg[1]]}"
+    end
     | "list" => do
-        let out = ""
-        for key in data:keys()
-          out ~= "#{key}\r\n"
+      let out = ""
+      for key in data:keys()
+        out ~= "#{key}\r\n"
     end
     | x => "unrecognized " ~ msg[1..]
 
@@ -51,5 +52,6 @@ fn handle(client) do
   end
   client:close()?
 end
+
 
 loop spawn handle(srv:accept()?)

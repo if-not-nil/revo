@@ -33,15 +33,21 @@ const EXAMPLES =
     \\  revo bench script.rv              run with timing stats
     \\
 ++ (if (revo.vm.perf.enabled)
-    \\  revo --perf script.rv             run with VM perf counters (needs -Dperf)
-    \\  revo bench --perf script.rv       bench with VM perf counters (needs -Dperf)
+    \\  revo       --perf script.rv       run with VM perf counters (you have -Dperf enabled)
+    \\  revo bench --perf script.rv       bench with VM perf counters (you have -Dperf enabled)
     \\
 else
     "") ++
     \\  revo dis script.rv                show bytecode disassembly
-    \\  revo doc script.rv                print extracted docs as markdown
-    \\  revo doc --html src/baselib/iface     render the baselib reference as html
-    \\  revo doc --html --splice src/baselib/iface < std.md > std.new   splice into a doc page
+    \\       doc script.rv                print extracted docs as markdown
+    \\       doc --html src/baselib/iface     render the baselib reference as html
+    \\       doc --html --splice src/baselib/iface < std.md > std.new   splice into a doc page
+    \\
+    \\  revo fmt                          format every .rv under the pwd
+    \\       fmt script.rv dir/           format that in place
+    \\       fmt --check .                list files whose formatting differs
+    \\       fmt --diff .                 print a diff of the changes
+    \\       fmt - < script.rv            format stdin to stdout
     \\
 ++ (if (lsp_enabled)
     \\  revo lsp                          start the language server
@@ -60,7 +66,7 @@ fn usageText(allocator: Allocator, args: []const ap.Arg, commands: []const ap.Co
     return try allocator.print("{s}{s}{s}", .{ SYNOPSIS, auto, EXAMPLES });
 }
 
-const ExecutionMode = enum { run, repl, bench, disassemble, compile, doc, lsp };
+const ExecutionMode = enum { run, repl, bench, disassemble, compile, doc, lsp, format };
 
 const DocMode = enum { markdown, html };
 
@@ -76,6 +82,8 @@ const Config = struct {
     perf: bool = false,
     echo_last: ?revo.Value.PrintMode = null,
     force_splice: bool = false,
+    check: bool = false,
+    diff: bool = false,
     threads: usize = 1,
     argv: []const [:0]const u8 = &.{},
 };
@@ -92,6 +100,7 @@ pub fn main(provided_init: std.process.Init) void {
         error.UnknownCommand,
         error.CompilationError,
         error.FileError,
+        error.FormatNeeded,
         => std.process.exit(1),
         error.HelpRequested,
         error.VersionRequested,
@@ -126,7 +135,7 @@ fn handleSource(
             defer gpa.free(bytecode.spans);
             try revo.vm.disasm.printDisassembly(&vm, bytecode, source);
         },
-        .repl, .lsp => unreachable,
+        .repl, .lsp, .format => unreachable,
     }
 }
 
@@ -171,6 +180,9 @@ fn runMain(init: std.process.Init) !void {
     if (config.mode == .doc) {
         return try docgen.Cli.run(init, init.gpa, arena, config.script_path, config.doc_format == .html, config.force_splice);
     }
+    if (config.mode == .format) {
+        return try formatPaths(init, init.gpa, arena, config.argv, config.check, config.diff);
+    }
 
     // script path or stdin
     if (config.script_path) |path| {
@@ -206,7 +218,7 @@ fn runMain(init: std.process.Init) !void {
                         printError(init, "cannot extract docs from bytecode files", .{});
                         return error.InvalidArgs;
                     },
-                    .repl, .lsp => unreachable,
+                    .repl, .lsp, .format => unreachable,
                 }
             } else {
                 try handleSource(init, init.gpa, arena, path, source, config);
@@ -231,6 +243,14 @@ fn runMain(init: std.process.Init) !void {
     defer vm.deinit();
     try revo.baselib.populateArgv(&vm);
     try repl.run(&vm, init.gpa, init);
+}
+
+/// fmt's data output (file lists, diffs) written to stdout, like gofmt
+fn printData(init: std.process.Init, comptime fmt: []const u8, args: anytype) !void {
+    var buf: [4096]u8 = undefined;
+    var out = revo.stdout().writer(init.io, &buf);
+    try out.interface.print(fmt, args);
+    try out.flush();
 }
 
 fn printError(init: std.process.Init, comptime fmt: []const u8, args: anytype) void {
@@ -398,6 +418,8 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         .{ .name = "test", .kind = .boolean, .description = "run with test blocks" },
         .{ .name = "html", .kind = .boolean, .description = "render as html instead of markdown (doc)" },
         .{ .name = "splice", .kind = .boolean, .description = "splice output into markdown piped on stdin (doc)" },
+        .{ .name = "check", .kind = .boolean, .description = "list files whose formatting differs, dont write (fmt)" },
+        .{ .name = "diff", .kind = .boolean, .description = "print a unified diff, dont write (fmt)" },
         .{ .name = "threads", .kind = .string, .description = "worker threads (default 1, single-threaded without async)" },
         .{ .name = "help", .short = 'h', .kind = .boolean, .description = "show this help message" },
         // terminal positional:
@@ -409,7 +431,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         .{ .name = "perf", .kind = .boolean, .description = "collect and print VM perf counters (needs -Dperf)" },
     } else [_]ap.Arg{};
 
-    var commands_buf: [7]ap.Command = undefined;
+    var commands_buf: [8]ap.Command = undefined;
     var n: usize = 0;
     inline for (&[_]struct { name: []const u8, prefix: bool, has_validate: bool, desc: []const u8 }{
         .{ .name = "compile", .prefix = false, .has_validate = false, .desc = "compile script to bytecode instead of running" },
@@ -417,6 +439,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         .{ .name = "lsp", .prefix = false, .has_validate = false, .desc = "start the lsp" },
         .{ .name = "dis", .prefix = false, .has_validate = false, .desc = "show bytecode disassembly instead of running" },
         .{ .name = "doc", .prefix = false, .has_validate = false, .desc = "extract doc comments from a file, dir, or the pwd workspace" },
+        .{ .name = "fmt", .prefix = false, .has_validate = false, .desc = "format .rv files in place, like go fmt" },
         .{ .name = "version", .prefix = false, .has_validate = false, .desc = "show version and build info" },
         .{ .name = "bench", .prefix = true, .has_validate = true, .desc = "run N iterations with timing stats ([n] iterations, 1 if not specified)" },
     }) |cmd_def| {
@@ -476,6 +499,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
             if (std.mem.eql(u8, cmd.name, "lsp")) config.mode = .lsp;
             if (std.mem.eql(u8, cmd.name, "dis")) config.mode = .disassemble;
             if (std.mem.eql(u8, cmd.name, "doc")) config.mode = .doc;
+            if (std.mem.eql(u8, cmd.name, "fmt")) config.mode = .format;
             if (std.mem.eql(u8, cmd.name, "bench")) {
                 config.mode = .bench;
                 config.bench_iters = if (cmd.value.len == 0) 1 else std.fmt.parseUnsigned(u32, cmd.value, 10) catch 1;
@@ -487,6 +511,9 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
     config.interactive = ap.cliArg(&arg_list, "interactive").enabled; // -i
     config.test_mode = ap.cliArg(&arg_list, "test").enabled; // --test
     config.force_splice = ap.cliArg(&arg_list, "splice").enabled; // --splice
+    config.check = ap.cliArg(&arg_list, "check").enabled; // --check
+    config.diff = ap.cliArg(&arg_list, "diff").enabled; // --diff
+
     if (comptime revo.vm.perf.enabled) {
         config.perf = ap.cliArg(&arg_list, "perf").enabled; // --perf
     }
@@ -745,6 +772,160 @@ fn compileToBytecode(
     };
 
     printSuccess(init, "compiled to {s}", .{output_path});
+}
+
+fn isDir(init: std.process.Init, path: []const u8) bool {
+    var dir = std.Io.Dir.cwd().openDir(init.io, path, .{}) catch return false;
+    dir.close(init.io);
+    return true;
+}
+
+fn lessStr(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+/// recursive `.rv` collection
+/// skip hidden and `_`-prefixed dirs: caches and vendored trees
+fn collectRvFiles(
+    init: std.process.Init,
+    arena: Allocator,
+    dir: []const u8,
+    out: *std.ArrayList([]const u8),
+) !void {
+    const open_dir = std.Io.Dir.cwd().openDir(init.io, dir, .{ .iterate = true }) catch |err| {
+        printError(init, "opening {s} - {}", .{ dir, err });
+        return error.FileError;
+    };
+
+    defer open_dir.close(init.io);
+    var it = open_dir.iterate();
+    while (try it.next(init.io)) |entry| {
+        switch (entry.kind) {
+            .directory => {
+                if (entry.name.len > 0 and (entry.name[0] == '.' or entry.name[0] == '_')) continue;
+
+                const sub = try std.Io.Dir.path.join(arena, &.{ dir, entry.name });
+                try collectRvFiles(init, arena, sub, out);
+            },
+            .file => {
+                if (!std.mem.endsWith(u8, entry.name, ".rv")) continue;
+
+                try out.append(arena, try std.Io.Dir.path.join(arena, &.{ dir, entry.name }));
+            },
+            else => {},
+        }
+    }
+}
+
+/// revo fmt
+///
+/// rewrite files/dirs in place, or list them with `check`
+fn formatPaths(
+    init: std.process.Init,
+    gpa: Allocator,
+    arena: Allocator,
+    paths: []const [:0]const u8,
+    check: bool,
+    diff: bool,
+) !void {
+    var files: std.ArrayList([]const u8) = .empty;
+    defer files.deinit(arena);
+
+    if (paths.len == 0) {
+        try collectRvFiles(init, arena, ".", &files);
+    } else for (paths) |p| {
+        if (std.mem.eql(u8, p, "-")) {
+            try files.append(arena, p);
+        } else if (isDir(init, p)) {
+            try collectRvFiles(init, arena, p, &files);
+        } else {
+            try files.append(arena, p);
+        }
+    }
+    std.mem.sort([]const u8, files.items, {}, lessStr);
+
+    var failed = false;
+    var changed = false;
+
+    var diff_buf = std.Io.Writer.Allocating.init(gpa);
+    defer diff_buf.deinit();
+
+    for (files.items) |path| {
+        var file_arena = std.heap.ArenaAllocator.init(gpa);
+        defer file_arena.deinit();
+        const file_alloc = file_arena.allocator();
+        const is_stdin = std.mem.eql(u8, path, "-");
+
+        const source: []const u8 = if (is_stdin) blk: {
+            const piped = readStdin(init, file_alloc) catch {
+                failed = true;
+                continue;
+            };
+            break :blk piped orelse continue;
+        } else std.Io.Dir.cwd().readFileAlloc(init.io, path, file_alloc, std.Io.Limit.unlimited) catch |err| {
+            printError(init, "reading {s} - {}", .{ path, err });
+            failed = true;
+            continue;
+        };
+
+        // refuse to touch anything we cant parse; show the real diagnostic
+        switch (try revo.lang.parse(file_alloc, .{ .name = path, .text = source }, .{})) {
+            .ok => {},
+            .err => |failure| {
+                revo.printBuildError(gpa, .{ .name = path, .text = source }, .{ .parse = failure }, hostColor(init));
+                failed = true;
+                continue;
+            },
+        }
+
+        const formatted = revo.lang.fmt.format(file_alloc, source) catch |err| {
+            printError(init, "formatting {s} - {}", .{ path, err });
+            failed = true;
+            continue;
+        };
+
+        if (is_stdin) {
+            if (check or diff) {
+                if (!std.mem.eql(u8, formatted, source)) {
+                    changed = true;
+                    if (diff) {
+                        diff_buf.clearRetainingCapacity();
+                        try revo.diff.write(&diff_buf.writer, "-", source, formatted);
+                        try printData(init, "{s}", .{diff_buf.written()});
+                    } else try printData(init, "-\n", .{});
+                }
+                continue;
+            }
+
+            var out_buf: [4096]u8 = undefined;
+            var out = revo.stdout().writer(init.io, &out_buf);
+            try out.interface.writeAll(formatted);
+            try out.flush();
+            continue;
+        }
+
+        if (std.mem.eql(u8, formatted, source)) continue;
+        changed = true;
+        if (diff) {
+            diff_buf.clearRetainingCapacity();
+            try revo.diff.write(&diff_buf.writer, path, source, formatted);
+            try printData(init, "{s}", .{diff_buf.written()});
+            continue;
+        }
+        if (check) {
+            try printData(init, "{s}\n", .{path});
+            continue;
+        }
+        std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = path, .data = formatted }) catch |err| {
+            printError(init, "writing {s} - {}", .{ path, err });
+            failed = true;
+            continue;
+        };
+        try printData(init, "{s}\n", .{path});
+    }
+
+    if (failed) return error.CompilationError;
+    if (check and changed) return error.FormatNeeded;
 }
 
 pub fn printRuntimeFailure(init: std.process.Init, failure: revo.RunFailure, source: []const u8) void {

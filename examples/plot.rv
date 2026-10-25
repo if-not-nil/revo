@@ -14,57 +14,63 @@
 !#
 
 const colors = {
-	"#009E73",
-	"#F0E442",
-	"#0072B2",
-	"#CC79A7",
-	"#D55E00"
+  "#009E73",
+  "#F0E442",
+  "#0072B2",
+  "#CC79A7",
+  "#D55E00"
 }
 
+
 fn indices(table) do
-	iter.map(table, fn(elem, i) {i, elem})
+  iter.map(table, fn(elem, i) {i, elem})
 end
+
 
 fn append(table, value) do
-	table:insert(table:len(), value)
+  table:insert(table:len(), value)
 end
 
+
 fn transpose(table) do
-	if table:len() == 0 do return {} end
-	let result = {}
-	const length = table[0]:len()
-	for i in 0..length do
-		result:insert(i, iter.collect(iter.map(table, fn(t) t[i])))
-	end
-	result
+  if table:len() == 0 do return {} end
+  let result = {}
+  const length = table[0]:len()
+
+  for i in 0..length do
+    result:insert(i, iter.collect(iter.map(table, fn(t) t[i])))
+  end
+  result
 end
+
 
 let line = :nil
 let data = {}
-while do # i like the `while do` trick
-	let {st_, line_} = input()
-	line = line_
-	st_ == :ok
+
+while do  # i like the `while do` trick
+  let {st_, line_} = input()
+  line = line_
+  st_ == :ok
 end do
-	if (line != :nil)
-		line
-			|> _:split(",")
-			|> iter.map(fn (n) number(n) orelse 0)
-			|> iter.collect()
-			|> append(data, _)
+  if (line != :nil)
+    line
+      |> _:split(",")
+      |> iter.map(fn (n) number(n) orelse 0)
+      |> iter.collect()
+      |> append(data, _)
 end
 
 const {min, max} = iter.reduce(
-	data,
-	fn(acc, row) iter.reduce(
-		row,
-		fn(rowacc, num) {
-			math.min(rowacc[0], num),
-			math.max(rowacc[1], num)
-		},
-		acc
-	),
-	{1000000, -1000000}
+  data,
+  fn(acc, row) iter.reduce(
+    row,
+    fn(rowacc, num) {
+      math.min(rowacc[0], num),
+      math.max(rowacc[1], num)
+    },
+    acc
+  ),
+  {1000000, -1000000}
 )
 
 const padding = 5
@@ -73,32 +79,34 @@ const height = 300
 
 print("<?xml version='1.0'?>")
 print({
-	"<svg xmlns='http://www.w3.org/2000/svg' width='",
-	width + padding * 2,
-	"' height='",
-	height + padding * 2,
-	"' version='1.1'>"
+  "<svg xmlns='http://www.w3.org/2000/svg' width='",
+  width + padding * 2,
+  "' height='",
+  height + padding * 2,
+  "' version='1.1'>"
 }:join(""))
 
 for series in indices(transpose(data)) do
-	const {color, linedata} = series
-	let output = {
-		"	<polyline stroke='",
-		colors[color],
-		"' stroke-width='2.5' fill='none' points='"
-	}:join("")
-	for entry in indices(linedata) do
-		const {index, point} = entry
-		if (index != 0) (output = output ~ " ")
-		output = {
-			output,
-			(index / linedata:len() * width + padding),
-			",",
-			(height - (point - min) / (max - min) * height + padding)
-		}:join("")
-	end
-	output = output ~ "'/>"
-	print(output)
+  const {color, linedata} = series
+  let output = {
+    "	<polyline stroke='",
+    colors[color],
+    "' stroke-width='2.5' fill='none' points='"
+  }:join("")
+
+  for entry in indices(linedata) do
+    const {index, point} = entry
+    if (index != 0) (output = output ~ " ")
+    output = {
+      output,
+      (index / linedata:len() * width + padding),
+      ",",
+      (height - (point - min) / (max - min) * height + padding)
+    }:join("")
+  end
+
+  output = output ~ "'/>"
+  print(output)
 end
 
 print("</svg>")

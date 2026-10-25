@@ -9,7 +9,7 @@ the code above should work like
 
 # [x] error match expression requires at least one arm [vim.NIL]
 :ok |> match "hi"
-		| "hi" => 3
+| "hi" => 3
 
 ##
 [ ] change generics syntax to this
@@ -18,16 +18,14 @@ the code above should work like
 fn identity<T>(x: T) x
 let id_int = identity<int>(42)
 
-
-
 do
-	total = total + len(detector_handle_frame(det, sim_simulate(sim, time)))
-	total
+  total = total + len(detector_handle_frame(det, sim_simulate(sim, time)))
+  total
 end
 # [ ] must be equivalent to
 do
-	total += sim_simulate(sim, time)
-				|> detector_handle_frame(det, _)
-				|> len() # with or without these parens
-	total
+  total += sim_simulate(sim, time)
+    |> detector_handle_frame(det, _)
+    |> len()  # with or without these parens
+  total
 end

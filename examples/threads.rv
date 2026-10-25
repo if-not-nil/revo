@@ -7,7 +7,7 @@ try `revo --threads=4 ./threads.rv`
 and `revo --threads=2 ./threads.rv`
 !#
 
-if revo.threads() == 1
+if (revo.threads() == 1)
   print("""
   wait! you only have one thread dedicated to revo.
   you should run this with the --threads=4 flag instead
@@ -18,6 +18,7 @@ if revo.threads() == 1
 # that's why we use a table instead of a nubmer
 let waitgroup = {0}
 
+
 fn worker(name: string) do
   waitgroup.0 += 1
 
@@ -26,12 +27,13 @@ fn worker(name: string) do
   sleep 0.5
   echo #{name}\\'s job got done at $(date +%T)
   """
-  |> system({"bash", "-c", _})?
-  |> _[0] # stdout
-  |> print()
+    |> system({"bash", "-c", _})?
+    |> _[0]  # stdout
+    |> print()
 
   waitgroup.0 -= 1
 end
+
 
 let {start, jobs} = {time.now(), {}}
 
@@ -40,7 +42,7 @@ jobs:push(spawn worker("bob"))
 jobs:push(spawn worker("carol"))
 jobs:push(spawn worker("dave"))
 
-for i in ..(revo.threads() - 4)
+for i in..(revo.threads() - 4)
   jobs:push(spawn worker("#{i}"))
 
 for job in jobs do

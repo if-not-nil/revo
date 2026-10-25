@@ -17,10 +17,6 @@ pub fn runtime() revo.Runtime {
     };
 }
 
-pub fn expectPrinted(source: []const u8, expected: []const u8) !void {
-    try Parser.testing.expectPrinted(source, expected);
-}
-
 pub fn expectTypes(source: []const u8, expected: []const Lexer.TokenType) !void {
     try Lexer.testing.expectTypes(source, expected);
 }
@@ -38,21 +34,61 @@ const TopResult = struct {
     }
 };
 
+/// a miss means the compiler fell back to `any` without semantic saying so
+pub fn expectNoAnnotationMisses(stats: revo.lang.compiler.CompileStats, source: []const u8) !void {
+    if (stats.annotation_misses == 0) return;
+    if (stats.first_annotation_miss) |miss| {
+        std.debug.print(
+            "annotation miss: {s} at {d}:{d} in:\n{s}\n",
+            .{ miss.kind, miss.span.line, miss.span.column, source },
+        );
+    }
+    return error.AnnotationMiss;
+}
+
 fn compileChecked(vm: *revo.VM, source: []const u8) ![]revo.Instruction {
+    var stats = revo.lang.compiler.CompileStats{};
     const result = try pipeline.build(vm, .{ .text = source }, .{
         .install_debug_info = true,
+        .annotation_stats = &stats,
     });
+    try expectNoAnnotationMisses(stats, source);
     return switch (result) {
         .ok => |bytecode| blk: {
             alloc.free(bytecode.spans);
             break :blk bytecode.instructions;
         },
         .err => |lang_err| {
+            defer pipeline.deinitError(lang_err);
             revo.printBuildError(alloc, .{ .text = source }, lang_err, vm.runtime.supports_color);
             vm.runtime.resetDiagArena();
             return error.LangFailure;
         },
     };
+}
+
+/// compile without running and return compiler annotation coverage
+pub fn compileStats(source: []const u8) !revo.lang.compiler.CompileStats {
+    var vm = try revo.VM.init(runtime());
+    defer vm.deinit();
+
+    var stats = revo.lang.compiler.CompileStats{};
+    const result = try pipeline.build(&vm, .{ .text = source }, .{
+        .annotation_stats = &stats,
+    });
+    switch (result) {
+        .ok => |bytecode| {
+            alloc.free(bytecode.instructions);
+            alloc.free(bytecode.spans);
+        },
+        .err => |lang_err| {
+            defer pipeline.deinitError(lang_err);
+            revo.printBuildError(alloc, .{ .text = source }, lang_err, vm.runtime.supports_color);
+            vm.runtime.resetDiagArena();
+            return error.LangFailure;
+        },
+    }
+    return stats;
 }
 
 fn runTopModuleChecked(vm: *revo.VM, source: []const u8, source_name: []const u8) !void {
@@ -84,13 +120,21 @@ pub fn topResultOpts(
         break :blk joined;
     } else "<source>";
     defer if (import_dir != null) alloc.free(src_name);
-    const built = try pipeline.build(&vm, .{ .name = src_name, .text = source }, opts);
+
+    var stats = revo.lang.compiler.CompileStats{};
+    var build_opts = opts;
+    build_opts.annotation_stats = &stats;
+
+    const built = try pipeline.build(&vm, .{ .name = src_name, .text = source }, build_opts);
+    try expectNoAnnotationMisses(stats, source);
+
     switch (built) {
         .ok => |bytecode| {
             alloc.free(bytecode.instructions);
             alloc.free(bytecode.spans);
         },
         .err => |lang_err| {
+            defer pipeline.deinitError(lang_err);
             revo.printBuildError(alloc, .{ .name = src_name, .text = source }, lang_err, vm.runtime.supports_color);
             vm.runtime.resetDiagArena();
             return error.LangFailure;
@@ -203,9 +247,14 @@ pub fn topFalse(source: []const u8) !void {
 }
 
 fn buildOkWithWarnings(source: []const u8, vm: *revo.VM, w: *?diagnostic.Report) !void {
+    var stats = revo.lang.compiler.CompileStats{};
+
     const result = try pipeline.buildWithWarnings(vm, .{ .text = source }, .{
         .install_debug_info = false,
+        .annotation_stats = &stats,
     }, w);
+
+    try expectNoAnnotationMisses(stats, source);
     switch (result) {
         .ok => |bytecode| {
             defer alloc.free(bytecode.instructions);
@@ -249,7 +298,7 @@ pub fn expectWarning(source: []const u8, snippet: []const u8) !void {
     defer vm.deinit();
 
     var w: ?diagnostic.Report = null;
-    defer if (w) |*wr| wr.deinit(alloc);
+    defer if (w) |*wr| wr.deinit();
     const wr = try warningReport(source, &vm, &w);
     const msg = diagnostic.firstWarn(wr) orelse return error.ExpectedWarning;
     try std.testing.expect(std.mem.find(u8, msg, snippet) != null);
@@ -260,7 +309,7 @@ pub fn expectWarningCode(source: []const u8, code: []const u8) !void {
     defer vm.deinit();
 
     var w: ?diagnostic.Report = null;
-    defer if (w) |*wr| wr.deinit(alloc);
+    defer if (w) |*wr| wr.deinit();
     const wr = try warningReport(source, &vm, &w);
     const got = wr.code orelse return error.ExpectedCode;
     try std.testing.expectEqualStrings(code, got);
@@ -271,7 +320,7 @@ pub fn expectSuggestion(source: []const u8, snippet: []const u8) !void {
     defer vm.deinit();
 
     var w: ?diagnostic.Report = null;
-    defer if (w) |*wr| wr.deinit(alloc);
+    defer if (w) |*wr| wr.deinit();
     const wr = try warningReport(source, &vm, &w);
     for (wr.parts) |part| {
         if (part == .suggestion and std.mem.find(u8, part.suggestion.replacement, snippet) != null) return;
@@ -284,7 +333,7 @@ pub fn expectNoWarning(source: []const u8) !void {
     defer vm.deinit();
 
     var w: ?diagnostic.Report = null;
-    defer if (w) |*wr| wr.deinit(alloc);
+    defer if (w) |*wr| wr.deinit();
     try buildOkWithWarnings(source, &vm, &w);
     try std.testing.expect(w == null);
 }
@@ -308,6 +357,7 @@ pub fn expectErrorCode(source: []const u8, code: []const u8) !void {
     defer vm.deinit();
 
     const err = try buildExpectingFailure(source, &vm);
+    defer pipeline.deinitError(err);
     defer vm.runtime.resetDiagArena();
     const got = switch (err) {
         inline else => |f| f.report.code orelse return error.ExpectedCode,
@@ -320,6 +370,7 @@ pub fn expectCompileError(source: []const u8, expected: pipeline.CompileErrorKin
     defer vm.deinit();
 
     const err = try buildExpectingFailure(source, &vm);
+    defer pipeline.deinitError(err);
     defer vm.runtime.resetDiagArena();
     switch (err) {
         .compile => |failure| try std.testing.expectEqual(expected, failure.kind),
@@ -334,6 +385,7 @@ pub fn expectSemanticError(source: []const u8) !void {
     defer vm.deinit();
 
     const err = try buildExpectingFailure(source, &vm);
+    defer pipeline.deinitError(err);
     defer vm.runtime.resetDiagArena();
     switch (err) {
         .semantic => {},
@@ -359,6 +411,7 @@ pub fn expectCompileErrorInDir(import_dir: []const u8, source: []const u8) !void
             return error.ExpectedCompileFailure;
         },
         .err => |failure| {
+            defer pipeline.deinitError(failure);
             vm.runtime.resetDiagArena();
             switch (failure) {
                 .semantic, .compile => {},
@@ -366,50 +419,6 @@ pub fn expectCompileErrorInDir(import_dir: []const u8, source: []const u8) !void
             }
         },
     }
-}
-
-fn checkExpandError(vm: *revo.VM, result: pipeline.BuildResult, expected_message: []const u8) !void {
-    switch (result) {
-        .ok => |bytecode| {
-            defer vm.runtime.alloc.free(bytecode.instructions);
-            defer vm.runtime.alloc.free(bytecode.spans);
-            return error.ExpectedCompileFailure;
-        },
-        .err => |failure| switch (failure) {
-            .expand => |diag| {
-                const msg = diagnostic.firstError(diag.report).?;
-                try std.testing.expectEqualStrings(expected_message, msg);
-                vm.runtime.resetDiagArena();
-            },
-            else => return error.ExpectedExpandFailure,
-        },
-    }
-}
-
-pub fn expectExpandError(source: []const u8, expected_message: []const u8) !void {
-    var vm = try revo.VM.init(runtime());
-    defer vm.deinit();
-
-    const result = try pipeline.build(&vm, .{ .text = source }, .{
-        .install_debug_info = false,
-    });
-
-    try checkExpandError(&vm, result, expected_message);
-}
-
-pub fn expectExpandErrorInDir(import_dir: []const u8, source: []const u8, expected_message: []const u8) !void {
-    var vm = try revo.VM.init(runtime());
-    defer vm.deinit();
-    vm.import_dir = import_dir;
-
-    const source_name = try std.Io.Dir.path.join(alloc, &.{ import_dir, "<source>" });
-    defer alloc.free(source_name);
-
-    const result = try pipeline.build(&vm, .{ .name = source_name, .text = source }, .{
-        .install_debug_info = false,
-    });
-
-    try checkExpandError(&vm, result, expected_message);
 }
 
 /// one table entry per pinned failure: stage + kind + span + message
@@ -436,6 +445,7 @@ pub fn expectFailure(source: []const u8, kind: FailureKind, expected_line: u32, 
     switch (kind) {
         .compile => |k| {
             const err = try buildExpectingFailure(source, &vm);
+            defer pipeline.deinitError(err);
             defer vm.runtime.resetDiagArena();
             const diag = switch (err) {
                 .compile => |d| d,
@@ -446,6 +456,7 @@ pub fn expectFailure(source: []const u8, kind: FailureKind, expected_line: u32, 
         },
         .semantic => {
             const err = try buildExpectingFailure(source, &vm);
+            defer pipeline.deinitError(err);
             defer vm.runtime.resetDiagArena();
             const diag = switch (err) {
                 .semantic => |d| d,

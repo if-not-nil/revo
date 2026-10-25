@@ -31,17 +31,13 @@ pub const Extracted = struct {
 
 /// a `#! ... !#` block before any code is the module's own doc
 pub fn moduleDoc(src: []const u8) ![]const u8 {
-    const result = try Lexer.lexReportAt(std.heap.page_allocator, src, .{});
-    const tokens = switch (result) {
-        .ok => |t| t,
-        .err => return "",
-    };
-    defer std.heap.page_allocator.free(tokens);
-    for (tokens) |tok| {
-        if (tok.type != .comment) {
-            if (tok.type == .module_doc) return std.mem.trim(u8, tok.text, "#! \t\r\n");
-            return "";
-        }
+    const out = Lexer.lexAll(std.heap.page_allocator, src) catch return "";
+    defer Lexer.freeLexOutput(std.heap.page_allocator, out);
+    // first module_doc trivia before any significant token (tokens end in eof)
+    const first_sig = out.tokens[0].start;
+    for (out.trivia) |tok| {
+        if (tok.type == .module_doc and tok.start < first_sig)
+            return std.mem.trim(u8, tok.text, "#! \t\r\n");
     }
     return "";
 }

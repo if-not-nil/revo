@@ -473,7 +473,9 @@ async def test_typed_table_hover(client: LanguageClient):
             )
         )
         await client.wait_for_notification("textDocument/publishDiagnostics")
-        name_col = wrapper_text.split("\n")[1].index("add")  # `pub const add: ...`
+
+        name_col = wrapper_text.split("\n")[1].index(
+            "add")  # `pub const add: ...`
         result = await client.text_document_hover_async(
             params=HoverParams(
                 position=Position(line=1, character=name_col + 1),
@@ -910,32 +912,6 @@ async def test_table_destructuring_no_diag(client: LanguageClient):
         len(diags)}: {[d.message for d in diags]}"
 
 
-@pytest.mark.skip(reason="TODO")
-@pytest.mark.asyncio(loop_scope="module")
-async def test_will_save_wait_until(client: LanguageClient):
-    """will save wait until should allow edits before saving"""
-    result = await client.text_document_will_save_wait_until_async(
-        params=WillSaveTextDocumentParams(
-            text_document=TextDocumentIdentifier(uri=TEST_URI),
-            reason=TextDocumentSaveReason.Manual,
-        ),
-    )
-    assert result is not None
-
-
-@pytest.mark.skip(reason="TODO")
-@pytest.mark.asyncio(loop_scope="module")
-async def test_formatting(client: LanguageClient):
-    """formatting should produce some edits"""
-    result = await client.text_document_formatting_async(
-        params=DocumentFormattingParams(
-            text_document=TextDocumentIdentifier(uri=TEST_URI),
-            options={"tabSize": 2, "insertSpaces": True},
-        ),
-    )
-    assert result is not None
-
-
 @pytest.mark.asyncio(loop_scope="module")
 async def test_inlay_hints(client: LanguageClient):
     """inlay hints should show inferred types"""
@@ -1139,45 +1115,6 @@ async def test_bare_import_completion_after_dot(client: LanguageClient):
         labels = [i.label for i in items]
         assert "f" in labels, f"expected 'f' completion, got: {labels}"
         assert "v" in labels, f"expected 'v' completion, got: {labels}"
-
-
-@pytest.mark.asyncio(loop_scope="module")
-async def test_module_hover_shows_macros_not_prelude(client: LanguageClient):
-    """module hover lists dep macros once, without prelude leakage"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        with open(os.path.join(tmpdir, "a.rv"), "w") as f:
-            f.write(
-                'pub let v = 5\n\npub fn f() 10\n\npub proc hi!(m) do\n\tm.items\nend\n')
-        user_path = os.path.join(tmpdir, "b.rv")
-        user_text = 'import "a"\na.hi!(:ok)\n'
-        with open(user_path, "w") as f:
-            f.write(user_text)
-        dep_uri = "file://" + os.path.join(tmpdir, "a.rv")
-        client.text_document_did_open(params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(
-                uri=dep_uri, language_id="revo", version=1,
-                text='pub let v = 5\n\npub fn f() 10\n\npub proc hi!(m) do\n\tm.items\nend\n'),
-        ))
-        await client.wait_for_notification("textDocument/publishDiagnostics")
-        user_uri = "file://" + user_path
-        client.text_document_did_open(params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(
-                uri=user_uri, language_id="revo", version=1, text=user_text),
-        ))
-        await client.wait_for_notification("textDocument/publishDiagnostics")
-        result = await client.text_document_hover_async(
-            params=HoverParams(
-                position=Position(line=1, character=0),
-                text_document=TextDocumentIdentifier(uri=user_uri),
-            )
-        )
-        assert result is not None, "hover on module name returned None"
-        value = result.contents.value
-        print("  module hover:", repr(value))
-        assert "hi!" in value, f"expected macro in hover, got: {value}"
-        assert "ok?!" not in value, f"prelude leaked into hover: {value}"
-        assert value.count(
-            "proc hi!(m) do") == 1, f"expected no duplicates, got: {value}"
 
 
 @pytest.mark.asyncio(loop_scope="module")

@@ -5,7 +5,7 @@
  ~    x for exit
  ~    ping for "pong {number of pings}"
  ~    anything else is repeated back at the user
-!#  
+!#
 
 fn serve(peer, counter) do
   print("new peer #{peer}")
@@ -25,14 +25,14 @@ fn serve(peer, counter) do
       return :nil
     end
     | {:ok, "ping"} => do
-        counter = counter + 1
-        # send the current counter back to the client.
-        peer:send("pong #{counter}\n")?
+      counter = counter + 1
+      # send the current counter back to the client
+      peer:send("pong #{counter}\n")?
     end
     | {:ok, line} => do
-        # echo any other line back to the same peer.
-        print("< #{line:p}")
-        peer:send("#{line}\n")?
+      # echo any other line back to the same peer
+      print("< #{line:p}")
+      peer:send("#{line}\n")?
     end
     | {:err, :SocketClosed} => do
       # the other side hung up, so just close our handle and stop this fiber.
@@ -45,8 +45,10 @@ fn serve(peer, counter) do
       peer:close()?
       return :nil
     end
+    | e => panic(e)
   end
 end
+
 
 fn srv(port) do
   const server = net.listen(port)?
@@ -60,6 +62,7 @@ fn srv(port) do
     spawn serve(conn, port - 1)
   end
 end
+
 
 spawn srv(6767)
 spawn srv(6768)

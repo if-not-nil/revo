@@ -79,13 +79,8 @@ pub declare panic = fn(args: any...) -> never
 #* prints values to stdout with space separator *#
 pub declare print = fn(args: any...) -> :ok
 
-#* returns a fresh unique symbol-like string, for macro hygiene *#
-pub declare gensym = fn() -> string
-
 #* hashes any value *#
 pub declare hash = fn(val: any) -> num
-
-
 
 # os
 
@@ -123,8 +118,6 @@ pub type os.InputOpts = {
   ?delimiter: string | :nil | :eof
 }
 
-
-
 # re
 
 #* regular expressions! *#
@@ -143,22 +136,19 @@ pub declare re = {
   free: fn(regex: table) -> :nil,
 }
 
-
-
 # ffi
 
 #* dynamic c calls, posix only *#
 pub declare ffi = {
-#* open a shared library, returns a handle *#
-load: fn(path: string) -> any,
-#* declare a c function, call the handle: return type + arg types as atoms *#
-func: fn(lib: any, name: string, ret: atom, args: table) -> any,
-#* declare a variadic c function: fixed prefix types + total count *#
-varfunc: fn(lib: any, name: string, ret: atom, fixed: table, total: number) -> any,
-#* errno from the last ffi call on this vm *#
-errno: fn() -> number,
+  #* open a shared library, returns a handle *#
+  load: fn(path: string) -> any,
+  #* declare a c function, call the handle: return type + arg types as atoms *#
+  func: fn(lib: any, name: string, ret: atom, args: table) -> any,
+  #* declare a variadic c function: fixed prefix types + total count *#
+  varfunc: fn(lib: any, name: string, ret: atom, fixed: table, total: number) -> any,
+  #* errno from the last ffi call on this vm *#
+  errno: fn() -> number,
 }
-
 
 #* global number helpers, calllable as `1337:nan?` and `number.nan?(1337)` *#
 pub declare number = {
@@ -179,7 +169,6 @@ pub declare number = {
   #* absolute value *#
   abs: fn(self: number) -> number,
 }
-
 
 #* global string helpers, calllable as `"hello   world":split(" ")` and `string.split("hello  world", " ")` *#
 pub declare string = {
@@ -257,7 +246,6 @@ pub declare string = {
   #* repeats string n times *#
   repeat: fn(self: string, n: num) -> string,
 }
-
 
 #* global table helpers, calllable as `{1, 2}:at(0)` and `table.at({1, 2}, 0)` *#
 pub declare table = {
@@ -351,11 +339,9 @@ pub declare table = {
   repeat: fn<T>(self: table<T>, n: num) -> table<T>,
 }
 
-
 #* dataframe functions *#
 pub declare dataframe = {
   #type Dataframe = table<string, table<any>>
-  
   #*
   returns the length of the dataframe, ensuring column lengths are equal
   *#
@@ -381,7 +367,6 @@ pub declare dataframe = {
   *#
   sort: fn(input: table<string, table<any>>, fn: function) -> table<string, table<any>>,
 }
-
 
 #* lazy iterators: range, mapping, filtering, folding and chaining *#
 pub declare iter = {
@@ -501,7 +486,6 @@ tables with __iter metamethod call __iter(obj)
 *#
 pub declare to_iter = fn(obj: any) -> function
 
-
 #* numeric math *#
 pub declare math = {
   #* absolute value *#
@@ -556,7 +540,6 @@ pub declare math = {
   close?: fn(x: num, y: num, places: num) -> bool,
 }
 
-
 #* statistics functions *#
 pub declare stats = {
   #*
@@ -609,7 +592,6 @@ pub declare stats = {
   },
 }
 
-
 #* encode values as json and decode json back into revo values *#
 pub declare json = {
   #*
@@ -620,7 +602,6 @@ pub declare json = {
   #* decodes json string into revo value *#
   decode: fn(source: string) -> !any,
 }
-
 
 #* encode values as csv and decode csvs back into revo values *#
 pub declare csv = {
@@ -670,12 +651,10 @@ pub declare csv = {
   Opts: {
     ?delimiter: string,
     ?terminator: string,
-    ?quote: string?,
+    ?quote: string | :nil,
     ?bom: bool,
   }
 }
-
-
 
 #* clocks *#
 pub declare time = {
@@ -689,14 +668,11 @@ pub declare time = {
   monotonic_ns: fn() -> num,
 }
 
-
-
 #* you already know what it is (might merge into time, idk) *#
 pub declare datetime = {
-  #* returns current date in UTC using ISO 8601 (YYYY-MM-DD) date format*#
+  #* returns current date in UTC using ISO 8601 (YYYY-MM-DD) date format *#
   today: fn() -> string,
 }
-
 
 #* tcp sockets: connect, listen, accept, send and receive *#
 pub declare net = {
@@ -723,8 +699,6 @@ pub declare socket = {
     ?delimiter: string,
   }
 }
-
-
 
 #* http *#
 
@@ -757,8 +731,6 @@ pub declare http = {
 }
 
 type http.HeaderValue = string | num | :nil
-
-
 
 # uri
 
@@ -808,8 +780,6 @@ pub declare uri = {
     ?port: num,
   }
 }
-
-
 
 # fs
 
@@ -879,8 +849,6 @@ pub declare file = {
   close: fn(self: table) -> !atom,
 }
 
-
-
 # revo
 
 #* the revo metaprogramming lib *#
@@ -913,20 +881,20 @@ pub declare revo = {
     trace: table,
   },
   #*
-  evaluates it as a module, gives you back its' return value
+  evaluates it as a module, gives you back its return value
   you can treat it as a function's body
   static and runtime failures come back as {:err, revo.EvalError}
   *#
   eval: fn(code: string) -> !any/revo.EvalError,
   #*
-  reads the file and evaluates it as a module, gives you back its' return value
+  reads the file and evaluates it as a module, gives you back its return value
   like eval but the source comes from a file, relative paths resolve
   against the current module's directory like import, then cwd
   failures (including missing files) come back as {:err, revo.EvalError}
   *#
   dofile: fn(path: string) -> !any/revo.EvalError,
   #*
-  builds it as a module, gives you back its' bytecode in a string
+  builds it as a module, gives you back its bytecode in a string
   the string is only useful for writing to a file or executing
   build failures come back as {:err, revo.EvalError}
   *#
@@ -948,8 +916,6 @@ pub declare revo = {
   #* worker thread count (see --threads) *#
   threads: fn() -> num,
 }
-
-
 
 #* compress & decompress stuff *#
 pub declare compress = {
@@ -981,7 +947,6 @@ pub declare compress = {
   xz_decompress: fn(data: string) -> !string,
 }
 
-
 #* pseudo-random numbers with a settable seed *#
 pub declare rng = {
   #* Statically sets the seed used for generation of pseudo-random numbers. *#
@@ -997,7 +962,6 @@ pub declare rng = {
   #* Returns a random element from a table, or :nil if empty (note: this function *ignores* key value pairs.) *#
   choice: fn<T>(input: table<T>) -> T | :nil,
 }
-
 
 #* command-line arguments parsing *#
 pub declare argparse = {
@@ -1050,6 +1014,7 @@ pub declare argparse = {
   usage: fn(result: argparse.Opts) -> string,
   #* a parse error, token plus its message *#
   ResultMsg: { token: string, message: string },
+
   Opts: {
     err: argparse.ResultMsg?,
     flags: table<string, string | bool> | :nil,

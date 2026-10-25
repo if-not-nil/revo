@@ -69,27 +69,28 @@ you might want to add a grammar entry for syntax highlighting
 
 ### supported features
 
-- [DONE] textDocument/didOpen
-- [DONE] textDocument/didChange
-- [DONE] textDocument/didClose
-- [DONE] textDocument/definition
-- [DONE] textDocument/hover
-- [DONE] textDocument/signatureHelp
-- [DONE] textDocument/references
-- [DONE] textDocument/documentSymbol
-- [DONE] textDocument/rename
-  - [DONE] textDocument/prepareRename
-- [STUB] textDocument/completion
-- [DONE] textDocument/publishDiagnostics
-- [DONE] textDocument/inlayHint
-- [DONE] textDocument/semanticTokens/full
-- [DONE] workspace/symbol
-- [TODO] textDocument/willSaveWaitUntil
-- [TODO] textDocument/formatting
-- [TODO] textDocument/codeAction
+- [DONE] `textDocument/didOpen`
+- [DONE] `textDocument/didChange`
+- [DONE] `textDocument/didClose`
+- [DONE] `textDocument/definition`
+- [DONE] `textDocument/hover`
+- [DONE] `textDocument/signatureHelp`
+- [DONE] `textDocument/references`
+- [DONE] `textDocument/documentSymbol`
+- [DONE] `textDocument/rename`
+  - [DONE] `textDocument/prepareRename`
+- [STUB] `textDocument/completion`
+- [DONE] `textDocument/publishDiagnostics`
+- [DONE] `textDocument/inlayHint`
+- [DONE] `textDocument/semanticTokens/full`
+- [DONE] `workspace/symbol`
+- [DONE] `textDocument/formatting`
+  - `revo fmt`
+- [DONE] `textDocument/willSaveWaitUntil`
+  - same as `textDocument/formatting`
+- [TODO] `textDocument/codeAction`
   - [TODO] inline a function
-- [TODO] textDocument/inlayHint
-- [TODO] textDocument/codeLens
+- [TODO] `textDocument/codeLens`
 
 ## server logs
 

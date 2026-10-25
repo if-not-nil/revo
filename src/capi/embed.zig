@@ -57,22 +57,26 @@ fn compileProgram(inner: *revo.VM, name: []const u8, source: []const u8) ?*Progr
             const program = self.alloc.create(Program) catch return null;
             const name_z = self.alloc.dupeSentinel(u8, name, 0) catch return null;
             const source_z = self.alloc.dupeSentinel(u8, source, 0) catch return null;
+
             program.* = .{
                 .alloc = self.alloc,
                 .name = name_z,
                 .source = source_z,
                 .bytecode = bytecode,
             };
+
             break :blk program;
         },
         .err => |failure| blk: {
             var buf = std.Io.Writer.Allocating.init(self.alloc);
             defer buf.deinit();
-            revo.lang.renderError(self.alloc, &buf.writer, .{ .name = name, .text = source }, failure, .{}) catch {
-                self.last_error = self.alloc.dupeSentinel(u8, "compile error", 0) catch null;
+
+            revo.lang.renderError(&buf.writer, .{ .name = name, .text = source }, failure, .{}) catch {
+                self.last_error = self.alloc.dupeSentinel(u8, "compile error (todo put it here)", 0) catch null;
                 inner.runtime.resetDiagArena();
                 break :blk null;
             };
+
             self.last_error = self.alloc.dupeSentinel(u8, buf.written(), 0) catch null;
             inner.runtime.resetDiagArena();
             break :blk null;
@@ -109,7 +113,7 @@ fn runProgram(inner: *revo.VM, program: *Program, out_value: ?*ErevoValue) bool 
         .err => |failure| blk: {
             var buf = std.Io.Writer.Allocating.init(self.alloc);
             defer buf.deinit();
-            failure.render(self.alloc, &buf.writer, program.source, false) catch {
+            failure.render(&buf.writer, program.source, false) catch {
                 self.last_error = self.alloc.dupeSentinel(u8, "runtime error", 0) catch null;
                 inner.runtime.resetDiagArena();
                 break :blk false;

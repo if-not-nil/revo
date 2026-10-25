@@ -4,8 +4,7 @@ const std = @import("std");
 
 const common = @import("common.zig");
 
-const ast = @import("../ast.zig");
-const Parser = @import("../Parser.zig");
+const cst = @import("../cst.zig");
 const pipeline = @import("../pipeline.zig");
 const txt = @import("text.zig");
 const type_syntax = @import("../type_syntax.zig");
@@ -73,7 +72,7 @@ pub fn inlayHints(
         });
     }
 
-    try appendParamHints(self, alloc, &hints, id, snap.text);
+    try appendParamHints(self, alloc, &hints, id);
 
     return hints.toOwnedSlice(alloc);
 }
@@ -85,23 +84,30 @@ const ParamHintVisitor = struct {
     hints: *std.ArrayList(InlayHint),
     alloc: std.mem.Allocator,
 
-    pub fn visit(self: *@This(), node: *const ast.Node) void {
-        switch (node.expr) {
-            .call => |c| if (c.callee.expr == .ident and !c.implicit_self and c.args.len > 0) {
-                const names = self.paramNames(c.callee.expr.ident);
-                defer self.alloc.free(names);
-                for (c.args, 0..) |arg, i| {
-                    if (i >= names.len) break;
-                    self.hints.append(self.alloc, .{
-                        .position = .{ .line = arg.span.line, .character = arg.span.column },
-                        .label = names[i],
-                        .kind = .parameter,
-                    }) catch return;
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
+        switch (node.kind) {
+            .call => |c| {
+                const cu = cst.unwrapParen(c.callee) orelse return;
+                if (cu.kind == .ident and c.args.len > 0) {
+                    self.appendCallHints(cu.kind.ident.tok.text, c.args);
                 }
             },
             else => {},
         }
-        ast.walkAST(@This(), self, node);
+        cst.walkCst(@This(), self, node);
+    }
+
+    fn appendCallHints(self: *@This(), name: []const u8, args: []const *cst.CstNode) void {
+        const names = self.paramNames(name);
+        defer self.alloc.free(names);
+        for (args, 0..) |arg, i| {
+            if (i >= names.len) break;
+            self.hints.append(self.alloc, .{
+                .position = .{ .line = arg.span.line, .character = arg.span.column },
+                .label = names[i],
+                .kind = .parameter,
+            }) catch return;
+        }
     }
 
     fn paramNames(self: *@This(), name: []const u8) []const []const u8 {
@@ -121,7 +127,7 @@ const ParamHintVisitor = struct {
 
         if (common.baselibSig(name)) |spec| {
             var out = std.ArrayList([]const u8).empty;
-            for (spec.type.kind.function.params) |p| out.append(self.alloc, p.name) catch {
+            for (spec.type.kind.function.params) |p| out.append(self.alloc, p.name_tok.text) catch {
                 out.deinit(self.alloc);
                 return &.{};
             };
@@ -139,13 +145,11 @@ fn appendParamHints(
     alloc: std.mem.Allocator,
     hints: *std.ArrayList(InlayHint),
     id: FileId,
-    text: []const u8,
 ) !void {
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    defer arena.deinit();
-    const parsed = Parser.parseSourceReport(arena.allocator(), text, .{}) catch return;
+    const parsed_entry = ws.parsed(id, false) catch return;
+    const parsed = parsed_entry.result;
     const root = switch (parsed) {
-        .ok => |r| r,
+        .ok => |r| r.root,
         .err => return,
     };
     var visitor = ParamHintVisitor{ .ws = ws, .id = id, .hints = hints, .alloc = alloc };

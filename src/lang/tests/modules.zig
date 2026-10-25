@@ -57,22 +57,6 @@ test "module non-pub values are not exported" {
     , 42);
 }
 
-test "cross-module proc macro injection works" {
-    var m = try t.TmpMod.init(&.{
-        .{ .path = "procs.rv", .data =
-        \\ pub proc add_one!(iter) do
-        \\   let n = iter:next()
-        \\   {{:binary, :add, n, {:number, 1}}}
-        \\ end
-        },
-    });
-    defer m.deinit();
-    try t.topNumberInDir(m.dir,
-        \\ import "./procs"
-        \\ procs.add_one!(41)
-    , 42);
-}
-
 test "const x = import \"foo\" with different names binds both" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "mymod.rv", .data = "pub const val = 42\n" },

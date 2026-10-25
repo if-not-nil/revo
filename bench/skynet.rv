@@ -2,8 +2,9 @@
 # ported to revo by cb:0riginaln0 gh:0riginaln0
 let start = time.now()
 
+
 fn skynet(num, size) do
-  if size <= 1 return num
+  if (size <= 1) return num
   size /= 10
   let acc = 0
   for i in 0..10 do
@@ -12,6 +13,7 @@ fn skynet(num, size) do
   end
   acc
 end
+
 
 let root = spawn skynet(0, 1000000)
 print("Res:", join(root))

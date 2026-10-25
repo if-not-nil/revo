@@ -32,8 +32,6 @@ pub const Runtime = struct {
     input_buf: [4096]u8 = undefined,
     input_buf_len: usize = 0,
 
-    gensym_counter: u64 = 0,
-
     supports_color: bool = term.defaultSupportsColor(),
 
     /// ret: a new runtime with its own vm
@@ -285,7 +283,7 @@ pub fn printBuildError(gpa: std.mem.Allocator, source_info: lang.Source, err: la
     if (comptime is_freestanding) return;
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
-    lang.renderError(gpa, &buf.writer, source_info, err, .{ .color = color }) catch {};
+    lang.renderError(&buf.writer, source_info, err, .{ .color = color }) catch {};
     std.debug.print("{s}", .{buf.written()});
 }
 
@@ -294,7 +292,7 @@ pub fn printBuildWarning(gpa: std.mem.Allocator, source_info: lang.Source, repor
     if (comptime is_freestanding) return;
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
-    lang.renderWarnings(gpa, &buf.writer, source_info, report, .{ .color = color }) catch {};
+    lang.renderWarnings(&buf.writer, source_info, report, .{ .color = color }) catch {};
     std.debug.print("{s}", .{buf.written()});
 }
 
@@ -303,7 +301,7 @@ pub fn printRunError(gpa: std.mem.Allocator, source: []const u8, failure: RunFai
     if (comptime is_freestanding) return;
     var buf = std.Io.Writer.Allocating.init(gpa);
     defer buf.deinit();
-    failure.render(gpa, &buf.writer, source, color) catch {};
+    failure.render(&buf.writer, source, color) catch {};
     std.debug.print("{s}", .{buf.written()});
 }
 
@@ -384,6 +382,7 @@ pub const RunFailure = vm.RunFailure;
 pub const RunResult = vm.RunResult;
 
 pub const argparse = @import("./argparse.zig");
+pub const diff = @import("./diff.zig");
 pub const baselib = @import("./baselib/root.zig");
 pub const baselib_net = @import("./baselib/net.zig");
 pub const extension = @import("./extension.zig");

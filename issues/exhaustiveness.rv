@@ -1,11 +1,11 @@
 # [x] this is exhaustive
 match {10, :ok}
-  | {n, :ok} => "small success"
+| {n, :ok} => "small success"
 
 # [x] this is exhaustive
 match {:ok}
-  | {a} => a
+| {a} => a
 
 # [x] autofix must suggest the correct shape
 match {42}
-  | n: number => n
+| n: number => n

@@ -7,21 +7,48 @@ const VM = revo.VM;
 
 const t = revo.lang.test_helpers;
 
-test "lang surface exports parse and build pipeline entrypoints" {
+fn expectParseError(source: []const u8, needle: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
 
-    const parsed = try lang.parse(arena.allocator(), .{ .text = "sys.print \"hello\"" }, .{});
-    try std.testing.expect(parsed == .ok);
-    try std.testing.expect(parsed.ok.root.expr == .call);
+    const parsed = try lang.parse(arena.allocator(), .{ .text = source }, .{});
+    switch (parsed) {
+        .ok => return error.ExpectedParseFailure,
+        .err => |failure| {
+            for (failure.report.parts) |part| {
+                if (part == .@"error" and std.mem.find(u8, part.@"error", needle) != null) return;
+            }
+            return error.ExpectedParseMessage;
+        },
+    }
+}
 
-    var vm = try VM.init(t.runtime());
-    defer vm.deinit();
-    const built = try lang.build(&vm, .{ .text = "1 + 1" }, .{});
-    try std.testing.expect(built == .ok);
-    defer vm.runtime.alloc.free(built.ok.instructions);
-    defer vm.runtime.alloc.free(built.ok.spans);
-    try std.testing.expect(built.ok.instructions.len != 0);
+test "bare calls take exactly one argument" {
+    try expectParseError(
+        \\ fn f(a) a
+        \\ f "x" "y"
+    , "bare calls take exactly one argument");
+}
+
+test "bare calls cannot chain off a call result" {
+    try expectParseError(
+        \\ fn g() fn(x) x
+        \\ g() "x"
+    , "a bare call cannot follow a call result");
+}
+
+test "colon calls need parens around a bare argument" {
+    try expectParseError(
+        \\ const o = {m = fn(self, x) x}
+        \\ o:m "x"
+    , "method calls need parentheses");
+}
+
+test "generic calls need parens around a bare argument" {
+    try expectParseError(
+        \\ fn id<T>(x) x
+        \\ id<int> "x"
+    , "generic calls need parentheses");
 }
 
 test "parser treats semicolons as whitespace characters" {
@@ -66,7 +93,7 @@ test "parser reports multiple syntax errors in one pass" {
 
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
-            try lang.renderError(alloc, &buf.writer, .{ .text = source }, .{ .parse = failure }, .{});
+            try lang.renderError(&buf.writer, .{ .text = source }, .{ .parse = failure }, .{});
             try std.testing.expect(buf.written().len != 0);
         },
         else => return error.ExpectedCompileFailure,

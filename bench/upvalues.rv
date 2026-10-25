@@ -1,11 +1,12 @@
 fn shallow(count) do
-    let x = 0
-    for i in 0..count do
-        let f = fn() x + i
-        x = f()
-    end
-    x
+  let x = 0
+  for i in 0..count do
+    let f = fn() x + i
+    x = f()
+  end
+  x
 end
+
 
 print(shallow(100))
 

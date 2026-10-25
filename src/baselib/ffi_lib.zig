@@ -30,9 +30,6 @@ const type_names = "i32|u32|i64|u64|f32|f64|bool|ptr|void|string";
 
 const Kind = enum(u8) { lib, func, ptr };
 
-/// one heap box per handle
-/// . libs live in `loaded_extensions` til destroy (never closed early)
-/// ; funcs die by metatable `__gc`
 const Box = struct {
     kind: Kind,
     lib_index: usize = 0,

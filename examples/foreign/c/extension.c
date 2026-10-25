@@ -221,8 +221,7 @@ static int total_free_fn(void *vm, size_t argc, RevoValue *argv,
   return REVO_OK;
 }
 
-// every binding lands flat in the module table at import time.
-// callers ascribe the entries they use; types live in revo, not here.
+// every binding lands flat in the module table at import time
 __attribute__((visibility("default"))) const RevoBinding revo_bindings[] = {
     {"greet", greet_fn},
     {"add", add_fn},

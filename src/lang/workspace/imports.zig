@@ -2,7 +2,7 @@
 
 const std = @import("std");
 
-const ast = @import("../ast.zig");
+const cst = @import("../cst.zig");
 const common = @import("common.zig");
 const Parser = @import("../Parser.zig");
 const pipeline = @import("../pipeline.zig");
@@ -82,54 +82,69 @@ pub fn symbolsFromDep(self: *Workspace, alloc: std.mem.Allocator, dep_id: FileId
 /// and return the resolved import path (caller frees)
 pub fn findImportPathForBinding(self: *Workspace, alloc: std.mem.Allocator, file_id: FileId, name: []const u8) ?[]const u8 {
     const snap = self.snapshot(file_id) orelse return null;
+
+    // full text
+    // use the lazy cached parse
+    if (self.parsed(file_id, false) catch null) |entry| {
+        if (entry.result == .ok) {
+            if (FindImportVisitor.find(entry.result.ok.root, name)) |result| {
+                return alloc.dupe(u8, result) catch null;
+            }
+        }
+    }
+
     // the buffer usually ends mid-access (`mod.<cursor>`)
     //   , which never parses
     //     : retry once without the last line, where imports live
-    const texts: [2][]const u8 = .{ snap.text, txt.stripLastLine(snap.text) };
-    for (texts) |text| {
-        const parsed = Parser.parseSourceReport(alloc, text, .{}) catch continue;
-        const root = switch (parsed) {
-            .ok => |n| n,
-            .err => continue,
-        };
-        defer alloc.destroy(root);
-        const result = FindImportVisitor.find(root, name) orelse continue;
-        return alloc.dupe(u8, result) catch null;
-    }
-    return null;
+    const stripped = txt.stripLastLine(snap.text);
+    if (stripped.len == snap.text.len) return null;
+
+    const parsed = Parser.parseSourceReport(alloc, stripped, .{}) catch return null;
+    const root = switch (parsed) {
+        .ok => |n| n,
+        .err => return null,
+    };
+    const result = FindImportVisitor.find(root, name) orelse return null;
+    return alloc.dupe(u8, result) catch null;
 }
 
 const FindImportVisitor = struct {
     target: []const u8,
     result: ?[]const u8,
 
-    fn find(root: *const ast.Node, name: []const u8) ?[]const u8 {
+    fn find(root: *const cst.CstNode, name: []const u8) ?[]const u8 {
         var visitor = FindImportVisitor{ .target = name, .result = null };
-        ast.walkAST(FindImportVisitor, &visitor, root);
+        cst.walkCst(FindImportVisitor, &visitor, root);
         return visitor.result;
     }
 
-    pub fn visit(self: *@This(), node: *const ast.Node) void {
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
         if (self.result != null) return;
-        if (node.expr == .decl) {
-            const d = node.expr.decl;
-            if (d.inner.expr == .binding) {
-                const b = d.inner.expr.binding;
-                if (b.target.expr == .ident and std.mem.eql(u8, b.target.expr.ident, self.target)) {
-                    if (b.value.expr == .import_stmt) {
-                        self.result = b.value.expr.import_stmt.path;
+        const u = cst.unwrapParen(node) orelse return;
+        if (u.kind == .decl) {
+            const d = u.kind.decl;
+            const inner = cst.unwrapParen(d.inner) orelse return;
+            if (inner.kind == .binding) {
+                const b = inner.kind.binding;
+                const bt = cst.unwrapParen(b.target) orelse return;
+                if (bt.kind == .ident and std.mem.eql(u8, bt.kind.ident.tok.text, self.target)) {
+                    const bv = cst.unwrapParen(b.value) orelse return;
+                    if (bv.kind == .import and bv.kind.import.items.len > 0) {
+                        self.result = bv.kind.import.items[0].path.text;
                     }
                 }
             }
+            return;
         }
         // bare `import "path"`: auto-bound name is the path stem
-        if (node.expr == .import_stmt) {
-            const stmt = node.expr.import_stmt;
-            if (std.mem.eql(u8, autoImportName(stmt.path), self.target)) {
-                self.result = stmt.path;
+        if (u.kind == .import) {
+            for (u.kind.import.items) |item| {
+                if (std.mem.eql(u8, autoImportName(item.path.text), self.target)) {
+                    self.result = item.path.text;
+                }
             }
         }
-        ast.walkAST(FindImportVisitor, self, node);
+        cst.walkCst(FindImportVisitor, self, node);
     }
 };
 

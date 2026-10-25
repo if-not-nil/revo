@@ -5,14 +5,6 @@
 //! yes there are hella re-exports and its 100% intentional
 //! dont hit "organize @import"
 //!
-//! workspace/ providers, one file per ide feature:
-//!   store (file entries + open/close), cache (build cache put/get),
-//!   analyze (analyzeDetailed/inspect orchestration), common (shared
-//!   copy/free/report helpers), text (offsets, edits, spans),
-//!   imports (import graph edges), deps (dependents + invalidation),
-//!   symbols (document/workspace symbols + index), definition (go to),
-//!   hover, signature, completion, inlay (per-position queries)
-//!   query (salsa-style input hashes + revision guard, taking over)
 
 pub const Workspace = @This();
 alloc: std.mem.Allocator,
@@ -24,14 +16,11 @@ dependencies: std.AutoHashMap(FileId, []FileId),
 reverse_deps: std.AutoHashMap(FileId, []FileId),
 cache: std.AutoHashMap(FileId, CacheEntry), // full build cache
 inspect_cache: std.AutoHashMap(FileId, InspectCacheEntry), // quick inspect cache
-query_db: query_mod.QueryDb, // input hashes + revision, todo legacy caches still serve reads
+parsed_cache: std.AutoHashMap(FileId, *ParsedEntry), // lazy parse per content version
+query_db: query_mod.QueryDb, // content hashes, guards no-op changes
 symbol_index: std.StringHashMap([]IndexedSymbol),
 symbol_index_dirty: bool = true,
 next_file_id: FileId = 1,
-// baselib macro names, parsed once
-//   strs borrow embedded srcs, only list owned
-//   keeps completions off per-keystroke reparse
-macro_names_cache: ?[][]const u8 = null,
 
 //
 // types
@@ -62,6 +51,21 @@ pub const CacheEntry = struct {
     symbols: []Symbol,
 };
 
+/// held per content version
+///   arena owns the whole cst + failure report
+pub const ParsedEntry = struct {
+    version: u32,
+    repl_mode: bool,
+    arena: std.heap.ArenaAllocator,
+    result: pipeline.ParseResult,
+    warnings: ?diagnostic.Report = null,
+
+    pub fn deinit(self: *ParsedEntry, alloc: std.mem.Allocator) void {
+        self.arena.deinit();
+        alloc.destroy(self);
+    }
+};
+
 /// cached fn sig: params as name+type pairs, return type, doc
 pub const FnSig = struct {
     params: []ParamInfo,
@@ -75,7 +79,6 @@ pub const InspectCacheEntry = struct {
     version: u32,
     opts: pipeline.BuildOptions,
     symbols: []Symbol,
-    dependencies: []FileId,
     diagnostics: ?pipeline.Error = null,
     sig_map: std.StringHashMapUnmanaged(FnSig) = .empty,
     /// declared name -> doc text, from the semantic pass
@@ -108,10 +111,10 @@ pub const Analysis = struct {
             alloc.free(bytecode.spans);
         }
         if (self.diagnostics) |err| {
-            pipeline.deinitError(alloc, err);
+            pipeline.deinitError(err);
         }
         if (self.warnings) |*w| {
-            w.deinit(alloc);
+            w.deinit();
         }
         freeSymbols(alloc, self.symbols);
         alloc.free(self.dependencies);
@@ -123,7 +126,6 @@ pub const SymbolKind = enum {
     function,
     param,
     type_alias,
-    macro,
 };
 
 pub const Symbol = struct {
@@ -198,6 +200,7 @@ pub fn init(alloc: std.mem.Allocator) !Workspace {
         .reverse_deps = std.AutoHashMap(FileId, []FileId).init(alloc),
         .cache = std.AutoHashMap(FileId, CacheEntry).init(alloc),
         .inspect_cache = std.AutoHashMap(FileId, InspectCacheEntry).init(alloc),
+        .parsed_cache = std.AutoHashMap(FileId, *ParsedEntry).init(alloc),
         .query_db = query_mod.QueryDb.init(alloc),
         .symbol_index = std.StringHashMap([]IndexedSymbol).init(alloc),
     };
@@ -225,10 +228,7 @@ pub fn deinit(self: *Workspace) void {
     self.reverse_deps.deinit();
     self.cache.deinit();
     self.inspect_cache.deinit();
-    if (self.macro_names_cache) |names| {
-        for (names) |n| self.alloc.free(n);
-        self.alloc.free(names);
-    }
+    self.parsed_cache.deinit();
     {
         var it = self.symbol_index.iterator();
         while (it.next()) |entry| {
@@ -249,6 +249,9 @@ pub const close = store.close;
 
 /// ret: borrow of file metadata
 pub const snapshot = store.snapshot;
+
+/// lazy parse for a file/version; parses on first use and caches the CST
+pub const parsed = store.parsed;
 
 /// check if cached version is outdated
 pub const isStale = store.isStale;
@@ -376,31 +379,14 @@ pub const dependencyClosure = deps_mod.dependencyClosure;
 /// recursive deps walker; visited prevents cycles
 pub const collectDependencyClosure = deps_mod.collectDependencyClosure;
 
-///
-/// walk ast & collect
-///     bindings, functions, type aliases
-///
-/// full dotted macro names from baselib manifests
-///     (`uri.asdf!`)
-///
-/// names borrow the embedded sources (static)
-/// ; only the list is owned
-/// . callers split scope from member
-/// ; the parser caps heads at one dot.
-///
-pub const baselibMacroNames = symbols_mod.baselibMacroNames;
-
-/// cached macros, parsed once
-///   same names as `baselibMacroNames`
-///   owned by `ws.alloc`, dont free
-pub const baselibMacroNamesCached = symbols_mod.baselibMacroNamesCached;
-
+/// walk cst & collect
+///   bindings, functions, type aliases
 pub const collectSymbolsFromParsed = symbols_mod.collectSymbolsFromParsed;
 
-/// walk AST for fn_expr bindings and populate sig_map with ParamInfo slices
+/// walk cst for fn_expr bindings and populate sig_map with ParamInfo slices
 pub const collectSigsFromParsed = symbols_mod.collectSigsFromParsed;
 
-/// walk AST for import expressions and resolve them to FileIds
+/// walk cst for import expressions and resolve them to FileIds
 pub const collectDepsFromParsed = symbols_mod.collectDepsFromParsed;
 
 /// id -> mut *FileEntry
@@ -470,6 +456,7 @@ pub const FileId = txt.FileId;
 pub const Position = txt.Position;
 pub const Range = txt.Range;
 pub const Location = txt.Location;
-pub const buildASTSpanMap = txt.buildASTSpanMap;
+pub const buildCstSpanMap = txt.buildCstSpanMap;
+pub const cstSpanMap = analyze_mod.cstSpanMap;
 pub const QueryDb = query_mod.QueryDb;
 pub const hashText = query_mod.hashText;

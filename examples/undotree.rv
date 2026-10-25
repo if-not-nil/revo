@@ -40,6 +40,8 @@ pub type State<T> = {
 }
 
 #* helper function because math.max doesn't do tables *#
+
+
 fn _histmax(t: table<number>) do
   let o = 0
   for n in t
@@ -48,6 +50,8 @@ fn _histmax(t: table<number>) do
 end
 
 #* add a child state to the current one, returns id of the child *#
+
+
 pub fn add<T>(self: History<T>, data: T) -> number do
   let newst = {data = data, parent_id = self.cur, child_ids = {}}
   self.tl[self.cur].child_ids:push(self.idc + 1)
@@ -58,64 +62,74 @@ pub fn add<T>(self: History<T>, data: T) -> number do
 end
 
 #* go up one level, returns that level's data *#
+
+
 pub fn undo<T>(self: History<T>) -> Result<T> do
   match self.tl[self.cur].parent_id
-    | :root => {:err, :AtTheRoot}
-    | v when number?(v) => do
-        if self.tl[v] == :undef
-          return {:err, :InvalidParentId}
-        self.cur = v
-        {:ok, self.tl[self.cur].data}
-      end
-    | _ => {:err, :InvalidParentId}
+  | :root => {:err, :AtTheRoot}
+  | v when number?(v) => do
+    if (self.tl[v] == :undef)
+      return {:err, :InvalidParentId}
+    self.cur = v
+    {:ok, self.tl[self.cur].data}
+  end
+  | _ => {:err, :InvalidParentId}
 end
 
 #* go to the :latest (child state with the biggest id) or given state, returns its data *#
+
+
 pub fn redo<T>(self: History<T>, to: number | :latest) -> Result<T> do
   match to
   | :latest => do
-      if self.tl[self.cur].child_ids:len() > 0 do
-        self.cur = _histmax(self.tl[self.cur].child_ids)
-        {:ok, self.tl[self.cur].data}
-      end
+    if self.tl[self.cur].child_ids:len() > 0 do
+      self.cur = _histmax(self.tl[self.cur].child_ids)
+      {:ok, self.tl[self.cur].data}
+    end
 
-      {:err, :NoChildren}
+    {:err, :NoChildren}
   end
   | n: number when n < self.idc => do
-      self.cur = n
-      {:ok, self.tl[self.cur].data}
+    self.cur = n
+    {:ok, self.tl[self.cur].data}
   end
   | _ => {:err, :NoSuchState}
 end
 
 #* internal impl of history dump *#
+
+
 fn _dump_rec<T>(self: History<T>, start: State<T>, lvl: number, cur: number) -> string do
   let o =
-    (if self.cur == cur ('> ') else '  ') ~ ('| ':repeat(lvl)) ~ "#{start.data:?} (#{cur})\n"
+    (if (self.cur == cur) ('> ') else '  ') ~ ('| ':repeat(lvl)) ~ "#{start.data:?} (#{cur})\n"
   for ch in start.child_ids do
     let newst = self.tl[ch]
-    o ~= _dump_rec(self, newst, lvl+1, ch)
+    o ~= _dump_rec(self, newst, lvl + 1, ch)
   end
   o
 end
 
 #* dump history as a human-readable string akin to `tree`, includes the "cursor" *#
+
+
 pub fn dump<T>(self: History<T>) -> string do
   _dump_rec(self, self.tl[0], 0, 0)
 end
 
 #* create a tree from a starting state *#
+
+
 pub fn start<T>(data: T) -> History<T>
-  set_meta(
-    {
-      tl = { {data=data, parent_id = :root, child_ids = {}} },
-      cur = 0,
-      idc = 0
-    },
-    {
-      undo = undo,
-      redo = redo,
-      add = add,
-      dump = dump,
-    }
-  )
+    set_meta(
+      {
+        tl = { {data = data, parent_id = :root, child_ids = {}} },
+        cur = 0,
+        idc = 0
+      },
+      {
+        undo = undo,
+        redo = redo,
+        add = add,
+        dump = dump,
+      }
+    )

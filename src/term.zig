@@ -80,7 +80,7 @@ pub fn replStyleDef(styleName: []const u8) [:0]const u8 {
 
 pub fn fatal(comptime format: []const u8, args: anytype, vm: ?*revo.VM) noreturn {
     if (comptime !revo.is_freestanding) {
-        std.debug.print("a very unexpected error occured. please report to https://github.com/if-not-nil/revo", .{});
+        std.debug.print("a very unexpected error occurred. please report to https://github.com/if-not-nil/revo", .{});
         if (vm) |v|
             std.debug.print("info:\npc {}", .{v.currentFiber().pc});
         std.debug.panic(format, args);

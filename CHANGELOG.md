@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 the table version `┬─┬ノ( º _ ºノ)`
 
-tuples and structs are gone now, most breaking change yet
+tuples, macros, and structs are gone now\
+most breaking change yet
 
 ### Added
 
 - structural table types: annotate tables by shape with `{ name: string, age: num }`
-  - structs deprecated in favour of this, should be removed by 0.1.3
+  - replaces the old `struct` type
   - open subtyping: extra fields are ok, missing or mistyped fields are compile errors
   - field access on a structurally typed table infers the field's type
   - tracks both array and hash entries
@@ -26,7 +27,7 @@ tuples and structs are gone now, most breaking change yet
   greet({ name = "bob", age = 40 }) # "bob"
   ```
 
-  - and the related lsp feats...
+  - related lsp feats:
     - unknown-field diagnostics: reading `t.a` where every field of `t` is known
       and lacks `a` is now a compile error
 
@@ -40,11 +41,7 @@ tuples and structs are gone now, most breaking change yet
     - lsp hover shows record field values: `t: {name: string = "me"}`
       for table literals instead of just the shape
 
-    - lsp module hover lists macros: `pub proc`/`macro` decls show up
-      in `a.` hover and completions; prelude macros no longer leak
-      into dependency members with bogus lines
-
-    - now carry severity of either err, warning, note, or help
+- `revo fmt`, the simple standard formatter
 
 - ffi!
   dynamically call any & all c functions right from revo
@@ -130,7 +127,7 @@ tuples and structs are gone now, most breaking change yet
     | 1, 2 => :right
     ```
 
-  it tries each pattern in order, firsr hit wins\
+  it tries each pattern in order, first hit wins\
   bindings share one slot per name across the alternatives
 
 - a match miss falls through to nil, and the type knows it;\
@@ -168,7 +165,25 @@ tuples and structs are gone now, most breaking change yet
   {41, 42, 43}[..-1..] == {43, 42, 41}
   ```
 
+- interpolated strings are sugar nodes now
+
+- repl waits for unfinished input across lines
+
 - diagnostics have severity (err, warning, note, help) and slug codes. works for lsp as well
+
+- diagnostics rework:
+  - secondary spans on the primary's line underline inline
+  - suggestions render as diffs
+
+    ```ruby
+    help: add an explicit nil arm
+     --> <inline>:2:9
+       |
+     2 |  | 1 => 2
+     + |  | _ => :nil
+       |
+    ```
+  - `examples/errors.rv` is the error gallery you can run
 
 - std:
   - `revo.lex(code)` lexes source into an array of `revo.LexToken` tables
@@ -235,8 +250,9 @@ tuples and structs are gone now, most breaking change yet
 
 ### Removed
 
+- all macros gone: no `proc` macros, quasiquote, or `macro` keyword
 - `.d.rv` files are gone, no backcompat
-  see `extensions/foreign/*` and `src/baselib/base.rv`
+  see `examples/foreign/*` and `src/baselib/base.rv`
 - loop-accumulator promotion pass
   only fired on simple linear `r = r + 1` chains and i didnt know what i was doing when i made it
 - struct type, `struct Name { ... }`, is gone
@@ -244,6 +260,11 @@ tuples and structs are gone now, most breaking change yet
   use tables with closures instead: `{ name = "ana", greet = fn(self) ... }`
 
 ### Changed
+
+- bare calls tightened
+  - chained args (`f "x" "y"`) and bare calls on call results are parse errors
+  - `f (x)` still means `f` then `(x)`, but now warns with `space-before-call` and suggests `f; x`
+  - `revo fmt` keeps one space before bare string and table args
 
 - failures in functions that run revo code come back as `{:err, revo.EvalError}` tables
 
@@ -292,15 +313,13 @@ tuples and structs are gone now, most breaking change yet
 - lang/ import untangle, breaking if you reached into it
   - one explicit `CheckCtx` interface (`compiler/types.zig`) replaces the four
     duck-typed scopes; inference fns take it instead of `anytype`
-  - `type_serde` is text-only now: eval moved next to inference in
-    `compiler/types.zig`, TypeExpr printing/cloning lives in `ast.zig`
   - `parseSource`/`parseSourceReport` moved to `Parser` (pure frontend entry,
     no prelude); `pipeline.parse` keeps the baselib merge
   - `compiler/type_check.zig` is gone, its methods live on `Compiler`
   - semantic failures carry their own `semantic.Failure` instead of borrowing
     the lowering kind; test helpers split by stage (`expectSemanticError`,
     `expectSemanticFailure`)
-  - pipeline split into `pipeline/` companions (`module_scope`, `import_preload`)
+  - pipeline split into `pipeline/` companions (`scope_wiring`, `import_scan`)
   - integration tests moved from `compiler/types.zig` to `tests.zig`
   - `lang.types` is `lang.compiler.types` now, `lang.ir` no longer hangs off
     `compiler`, `parser` binding is `Parser` like `Lexer`
@@ -333,18 +352,11 @@ tuples and structs are gone now, most breaking change yet
 
 - type-to-string rendering is unified
 - rendered types use spaces
-- internal
-  - `.d.rv` simplified:
-    - can now include type aliases
-    - any `__` key now lands in a metatable automatically
-    - macro prelude killed and put into `root.d.rv`
 
 ### Fixed
 
 - host functions dropped explicit `:false` bool args: `unwrapArg` used `isBoolAtom` (true for both `:true`
   and `:false`) as the value instead of comparing against `:true`
-- `promote.zig`'s `[8]Register` buffer was too small for `call_field`
-  instructions with too many args
 - `const x = import "raylib.so"` named imports resolve like a plain
   `import "raylib.so"`
 - lsp signatures show generics and optional params:
@@ -358,6 +370,7 @@ tuples and structs are gone now, most breaking change yet
 - `table` array parts hold 4 inline slots before spilling to the heap
   , so small tables skip array growth allocs and bulk appends size once instead of chaining
 - paren calls now require a hug (no space between parens and callee)
+- ...and others. too many to count
 
 ## [0.1.2] - 2026-09-05
 
@@ -404,7 +417,7 @@ big release - many misc bugs are fixed but not noted
 
 - baselib:
   - `exit(number)`
-  - `revo.dofile(path)` -- do file & return; resole path like `import`
+  - `revo.dofile(path)` -- do file & return; resolve path like `import`
   - `csv.decode`, `csv.encode`
   - `os.getenv`, `os.setenv`
   - trig functions and sign in `math`
@@ -546,7 +559,7 @@ big release - many misc bugs are fixed but not noted
 - compiler return type propagation
 
 [Unreleased]: https://github.com/if-not-nil/revo/compare/0.1.2...HEAD
-[0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
+[0.1.2]: https://github.com/if-not-nil/revo/compare/0.1.1...0.1.2
 [0.1.1]: https://github.com/if-not-nil/revo/compare/0.1.0a...0.1.1
 [0.1.0a]: https://github.com/if-not-nil/revo/releases/tag/0.1.0a
 

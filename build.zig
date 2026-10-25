@@ -305,7 +305,6 @@ pub fn build(b: *Build) !void {
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
     const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, ffi, zig_backend") orelse
-        // isocline needs libc and not wasm; wasi gets lsp but not isocline
         // async is disabled on windows/wasi/freestanding (handled in src/root.zig)
         if (is_freestanding) "" else if (is_wasm) "regex" else "lsp,isocline,regex,mimalloc,ffi";
 

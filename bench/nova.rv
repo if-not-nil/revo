@@ -4,16 +4,16 @@ let start = time.now()
 let found: int = 0
 
 for num in 0..20001 do
-    let sum: int = 0
-    for j in 1..num do
-        if num % j == 0
-            sum += j
-    end
+  let sum: int = 0
+  for j in 1..num do
+    if (num % j == 0)
+      sum += j
+  end
 
-    if num == sum do
-        found += 1
-        print(fmt("found %v (%vth perfect number)", num, found))
-    end
+  if num == sum do
+    found += 1
+    print(fmt("found %v (%vth perfect number)", num, found))
+  end
 end
 
 print(fmt("found %v perfect numbers", found))

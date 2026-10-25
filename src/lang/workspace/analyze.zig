@@ -4,12 +4,13 @@ const std = @import("std");
 
 const revo = @import("revo");
 
-const ast = @import("../ast.zig");
+const cst = @import("../cst.zig");
 const common = @import("common.zig");
 const diagnostic = @import("../diagnostic.zig");
+const hir = @import("../hir.zig");
 const pipeline = @import("../pipeline.zig");
-const scope_graph_mod = @import("../scope_graph.zig");
 const semantic = @import("../semantic.zig");
+const txt = @import("text.zig");
 const types = @import("../compiler/types.zig");
 
 const W = @import("../Workspace.zig");
@@ -37,6 +38,16 @@ pub fn analyze(
     return .{ .err = analysis.diagnostics.? };
 }
 
+/// semantic token role map off the cached parse
+pub fn cstSpanMap(self: *Workspace, arena: std.mem.Allocator, id: FileId) ?std.AutoHashMap(usize, u32) {
+    const entry = self.parsed(id, false) catch return null;
+    const root = switch (entry.result) {
+        .ok => |r| r.root,
+        .err => return null,
+    };
+    return txt.cstSpanMapFromRoot(arena, root);
+}
+
 /// full compile
 /// ret: detailed Analysis with bytecode + diagnostics
 pub fn analyzeDetailed(
@@ -47,23 +58,19 @@ pub fn analyzeDetailed(
 ) !Analysis {
     const snap = self.snapshot(id) orelse return error.FileNotOpen;
     const vm = self.vm orelse return error.VmUnavailable;
+
     if (self.cache.get(id)) |cached| {
         if (cached.version == snap.version and common.sameOpts(cached.opts, opts)) {
             const bytecode = try common.copyBytecode(alloc, cached.bytecode);
             errdefer common.deinitBytecode(alloc, bytecode);
             var warnings: ?diagnostic.Report = null;
-            errdefer if (warnings) |*w| w.deinit(alloc);
+
+            errdefer if (warnings) |*w| w.deinit();
             if (cached.warnings) |cached_w| {
-                var wcopy = try cached_w.copy(alloc);
-                wcopy.source_name = alloc.dupe(u8, snap.name) catch |e| {
-                    wcopy.deinit(alloc);
-                    return e;
-                };
-                wcopy.source = alloc.dupe(u8, snap.text) catch |e| {
-                    wcopy.deinit(alloc);
-                    return e;
-                };
-                warnings = wcopy;
+                var tmp = cached_w;
+                tmp.source_name = snap.name;
+                tmp.source = snap.text;
+                warnings = try tmp.copyOwned(alloc);
             }
             if (opts.install_debug_info) {
                 try vm.setProgramDebugInfo(bytecode.spans, snap.text, snap.name);
@@ -79,15 +86,8 @@ pub fn analyzeDetailed(
         }
     }
 
-    var arena = std.heap.ArenaAllocator.init(self.alloc);
-    defer arena.deinit();
-
-    const parsed = try pipeline.parse(arena.allocator(), .{
-        .name = snap.name,
-        .text = snap.text,
-    }, .{
-        .include_baselib_macros = opts.include_baselib_macros,
-    });
+    const parsed_entry = try self.parsed(id, opts.repl_mode);
+    const parsed = parsed_entry.result;
 
     if (parsed == .err) {
         var report = try parsed.err.report.copy(alloc);
@@ -113,10 +113,11 @@ pub fn analyzeDetailed(
     try self.updateDeps(id, deps);
 
     var warn_report: ?diagnostic.Report = null;
-    const build_result = try pipeline.buildWithWarnings(vm, .{
+    const build_result = try pipeline.buildParsedWithWarnings(vm, root, .{
         .name = snap.name,
         .text = snap.text,
-    }, opts, &warn_report);
+    }, opts, parsed_entry.warnings, &warn_report);
+    defer if (warn_report) |*wr| wr.deinit();
 
     return switch (build_result) {
         .ok => |bytecode| blk: {
@@ -127,21 +128,22 @@ pub fn analyzeDetailed(
             const cache_symbols = try common.copySymbols(self.alloc, symbols);
             errdefer common.freeSymbols(self.alloc, cache_symbols);
 
-            // warnings are owned by vm.runtime.alloc
-            // re-own for the caller and the cache
+            // warnings arrive owned
+            // ; re-own one copy for the caller and one for the cache
+            // , the outparam copy is freed by the defer above
             var cache_warnings: ?diagnostic.Report = null;
-            errdefer if (cache_warnings) |*w| w.deinit(self.alloc);
+            errdefer if (cache_warnings) |*w| w.deinit();
+
             var warnings = if (warn_report) |wr| blk_w: {
-                var owned = try wr.copy(alloc);
-                owned.source_name = try alloc.dupe(u8, snap.name);
-                owned.source = try alloc.dupe(u8, snap.text);
+                var caller_src = wr;
+                caller_src.source_name = snap.name;
+                caller_src.source = snap.text;
+                const owned = try caller_src.copyOwned(alloc);
 
-                cache_warnings = try wr.copy(self.alloc);
-                cache_warnings.?.source_name = try self.alloc.dupe(u8, snap.name);
-                cache_warnings.?.source = try self.alloc.dupe(u8, snap.text);
-
-                var mutable = wr;
-                mutable.deinit(vm.runtime.alloc);
+                var cache_src = wr;
+                cache_src.source_name = snap.name;
+                cache_src.source = snap.text;
+                cache_warnings = try cache_src.copyOwned(self.alloc);
 
                 break :blk_w owned;
             } else null;
@@ -152,7 +154,7 @@ pub fn analyzeDetailed(
             const copy = try common.copyBytecode(alloc, bytecode);
             errdefer common.deinitBytecode(alloc, copy);
 
-            errdefer if (warnings) |*w| w.deinit(alloc);
+            errdefer if (warnings) |*w| w.deinit();
             break :blk .{
                 .snapshot = snap,
                 .bytecode = copy,
@@ -163,9 +165,6 @@ pub fn analyzeDetailed(
             };
         },
         .err => |err| blk: {
-            // errors dominate
-            // warnings drop with them
-            if (warn_report) |*wr| wr.deinit(vm.runtime.alloc);
             break :blk .{
                 .snapshot = snap,
                 .diagnostics = try common.copyError(alloc, err, snap.name, snap.text),
@@ -186,7 +185,7 @@ pub fn diagnostics(
     opts: pipeline.BuildOptions,
 ) !?pipeline.Error {
     var bundle = try diagnosticsWithWarnings(self, alloc, id, opts);
-    if (bundle.warnings) |*w| w.deinit(alloc);
+    if (bundle.warnings) |*w| w.deinit();
     return bundle.err;
 }
 
@@ -205,7 +204,7 @@ pub fn diagnosticsWithWarnings(
         try common.copyError(alloc, diag, sem_snap.name, sem_snap.text)
     else
         null;
-    errdefer if (sem_diag) |d| pipeline.deinitError(alloc, d);
+    errdefer if (sem_diag) |d| pipeline.deinitError(d);
 
     var full = analyzeDetailed(self, alloc, id, opts) catch |err| switch (err) {
         error.VmUnavailable => {
@@ -225,8 +224,8 @@ pub fn diagnosticsWithWarnings(
             const merged_report = try common.mergeReports(alloc, sem_d, full_diag);
             // errorKind hardly matters for display
             full.diagnostics = null;
-            pipeline.deinitError(alloc, sem_d);
-            pipeline.deinitError(alloc, full_diag);
+            pipeline.deinitError(sem_d);
+            pipeline.deinitError(full_diag);
             sem_diag = null;
             const warnings = full.warnings;
             full.warnings = null;
@@ -294,43 +293,18 @@ pub fn ensureInspect(
         if (cached.version == snap.version and common.sameOpts(cached.opts, opts)) return cached;
     }
 
-    var arena = std.heap.ArenaAllocator.init(self.alloc);
-    defer arena.deinit();
-
-    //
-    // analysis never merges manifest macros
-    //
-    //   their spans point into the embedded sources,
-    //   so theyd comw up as weird symbols/hovers with
-    //   wrong lines
-    //      (expansion and compilation keep merging; completions
-    //      derive the names from the same manifest sources instead)
-    //
-    const parsed = try pipeline.parse(arena.allocator(), .{
-        .name = snap.name,
-        .text = snap.text,
-    }, .{
-        .include_baselib_macros = false,
-    });
+    const parsed_entry = try self.parsed(id, opts.repl_mode);
+    const parsed = parsed_entry.result;
 
     if (parsed == .err) {
-        var report = try parsed.err.report.copy(self.alloc);
-        report.source_name = try self.alloc.dupe(u8, snap.name);
-        report.source = try self.alloc.dupe(u8, snap.text);
-
-        const parse_error: pipeline.Error = .{ .parse = .{ .kind = parsed.err.kind, .report = report } };
+        const parse_error: pipeline.Error = .{ .parse = .{ .kind = parsed.err.kind, .report = parsed.err.report } };
         const cache_diag = try common.copyError(self.alloc, parse_error, snap.name, snap.text);
-        errdefer pipeline.deinitError(self.alloc, cache_diag);
-        // first copy is ours, cache keeps the second
-        pipeline.deinitError(self.alloc, parse_error);
+        errdefer pipeline.deinitError(cache_diag);
 
         const empty_syms = try self.alloc.alloc(Symbol, 0);
         errdefer self.alloc.free(empty_syms);
 
-        const empty_deps = try self.alloc.alloc(FileId, 0);
-        errdefer self.alloc.free(empty_deps);
-
-        try self.putInspectCache(id, snap.version, opts, empty_syms, empty_deps, cache_diag, .empty, .init(self.alloc));
+        try self.putInspectCache(id, snap.version, opts, empty_syms, cache_diag, .empty, .init(self.alloc));
         return self.inspect_cache.getPtr(id) orelse return error.FileNotOpen;
     }
 
@@ -353,12 +327,10 @@ pub fn ensureInspect(
         type_map.deinit();
     }
 
-    var type_annotations = std.AutoHashMap(*const ast.Node, types.TypeId).init(scratch);
+    var type_annotations = std.AutoHashMap(*const cst.CstNode, types.TypeId).init(scratch);
     defer type_annotations.deinit();
-    var type_table = types.TypeTable.init(arena.allocator());
+    var type_table = types.TypeTable.init(scratch);
     defer type_table.deinit();
-    var scope_graph = scope_graph_mod.ScopeGraph.init(arena.allocator());
-    defer scope_graph.deinit();
 
     const WorkspaceResolver = struct {
         ws: *Workspace,
@@ -394,9 +366,11 @@ pub fn ensureInspect(
     }
 
     var dropped_warn: ?diagnostic.Report = null;
+    // semantic requires lowered input; symbols/deps above read the raw tree
+    const lowered = try hir.lower(scratch, root);
     const semantic_error = try semantic.analyze(
         scratch,
-        root,
+        lowered,
         snap.name,
         snap.text,
         known_globals,
@@ -404,17 +378,16 @@ pub fn ensureInspect(
         .{ .map = &type_annotations, .table = &type_table },
         &docs,
         .{ .ptr = &ws_resolver, .resolveFn = WorkspaceResolver.resolve },
-        &scope_graph,
         &dropped_warn,
     );
 
-    if (dropped_warn) |*wr| wr.deinit(scratch);
+    if (dropped_warn) |*wr| wr.deinit();
 
     const cache_diag = if (semantic_error) |failure|
         try common.copyError(self.alloc, .{ .semantic = failure }, snap.name, snap.text)
     else
         null;
-    errdefer if (cache_diag) |d| pipeline.deinitError(self.alloc, d);
+    errdefer if (cache_diag) |d| pipeline.deinitError(d);
 
     for (symbols) |*sym| {
         if (type_map.get(sym.name)) |t| {
@@ -465,9 +438,7 @@ pub fn ensureInspect(
 
     const cache_symbols = try common.copySymbols(self.alloc, symbols);
     errdefer common.freeSymbols(self.alloc, cache_symbols);
-    const cache_deps = try self.copyDeps(self.alloc, id);
-    errdefer self.alloc.free(cache_deps);
-    try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_deps, cache_diag, sig_map, cache_docs);
+    try self.putInspectCache(id, snap.version, opts, cache_symbols, cache_diag, sig_map, cache_docs);
 
     // docs buckets are self.alloc, entries got reparented to scratch
     //   free entries with scratch, table with self.alloc
@@ -483,7 +454,7 @@ pub fn ensureInspect(
     // semantic_error borrows scratch, cache keeps its own copy
     if (semantic_error) |err| {
         var owned = err;
-        owned.report.deinit(scratch);
+        owned.report.deinit();
     }
 
     return self.inspect_cache.getPtr(id) orelse return error.FileNotOpen;
@@ -545,7 +516,7 @@ test "workspace invalidates cache on change" {
             alloc.free(bytecode.instructions);
             alloc.free(bytecode.spans);
         },
-        .err => |err| pipeline.deinitError(alloc, err),
+        .err => |err| pipeline.deinitError(err),
     };
 
     try ws.change(id, "1 + 2");
@@ -558,7 +529,7 @@ test "workspace invalidates cache on change" {
             alloc.free(bytecode.instructions);
             alloc.free(bytecode.spans);
         },
-        .err => |err| pipeline.deinitError(alloc, err),
+        .err => |err| pipeline.deinitError(err),
     };
     try std.testing.expect(second == .ok);
 }
@@ -584,7 +555,7 @@ test "workspace invalidates dependent caches" {
             alloc.free(bytecode.instructions);
             alloc.free(bytecode.spans);
         },
-        .err => |err| pipeline.deinitError(alloc, err),
+        .err => |err| pipeline.deinitError(err),
     };
 
     const res_c = try ws.analyze(alloc, c, .{});
@@ -593,7 +564,7 @@ test "workspace invalidates dependent caches" {
             alloc.free(bytecode.instructions);
             alloc.free(bytecode.spans);
         },
-        .err => |err| pipeline.deinitError(alloc, err),
+        .err => |err| pipeline.deinitError(err),
     };
 
     try std.testing.expect(ws.cache.get(b) != null);
@@ -733,7 +704,6 @@ test "workspace diagnostics merge semantic and compile failures" {
 
     const report = switch (diag.?) {
         .parse => |f| f.report,
-        .expand => |f| f.report,
         .compile => |f| f.report,
         .semantic => |f| f.report,
     };

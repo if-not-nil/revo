@@ -43,12 +43,12 @@ while not rl.window_should_close() do
 
   rl.end_drawing()
 
-  if (x + cube_size >= WINDOW_WIDTH or x < 0) do
-     dx = dx * -1
+  if x + cube_size >= WINDOW_WIDTH or x < 0 do
+    dx = dx * -1
   end
 
-  if (y + cube_size >= WINDOW_HEIGHT or y < 0) do
-     dy = dy * -1
+  if y + cube_size >= WINDOW_HEIGHT or y < 0 do
+    dy = dy * -1
   end
 
   frame_time = rl.get_frame_time()

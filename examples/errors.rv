@@ -1,44 +1,144 @@
 #!/usr/bin/env revo
- ✖ 
+ ✖
  ✖  error gallery for revo
  ✖
+ ✖  every snippet below fails on purpose, and nothing here stops the
+ ✖  show: `revo.eval` hands back `{:err, revo.EvalError}` tables, and
+ ✖  `e.rendered` is exactly what the cli would print
+ ✖
+ ✖  phases covered: parse, semantic (box spans), the compiler
+ ✖  arity backstop, runtime (traces, unwraps, panics), plus warnings
+ ✖  through the cli
 !#
-
-let {good, bad} = {{:ok, "asdf"}, {:err, :Boom}}
-
-{:err, :Boom}?
-# they all panic
-fn boom() do
-	const res = fn() {:err, :Boom}
-	res()?
-	res():unwrap()
-	res() orelse "<not found>"
-
-	res():unwrap()
-	{:err, :Unlucky}:unwrap()
-
-	number("a")?
+fn heading(title: string) do
+  print("\n# " ~ title ~ "\n" ~ "-":repeat(title:len() + 2))
 end
 
-boom():unwrap()
 
-# there are all equal to 42
-# TODO: add good and_then patterns
-{:err, "e"} orelse 42
-{:ok, 42} orelse 67
-:nil orelse 42
+let shown = {0}
 
-const x = 123 |> inspect
 
-# this one returns an error if file does not exist
-# then tries to read it
-const contents = fs.open("readme.md")?:read() orelse "default content"
+fn study(title: string, code: string) do
+  heading(title)
 
-"readme.md"
-	|> fs.open
-	|> unwrap
-	|> file.read
-	|> string.split("\n")
-	|> len
-	|> fn(c) c * 2
-	|> inspect
+  match revo.eval(code)
+  | {:ok, v} =>
+    print("this one accidentally works: #{v:?}")
+  | {:err, e} => do
+    print(e.rendered)
+
+    # the same report is also a table, so editors and tools don't parse text
+    print("  phase=#{e.phase} kind=#{e.kind orelse :nil} code=#{e.code orelse :nil} line=#{e.line}")
+    shown.0 += 1
+  end
+end
+
+#* warnings aren't failures, so they need the real cli; skipped without
+   a `revo` binary on the PATH *#
+
+
+fn warn_study(title: string, code: string) do
+  heading(title)
+
+  match system({"revo", "-e", code})
+  | {:ok, {_, err}} =>
+    if (err:trim():len() == 0)
+      print("(no warning; is `revo` on PATH the same build?)")
+    else print(err:trim())
+  | {:err, _} =>
+    print("(skipped: `revo` is not on PATH)")
+end
+
+
+# -- [parse] ------------------------------------------------------------------
+
+study("parse: unexpected token", "1 +")
+
+study("parse: unterminated string", "'abc")
+
+# -- [semantic] ---------------------------------------------------------------
+
+study("sema: unknown name", "pritn('hi')")
+
+study("sema: type mismatch", "let x: num = 'hi'")
+
+study("sema: multiline expression", """
+let s: string = 1 +
+  2 +
+  3
+s
+""")
+
+study("sema: too many args", """
+const f = fn(a) a
+f(1, 2)
+""")
+
+study("sema: way too many args", """
+const f = fn(a) a
+f(1, 2, 3, 4, 5)
+""")
+
+# -- [semantic (box)] ---------------------------------------------------------
+
+study("semantic: multi-line span draws a box", """
+fn f() -> string do
+  1 +
+  2
+end
+f()
+""")
+
+# -- [compile] ----------------------------------------------------------------
+
+study("compile: sema didn't catch arity", """
+let f: any = fn(a) a
+f(1, 2)
+""")
+
+# -- [runtime] ----------------------------------------------------------------
+
+study("rt: division by zero", "1 // 0")
+
+study("rt: calling a number", "1(2)")
+
+study("rt: unknown field", "1:missing()")
+
+study("rt: unwrap an err", "{:err, :Boom}:unwrap()")
+
+study("rt: propagate with ?", "number('a')?")
+
+study("rt: panic", "panic('something went wrong')")
+
+study("rt: collapsed stack trace", """
+const f = fn(n) do
+  if n == 0 return :err
+  1 + f(n - 1)
+end
+f(3)
+""")
+
+# -- [warnings] ---------------------------------------------------------------
+
+warn_study("warn: duplicate declaration", """
+let x = 1
+let x = 2
+x
+""")
+
+warn_study("warn and suggestion: non-exhaustive match", """
+match 1
+| 1 => 2
+""")
+
+# -------------------------------------------------------------- recovery
+
+heading("the point: results recover")
+print({:err, "e"} orelse 42)
+print({:ok, 42} orelse 67)
+print(:nil orelse 42)
+
+print("\n#{shown.0} failures rendered without stopping the script")
+
+# outside eval a panic stops the script and renders the cli path:
+#   revo -e "panic('boom')"

@@ -7,8 +7,9 @@ const Register = revo.opcode.Register;
 const UpvalueSpec = revo.callable.UpvalueSpec;
 const types = @import("types.zig");
 
-const ast = @import("../ast.zig");
-const Node = ast.Node;
+const cst = @import("../cst.zig");
+const resmap = @import("../resmap.zig");
+const Node = cst.CstNode;
 
 pub const LocalVar = struct {
     name: []const u8,
@@ -248,34 +249,41 @@ pub fn resolveLocalTypeHint(self: *Compiler, name: []const u8) ?types.TypeInfo {
 
 pub fn predeclare(self: *Compiler, exprs: []const *Node) !void {
     for (exprs) |expr| {
-        if (expr.expr != .decl) continue;
-        const decl = expr.expr.decl;
-        switch (decl.inner.expr) {
+        if (expr.kind != .decl) continue;
+        const decl = expr.kind.decl;
+        switch (decl.inner.kind) {
             .type_alias => |t| {
                 // declares are values, not type aliases - do not pollute type space
                 if (decl.kind == .declare_decl) continue;
-                const key = ast.bareName(t);
+                if (t.segs.len == 0) continue;
+                const key = t.segs[t.segs.len - 1].text;
                 if (self.type_aliases.contains(key)) continue;
-                const type_info = try types.evalTypeExpr(self.aliasScope(), t.type_expr);
+                const type_info = try types.evalTypeExpr(self.aliasScope(), t.type);
                 try self.type_aliases.put(key, .{ .info = type_info });
             },
-            .binding => |binding| {
-                if (binding.target.expr != .ident or binding.value.expr != .fn_expr) continue;
-                if (decl.kind == .global or decl.kind == .global_const) continue; // globals are not locals
-                const name = binding.target.expr.ident;
-                if (ast.isDiscardName(name)) continue;
-                _ = try reuseOrDeclareLocal(self, name, decl.kind == .let);
+            .binding => {
+                // shared predicate with the checker's collectPredeclared
+                const pre = resmap.predeclFn(expr) orelse continue;
+                const name = pre.name;
+                _ = try reuseOrDeclareLocal(self, name, pre.is_let);
                 // temporarily set type_params so isTypeParam works during evalTypeExpr
+                const fn_def = pre.func;
+                var explicit: []const []const u8 = &.{};
+                if (fn_def.type_params.len > 0) {
+                    const tmp = try self.alloc.alloc([]const u8, fn_def.type_params.len);
+                    for (fn_def.type_params, 0..) |tok, i| tmp[i] = tok.text;
+                    explicit = tmp;
+                }
                 const fn_state = &self.functions.items[self.functions.items.len - 1];
                 const saved = fn_state.type_params;
-                fn_state.type_params = try types.combinedTypeParams(self.alloc, binding.value.expr.fn_expr.type_params, binding.value.expr.fn_expr.params);
+                fn_state.type_params = try types.combinedTypeParams(self.alloc, explicit, fn_def.params);
                 defer fn_state.type_params = saved;
                 try declareFnSignature(
                     self,
                     name,
-                    binding.value.expr.fn_expr.params,
-                    binding.value.expr.fn_expr.return_type,
-                    binding.value.expr.fn_expr.type_params,
+                    fn_def.params,
+                    fn_def.return_type,
+                    explicit,
                 );
             },
             else => {},
@@ -372,8 +380,8 @@ pub fn resolveUpvalue(self: *Compiler, name: []const u8) !?revo.UpvalueID {
 
 pub fn allocFnSig(
     self: *Compiler,
-    params: []const ast.FnParam,
-    return_type: ?*ast.TypeExpr,
+    params: []const cst.CstParam,
+    return_type: ?*const cst.CstType,
     type_params: []const []const u8,
 ) !*types.FunctionSignature {
     return try types.buildFnSig(
@@ -390,12 +398,12 @@ pub fn allocFnSig(
 pub fn declareFnSignature(
     self: *Compiler,
     name: []const u8,
-    params: []const ast.FnParam,
-    return_type: ?*ast.TypeExpr,
+    params: []const cst.CstParam,
+    return_type: ?*const cst.CstType,
     type_params: []const []const u8,
 ) !void {
     const state = currentFunctionState(self) orelse return;
-    if (ast.isDiscardName(name)) return;
+    if (cst.isDiscardName(name)) return;
     if (state.fn_signatures.get(name)) |old| {
         self.alloc.free(old.params);
         self.alloc.free(old.param_names);

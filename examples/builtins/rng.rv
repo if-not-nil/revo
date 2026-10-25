@@ -13,15 +13,15 @@ print("rng.choice({1, 2, 3, 'hi', :false}) = #{rng.choice({1, 2, 3, 'hi', :false
 
 print("\n --- set_seed(2226) -----")
 # `rng.set_seed` statically sets the seed of the number generator
-rng.set_seed(2226) 
+rng.set_seed(2226)
 
 # This will produce the same sequence of numbers every time
 for _ in 0..7
-    print(rng.rand(10))
+  print(rng.rand(10))
 
-rng.revert_seed() # Reverts the current seed back to being set to the current time
+rng.revert_seed()  # Reverts the current seed back to being set to the current time
 
 print("\n --- revert_seed -----")
 # The sequence is now dependent on the current time again
 for _ in 0..7
-    print(rng.rand(10)) 
+  print(rng.rand(10))

@@ -353,7 +353,6 @@ pub fn init(runtime: revo.Runtime) !VM {
     vm.sched.fibers.items[0].result = revo.Value.new.core(.no_result);
 
     try revo.baselib.register_baselib(&vm);
-    try revo.lang.macro_proc.register(&vm);
 
     return vm;
 }
@@ -1094,20 +1093,15 @@ pub inline fn loadUpvalueValue(self: *VM, upvalue_id: root.callable.UpvalueID) !
     return upvalue.closed;
 }
 
-pub inline fn storeUpvalueValue(self: *VM, upvalue_id: root.callable.UpvalueID, value: Value) !void {
-    return self.storeUpvalueValueIn(self.currentFiber(), upvalue_id, value);
-}
-
-/// storeUpvalueValue without re deriving the fiber( dispatch already has it)
-pub inline fn storeUpvalueValueIn(self: *VM, fiber: *Fiber, upvalue_id: root.callable.UpvalueID, value: Value) !void {
+pub inline fn storeUpvalueValue(self: *VM, fiber: *Fiber, upvalue_id: root.callable.UpvalueID, value: Value) !void {
     const upvalue = try self.callable.getUpvalue(upvalue_id);
+
     if (upvalue.open_index) |slot_index| {
-        // open upvalues live in the owner's registers
-        // ; shared closures can run cross-fiber, so that need not be us
         const owner_regs = if (upvalue.owner_fiber_id) |fid|
             self.sched.fibers.items[fid].registers
         else
             fiber.registers;
+
         std.debug.assert(slot_index < owner_regs.len);
         owner_regs[slot_index] = value;
     } else {

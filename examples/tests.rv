@@ -18,17 +18,20 @@
 
 !#
 fn add(a, b) a + b
+
+
 fn multiply(a, b) a * b
 
+
 suite "add" do
-	test "addition" do
-		expect(add(20, 22) == 42)?
-		expect(add(20, 22) != 22)?
-	end
- 
-	test/skip "adds two tables" do
-		expect(add({1,2}, {3, 4}) == {4,6})?
-	end
+  test "addition" do
+    expect(add(20, 22) == 42)?
+    expect(add(20, 22) != 22)?
+  end
+
+  test/skip "adds two tables" do
+    expect(add({1, 2}, {3, 4}) == {4, 6})?
+  end
 end
 
 # the body sees the same module scope as the rest of the file
@@ -50,31 +53,31 @@ suite "math operations" do
 end
 
 test "fails" do
-	expect(add(1,1) == 42)?
+  expect(add(1, 1) == 42)?
 end
 
 suite "json" do
-	fn mock(i) do
-		{id = i, name = "asdf"}
-	end
+  fn mock(i) do
+    {id = i, name = "asdf"}
+  end
 
-	test "structure" do
-		const data = mock(42)
-		expect(data.id == 42)?
-		expect(data.name == "asdf")?
-	end
+  test "structure" do
+    const data = mock(42)
+    expect(data.id == 42)?
+    expect(data.name == "asdf")?
+  end
 
-	test "structure multiple" do
-		for i in 0..10 do
-			const data = mock(i)
-			expect(data.id == i)?
-		end
-	end
+  test "structure multiple" do
+    for i in 0..10 do
+      const data = mock(i)
+      expect(data.id == i)?
+    end
+  end
 end
 
 # despite everything, tests always evaluate to :nil
 const x = test "nothing" do
-4
+  4
 end
 assert(x == :nil)?
 

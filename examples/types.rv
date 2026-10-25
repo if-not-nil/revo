@@ -15,7 +15,11 @@
 # scalar binds & coercion
 
 type Someone = { name: string, age: number, get_age: function }
+
+
 fn get_age(self: Asdf) self.age
+
+
 let x: Someone = { name = "me", age = 21, get_age = get_age }
 
 let acc = 0
@@ -25,7 +29,9 @@ for y in 0..1000
 
 print(acc)
 
+
 const id = fn(x: int, y: int) x * 2
+
 
 # optional: T? expands to T | :nil
 let maybe: int? = 42
@@ -39,8 +45,9 @@ const other: int | string = "hi"
 let nums: table<int> = { 1, 2, 3 }
 let pairs: table<string, int> = { a = 1, b = 2 }
 
-if :true 1 else "asdf"
+if (:true) 1 else "asdf"
 type A = {:ok, any} | {:err, atom}
+
 
 fn pick(how: A) -> any do
   print(how)
@@ -49,10 +56,12 @@ fn pick(how: A) -> any do
   | {:err, e} => print("err: ", e)
 end
 
+
 fn is_len(what) do
   const {length, str} = what
   len(str) == length
 end
+
 
 let pred1: A = {:err, :UhOh}
 pick(pred1)
@@ -88,7 +97,11 @@ let z: number = 10
 
 # typed function params: both args must be int, result inferred
 fn add(a: int, b: int) a + b
+
+
 let sum = add(3, 4)
+
+
 # add(3, "wrong")    # argument 2 to `add` expects int, got string
 # add("wrong", 3)    # argument 1 to `add` expects int, got string
 
@@ -99,20 +112,29 @@ let sum = add(3, 4)
 
 # typed function with return type annotation
 fn double(n: int) -> int do
-    return n * 2
+  return n * 2
 end
+
+
 let doubled = double(5)
+
+
 # double("hello")  # argument 1 to `double` expects int, got string
 
 # typed function with mixed params
 const scale = fn(v: number, factor: number) v * factor
+
+
 let scaled = scale(2.5, 4)
+
 
 # nested function with typed params
 const outer = fn(n: int) do
-    const inner = fn(x: int) x * 2
-    inner(n) + 1
+  const inner = fn(x: int) x * 2
+  inner(n) + 1
 end
+
+
 let nested = outer(5)
 
 
@@ -124,38 +146,53 @@ let nested = outer(5)
 
 # generic identity: T inferred from argument
 fn identity<T>(x: T) x
+
+
 let id_int = identity(42)
 let id_str = identity("hello")
 
+
 # repeated type param: both args must match
 fn repeat<T>(x: T, y: T) x
-let rep = repeat(1, 2)
-# repeat(1, "asdf")   # argument 2 to `repeat` expects same type as argument 1
 
+
+let rep = repeat(1, 2)
+
+
+# repeat(1, "asdf")   # argument 2 to `repeat` expects same type as argument 1
 
 # multiple type params with table return
 fn swap<T, U>(a: T, b: U) -> {U, T}
   return {b, a}
 
+
 let swapped = swap(1, "two")
+
 
 # compound return type with type param
 fn wrap<T>(x: T) -> {:ok, T}
   return {:ok, x}
+
+
 let wrapped = wrap(42)
+
 
 # non-inferrable: return-only type param needs explicit annotation
 # provide type args at the call site: ident<T, U>(args)
 fn make<T>(x) -> T
   return x
+
+
 # let y = make(1)                # cannot infer T: only used in return
-let y = make<int>(1)             # explicit T=int makes it work
+let y = make<int>(1)  # explicit T=int makes it work
+
 
 # return-only type param (zero runtime args)
 fn zero<T>() -> T
   return 0
-let z = zero<int>()              # T=int, returns int 0
 
+
+let z = zero<int>()  # T=int, returns int 0
 
 # tables & field validation
 # > table fields use `number` at runtime
@@ -180,6 +217,6 @@ let pname = person.name
 
 # associated methods are done via metatables
 person:set_meta({
-	fn get_name(self: Person) -> string
-		self.name
+  fn get_name(self: Person) -> string
+    self.name
 })

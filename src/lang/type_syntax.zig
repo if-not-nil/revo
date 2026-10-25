@@ -1,15 +1,10 @@
 //!
 //! welcome to type serde
-//!
-//! the text layer of types: text -> TypeExpr in parseTypeExpr below,
-//! TypeInfo -> text in printType. TypeExpr printing, cloning, and freeing
-//! live next to the TypeExpr definition in ast.zig (pure ast operations),
-//! and TypeExpr -> TypeInfo evaluation lives in compiler/types.zig next to
-//! inference (it takes an AliasScope filled from the caller's maps).
-//! type refs flow one way: here -> ast, here -> compiler/types
+//! , text -> TypeExpr below, typeInfo -> text in printType
+//! ; refs flow one way, here -> cst, here -> compiler/types
 //!
 
-const ast = @import("ast.zig");
+const cst = @import("cst.zig");
 const Lexer = @import("Lexer.zig");
 const std = @import("std");
 const types = @import("compiler/types.zig");
@@ -17,257 +12,365 @@ const TypeInfo = types.TypeInfo;
 const Token = Lexer.Token;
 const TokenType = Lexer.TokenType;
 
-/// advances pos past the consumed tokens
-/// mirrors ast.printTypeExpr: every Kind parses and prints
-pub fn parseTypeExpr(tokens: []const Token, pos: *usize, alloc: std.mem.Allocator) !*ast.TypeExpr {
-    var p = Parser{ .tokens = tokens, .pos = pos, .alloc = alloc };
-    return try p.parseExpr();
+/// advances pos past consumed tokens
+/// parses a type over pre-lexed tokens
+/// , one grammar (StreamParser)
+/// slices go through `SliceCursor` below
+pub fn parseCstTypeExpr(tokens: []const Token, pos: *usize, alloc: std.mem.Allocator) !*cst.CstType {
+    var cursor = SliceCursor{ .tokens = tokens, .pos = pos };
+    return parseCstTypeExprFromStream(&cursor, alloc);
 }
 
-const Parser = struct {
+/// slice-backed pull source for pre-lexed token arrays
+const SliceCursor = struct {
     tokens: []const Token,
     pos: *usize,
-    alloc: std.mem.Allocator,
-    fn peek(self: *Parser) Token {
-        while (self.pos.* < self.tokens.len and self.tokens[self.pos.*].type == .comment) {
-            self.pos.* += 1;
-        }
-        return self.tokens[self.pos.*];
+
+    fn peek(self: *SliceCursor) Token {
+        return self.tokens[@min(self.pos.*, self.tokens.len - 1)];
     }
-    fn advance(self: *Parser) Token {
-        const t = self.tokens[self.pos.*];
+    fn advance(self: *SliceCursor) Token {
+        const t = self.peek();
         self.pos.* += 1;
         return t;
     }
-    fn check(self: *Parser, t: TokenType) bool {
+    fn check(self: *SliceCursor, t: TokenType) bool {
         return self.peek().type == t;
     }
-    fn match(self: *Parser, t: TokenType) bool {
+    fn match(self: *SliceCursor, t: TokenType) bool {
         if (self.check(t)) {
             _ = self.advance();
             return true;
         }
         return false;
     }
-    /// token type ahead positions past pos, skipping comments (lookahead for `?name:`)
-    fn peekAt(self: *Parser, ahead: usize) TokenType {
-        var i = self.pos.*;
-        var skipped: usize = 0;
-        while (i < self.tokens.len and skipped <= ahead) : (i += 1) {
-            if (self.tokens[i].type == .comment) continue;
-            if (skipped == ahead) return self.tokens[i].type;
-            skipped += 1;
-        }
-        return .eof;
+    fn peekAt(self: *SliceCursor, ahead: usize) Token {
+        return self.tokens[@min(self.pos.* + ahead, self.tokens.len - 1)];
     }
-    fn expect(self: *Parser, t: TokenType) !Token {
+    fn prevToken(self: *SliceCursor) Token {
+        if (self.pos.* == 0) return self.peek();
+        return self.tokens[@min(self.pos.* - 1, self.tokens.len - 1)];
+    }
+    fn expect(self: *SliceCursor, t: TokenType) !Token {
         if (self.check(t)) return self.advance();
         return error.UnexpectedToken;
     }
-
-    fn span(self: *Parser, start: Token) ast.Span {
-        return ast.Span.merge(start.span(), self.tokens[self.pos.* - 1].span());
-    }
-
-    /// type union expression (lowest-precedence operator)
-    /// * "int | string"  "number? | :nil"  "int"
-    fn parseExpr(self: *Parser) anyerror!*ast.TypeExpr {
-        const left = try self.parseAtom();
-        var result = left;
-        if (self.match(.bar)) {
-            var variants = try std.ArrayList(*ast.TypeExpr).initCapacity(self.alloc, 4);
-            errdefer variants.deinit(self.alloc);
-            try flattenUnion(self.alloc, &variants, left);
-            try flattenUnion(self.alloc, &variants, try self.parseAtom());
-            while (self.match(.bar))
-                try flattenUnion(self.alloc, &variants, try self.parseAtom());
-            result = try ast.allocTypeExpr(self.alloc, left.span, .{ .union_of = try variants.toOwnedSlice(self.alloc) });
-        }
-        // `!any/:ExpectFailed` - a `/`-tagged error atom after the type; the
-        // runtime reads only the union, so claim and drop the tag here too
-        if (self.match(.slash)) _ = try self.parseAtom();
-        return result;
-    }
-
-    /// atomic type expression with no union operators
-    /// ~ ident (name):      "number", "string", custom alias
-    /// ~ a.T (qualified):   module a's alias T
-    /// ~ ident? (optional): "number?" -> union_of(named("number"), atom(":nil"))
-    /// ~ ident<T>:          "table<int>", "table<string, int>"
-    /// ~ :atom:      ":nil", ":ok", ":err"
-    /// ~ fn(T) -> U:        "fn(int) -> bool", "fn<T>(x: T) -> T"
-    /// ~ (T):               "(int | string)" (paren grouping)
-    /// ~ {f: T, ...}:       "{ name: string, age: num }" (structural table)
-    /// ~ {T, f: U, ...}:    "{ number, number, name: string }" (positional array entries)
-    /// ~ !T / ?T:           "!int", "?int" (error union - prefix bang or kw_not)
-    fn parseAtom(self: *Parser) !*ast.TypeExpr {
-        const tok = self.peek();
-        switch (tok.type) {
-            .ident, .kw_type, .kw_import => {
-                const start = self.advance();
-                const text = start.text;
-                // "number?" -> optional; lexer treats ? as ident-char, so it splits here
-                if (std.mem.endsWith(u8, text, "?")) {
-                    const name = try ast.allocTypeExpr(self.alloc, start.span(), .{ .named = text[0 .. text.len - 1] });
-                    const nil_atom = try ast.allocTypeExpr(self.alloc, start.span(), .{ .atom = ":nil" });
-                    const variants = try self.alloc.alloc(*ast.TypeExpr, 2);
-                    variants[0] = name;
-                    variants[1] = nil_atom;
-                    return try ast.allocTypeExpr(self.alloc, start.span(), .{ .union_of = variants });
-                }
-                if (self.match(.lt)) {
-                    var params = try std.ArrayList(*ast.TypeExpr).initCapacity(self.alloc, 4);
-                    errdefer params.deinit(self.alloc);
-                    try params.append(self.alloc, try self.parseExpr());
-                    while (self.match(.comma))
-                        try params.append(self.alloc, try self.parseExpr());
-                    _ = try self.expect(.gt);
-                    return try ast.allocTypeExpr(self.alloc, self.span(start), .{
-                        .parameterized = .{ .name = tok.text, .params = try params.toOwnedSlice(self.alloc) },
-                    });
-                }
-                // qualified module type: `a.T` names alias T from module a
-                if (self.match(.dot)) {
-                    const name_tok = try self.expect(.ident);
-                    // `a.b?` is optional, same sugar as `b?` on a bare name
-                    //   the lexer glues the `?` onto the ident, so strip it here
-                    if (std.mem.endsWith(u8, name_tok.text, "?")) {
-                        const named = try ast.allocTypeExpr(self.alloc, name_tok.span(), .{
-                            .qualified = .{ .module = tok.text, .name = name_tok.text[0 .. name_tok.text.len - 1] },
-                        });
-                        const nil_atom = try ast.allocTypeExpr(self.alloc, name_tok.span(), .{ .atom = ":nil" });
-                        const variants = try self.alloc.alloc(*ast.TypeExpr, 2);
-                        variants[0] = named;
-                        variants[1] = nil_atom;
-                        return try ast.allocTypeExpr(self.alloc, self.span(start), .{ .union_of = variants });
-                    }
-                    return try ast.allocTypeExpr(self.alloc, self.span(start), .{
-                        .qualified = .{ .module = tok.text, .name = name_tok.text },
-                    });
-                }
-                return try ast.allocTypeExpr(self.alloc, tok.span(), .{ .named = tok.text });
-            },
-            .atom => {
-                return try ast.allocTypeExpr(self.alloc, self.advance().span(), .{ .atom = tok.text });
-            },
-            .kw_fn => {
-                const start = self.advance();
-                var tps = try std.ArrayList([]const u8).initCapacity(self.alloc, 2);
-                errdefer tps.deinit(self.alloc);
-                if (self.match(.lt)) {
-                    while (!self.check(.gt)) {
-                        const tp_tok = try self.expect(.ident);
-                        try tps.append(self.alloc, tp_tok.text);
-                        if (!self.match(.comma)) break;
-                    }
-                    _ = try self.expect(.gt);
-                }
-                _ = try self.expect(.lparen);
-                const params = try self.parseFnParams();
-                _ = try self.expect(.rparen);
-                const return_type = if (self.match(.arrow)) try self.parseExpr() else null;
-                return try ast.allocTypeExpr(self.alloc, self.span(start), .{
-                    .function = .{ .params = params, .return_type = return_type, .type_params = try tps.toOwnedSlice(self.alloc) },
-                });
-            },
-            .lparen => {
-                _ = self.advance();
-                const inner = try self.parseExpr();
-                if (self.match(.comma)) return error.UnexpectedToken;
-                _ = try self.expect(.rparen);
-                return inner;
-            },
-            .kw_not, .bang => {
-                const start = self.advance();
-                const inner = try self.parseExpr();
-                return try ast.allocTypeExpr(self.alloc, self.span(start), .{ .error_union = inner });
-            },
-            .lsquiggly => {
-                const start = self.advance();
-                var fields = try std.ArrayList(ast.RecordField).initCapacity(self.alloc, 4);
-                errdefer fields.deinit(self.alloc);
-                var pos_idx: u32 = 0;
-
-                while (!self.check(.rsquiggly) and !self.check(.eof)) {
-                    // `#* ... *#` before a field documents it (declare tables);
-                    // plain `#` comments are already skipped by peek
-                    var field_doc: ?[]const u8 = null;
-                    while (self.check(.doc_comment)) {
-                        const dt = self.advance();
-                        field_doc = std.mem.trim(u8, dt.text, " \t\n\r");
-                    }
-                    // `name:` prefix means a named field, anything else is a
-                    // positional array entry (`{ number, number }`); field
-                    // names may be contextual kws (`type`, `end`)
-                    const cur = self.peek();
-                    const is_named = (cur.type == .ident or std.mem.startsWith(u8, @tagName(cur.type), "kw_")) and blk: {
-                        var i = self.pos.* + 1;
-                        while (i < self.tokens.len and self.tokens[i].type == .comment) : (i += 1) {}
-                        break :blk i < self.tokens.len and self.tokens[i].type == .colon;
-                    };
-
-                    // `?name:` is an optional field (may be absent);
-                    // a bare `?` is the `?T` optional-type prefix instead
-                    const is_optional = cur.type == .huh and self.peekAt(1) == .ident and self.peekAt(2) == .colon;
-                    if (is_optional) {
-                        _ = self.advance();
-                        const name_tok = try self.expect(.ident);
-                        _ = try self.expect(.colon);
-                        try fields.append(self.alloc, .{ .name = name_tok.text, .type_expr = try self.parseExpr(), .optional = true, .doc = field_doc });
-                    } else if (is_named) {
-                        self.pos.* += 1;
-                        _ = try self.expect(.colon);
-                        try fields.append(self.alloc, .{ .name = cur.text, .type_expr = try self.parseExpr(), .doc = field_doc });
-                    } else {
-                        const te = try self.parseExpr();
-                        const idx_name = try self.alloc.print("{d}", .{pos_idx});
-                        pos_idx += 1;
-                        try fields.append(self.alloc, .{ .name = idx_name, .type_expr = te, .doc = field_doc });
-                    }
-
-                    if (!self.match(.comma)) break;
-                }
-                _ = try self.expect(.rsquiggly);
-                return try ast.allocTypeExpr(self.alloc, self.span(start), .{
-                    .record = try fields.toOwnedSlice(self.alloc),
-                });
-            },
-            else => return error.UnexpectedToken,
-        }
-    }
-
-    fn parseFnParams(self: *Parser) ![]const ast.FnParam {
-        var params = try std.ArrayList(ast.FnParam).initCapacity(self.alloc, 4);
-        errdefer params.deinit(self.alloc);
-        while (!self.check(.rparen) and !self.check(.eof)) {
-            // `?` prefix marks optional params, same as value-level fn syntax
-            const optional = self.match(.huh);
-            // param names may be contextual keywords (`fn`, `end`)
-            const name = self.peek();
-            if (name.type != .ident and !std.mem.startsWith(u8, @tagName(name.type), "kw_"))
-                return error.UnexpectedToken;
-            self.pos.* += 1;
-            const type_name = if (self.match(.colon)) try self.parseExpr() else null;
-            // `...` lexes as `..` + `.`; claimed only here in type position
-            const variadic = self.match(.dotdot) and self.match(.dot);
-            // synthesized from a type string, no source span to attach
-            try params.append(self.alloc, .{ .name = name.text, .name_span = .{ .start = 0, .end = 0, .line = 0, .column = 0 }, .type_name = type_name, .variadic = variadic, .optional = optional });
-            if (!self.match(.comma)) break;
-        }
-        return try params.toOwnedSlice(self.alloc);
-    }
 };
 
-fn flattenUnion(alloc: std.mem.Allocator, variants: *std.ArrayList(*ast.TypeExpr), te: *ast.TypeExpr) !void {
-    if (te.kind == .union_of) {
-        try variants.appendSlice(alloc, te.kind.union_of);
-    } else {
-        try variants.append(alloc, te);
-    }
+pub fn parseCstTypeExprFromStream(stream: anytype, alloc: std.mem.Allocator) !*cst.CstType {
+    var p = StreamParser(@TypeOf(stream)){ .stream = stream, .alloc = alloc };
+    return try p.parseExpr();
+}
+
+fn StreamParser(comptime S: type) type {
+    return struct {
+        stream: S,
+        alloc: std.mem.Allocator,
+
+        fn peek(self: *@This()) Token {
+            return self.stream.peek();
+        }
+        fn advance(self: *@This()) Token {
+            return self.stream.advance();
+        }
+        fn check(self: *@This(), t: TokenType) bool {
+            return self.stream.check(t);
+        }
+        fn match(self: *@This(), t: TokenType) bool {
+            return self.stream.match(t);
+        }
+        fn peekTypeAt(self: *@This(), ahead: usize) TokenType {
+            return self.stream.peekAt(ahead).type;
+        }
+        fn expect(self: *@This(), t: TokenType) !Token {
+            return self.stream.expect(t);
+        }
+        fn prevSpan(self: *@This(), start: Token) Lexer.Span {
+            return Lexer.Span.merge(start.span(), self.stream.prevToken().span());
+        }
+
+        fn parseExpr(self: *@This()) anyerror!*cst.CstType {
+            const first = try self.parseAtom();
+
+            if (!self.check(.bar)) {
+                if (self.match(.slash)) {
+                    const slash_tok = self.stream.prevToken();
+                    const tag = try self.parseAtom();
+                    return cst.allocType(self.alloc, Lexer.Span.merge(first.span, tag.span), .{
+                        .slashed = .{ .inner = first, .slash_tok = slash_tok, .tag = tag },
+                    });
+                }
+                return first;
+            }
+
+            var bars = try std.ArrayList(Token).initCapacity(self.alloc, 2);
+            errdefer bars.deinit(self.alloc);
+
+            var rest = try std.ArrayList(*cst.CstType).initCapacity(self.alloc, 4);
+            errdefer rest.deinit(self.alloc);
+
+            while (self.match(.bar)) {
+                try bars.append(self.alloc, self.stream.prevToken());
+                try rest.append(self.alloc, try self.parseAtom());
+            }
+
+            const span = Lexer.Span.merge(first.span, self.stream.prevToken().span());
+            const node = try cst.allocType(self.alloc, span, .{
+                .union_of = .{ .first = first, .bars = try bars.toOwnedSlice(self.alloc), .rest = try rest.toOwnedSlice(self.alloc) },
+            });
+
+            if (self.match(.slash)) {
+                const slash_tok = self.stream.prevToken();
+                const tag = try self.parseAtom();
+                return cst.allocType(self.alloc, Lexer.Span.merge(first.span, tag.span), .{
+                    .slashed = .{ .inner = node, .slash_tok = slash_tok, .tag = tag },
+                });
+            }
+
+            return node;
+        }
+
+        fn parseAtom(self: *@This()) !*cst.CstType {
+            const tok = self.peek();
+            switch (tok.type) {
+                .ident, .kw_type, .kw_import => {
+                    const start = self.advance();
+                    const text = start.text;
+                    if (std.mem.endsWith(u8, text, "?")) {
+                        const inner = try cst.allocType(self.alloc, start.span(), .{ .named = .{ .tok = start } });
+                        return cst.allocType(self.alloc, start.span(), .{ .optional = .{ .inner = inner } });
+                    }
+                    if (self.match(.lt)) {
+                        const lt_tok = self.stream.prevToken();
+                        var args = try std.ArrayList(*cst.CstType).initCapacity(self.alloc, 4);
+
+                        errdefer args.deinit(self.alloc);
+                        var commas = try std.ArrayList(Token).initCapacity(self.alloc, 4);
+
+                        errdefer commas.deinit(self.alloc);
+                        try args.append(self.alloc, try self.parseExpr());
+
+                        while (self.match(.comma)) {
+                            try commas.append(self.alloc, self.stream.prevToken());
+                            try args.append(self.alloc, try self.parseExpr());
+                        }
+
+                        const gt_tok = try self.expect(.gt);
+                        return cst.allocType(self.alloc, self.prevSpan(start), .{
+                            .parameterized = .{
+                                .name_tok = start,
+                                .lt_tok = lt_tok,
+                                .args = try args.toOwnedSlice(self.alloc),
+                                .commas = try commas.toOwnedSlice(self.alloc),
+                                .gt_tok = gt_tok,
+                            },
+                        });
+                    }
+
+                    if (self.match(.dot)) {
+                        const dot_tok = self.stream.prevToken();
+                        const name_tok = try self.expect(.ident);
+
+                        if (std.mem.endsWith(u8, name_tok.text, "?")) {
+                            return cst.allocType(self.alloc, self.prevSpan(start), .{
+                                .qualified_optional = .{ .mod_tok = start, .dot_tok = dot_tok, .name_tok = name_tok },
+                            });
+                        }
+
+                        return cst.allocType(self.alloc, self.prevSpan(start), .{
+                            .qualified = .{ .mod_tok = start, .dot_tok = dot_tok, .name_tok = name_tok },
+                        });
+                    }
+
+                    return cst.allocType(self.alloc, tok.span(), .{ .named = .{ .tok = start } });
+                },
+                .atom => {
+                    const t = self.advance();
+                    return cst.allocType(self.alloc, t.span(), .{ .atom = .{ .tok = t } });
+                },
+                .kw_fn => {
+                    const start = self.advance();
+
+                    var lt_tok: ?Token = null;
+                    var tps = try std.ArrayList(Token).initCapacity(self.alloc, 2);
+
+                    errdefer tps.deinit(self.alloc);
+                    var tp_commas = try std.ArrayList(Token).initCapacity(self.alloc, 2);
+
+                    errdefer tp_commas.deinit(self.alloc);
+                    var gt_tok: ?Token = null;
+
+                    if (self.match(.lt)) {
+                        lt_tok = self.stream.prevToken();
+
+                        while (!self.check(.gt)) {
+                            const tp_tok = try self.expect(.ident);
+                            try tps.append(self.alloc, tp_tok);
+                            if (!self.match(.comma)) break;
+                            try tp_commas.append(self.alloc, self.stream.prevToken());
+                        }
+
+                        gt_tok = try self.expect(.gt);
+                    }
+
+                    const lparen_tok = try self.expect(.lparen);
+                    const plist = try self.parseFnParams();
+                    const rparen_tok = try self.expect(.rparen);
+
+                    var arrow_tok: ?Token = null;
+                    var return_type: ?*cst.CstType = null;
+
+                    if (self.match(.arrow)) {
+                        arrow_tok = self.stream.prevToken();
+                        return_type = try self.parseExpr();
+                    }
+
+                    return cst.allocType(self.alloc, self.prevSpan(start), .{
+                        .function = .{
+                            .fn_tok = start,
+                            .lt_tok = lt_tok,
+                            .tps = try tps.toOwnedSlice(self.alloc),
+                            .tp_commas = try tp_commas.toOwnedSlice(self.alloc),
+                            .gt_tok = gt_tok,
+                            .lparen_tok = lparen_tok,
+                            .params = plist.params,
+                            .commas = plist.commas,
+                            .rparen_tok = rparen_tok,
+                            .arrow_tok = arrow_tok,
+                            .ret = return_type,
+                        },
+                    });
+                },
+                .lparen => {
+                    const lparen_tok = self.advance();
+                    const inner = try self.parseExpr();
+                    if (self.match(.comma)) return error.UnexpectedToken;
+
+                    const rparen_tok = try self.expect(.rparen);
+
+                    return cst.allocType(self.alloc, self.prevSpan(lparen_tok), .{
+                        .paren = .{ .lparen_tok = lparen_tok, .inner = inner, .rparen_tok = rparen_tok },
+                    });
+                },
+                .kw_not, .bang => {
+                    const start = self.advance();
+                    const inner = try self.parseExpr();
+
+                    return cst.allocType(self.alloc, self.prevSpan(start), .{
+                        .error_union = .{ .bang_tok = start, .inner = inner },
+                    });
+                },
+                .lsquiggly => {
+                    const start = self.advance();
+
+                    var fields = try std.ArrayList(cst.CstRecordField).initCapacity(self.alloc, 4);
+                    errdefer fields.deinit(self.alloc);
+
+                    var commas = try std.ArrayList(Token).initCapacity(self.alloc, 4);
+                    errdefer commas.deinit(self.alloc);
+
+                    while (!self.check(.rsquiggly) and !self.check(.eof)) {
+                        var field_doc: ?Token = null;
+                        while (self.check(.doc_comment)) {
+                            field_doc = self.advance();
+                        }
+
+                        const cur = self.peek();
+                        const is_named = (cur.type == .ident or std.mem.startsWith(u8, @tagName(cur.type), "kw_")) and
+                            self.peekTypeAt(1) == .colon;
+
+                        const is_optional = cur.type == .huh and self.peekTypeAt(1) == .ident and self.peekTypeAt(2) == .colon;
+
+                        if (is_optional) {
+                            const qmark_tok = self.advance();
+                            const name_tok = try self.expect(.ident);
+                            const colon_tok = try self.expect(.colon);
+
+                            try fields.append(self.alloc, .{
+                                .doc_tok = field_doc,
+                                .qmark_tok = qmark_tok,
+                                .name_tok = name_tok,
+                                .colon_tok = colon_tok,
+                                .type = try self.parseExpr(),
+                            });
+                        } else if (is_named) {
+                            const name_tok = self.advance();
+                            const colon_tok = try self.expect(.colon);
+
+                            try fields.append(self.alloc, .{
+                                .doc_tok = field_doc,
+                                .name_tok = name_tok,
+                                .colon_tok = colon_tok,
+                                .type = try self.parseExpr(),
+                            });
+                        } else {
+                            try fields.append(self.alloc, .{
+                                .doc_tok = field_doc,
+                                .type = try self.parseExpr(),
+                            });
+                        }
+                        if (!self.match(.comma)) break;
+                        try commas.append(self.alloc, self.stream.prevToken());
+                    }
+
+                    const rbrace_tok = try self.expect(.rsquiggly);
+                    return cst.allocType(self.alloc, self.prevSpan(start), .{
+                        .record = .{
+                            .lbrace_tok = start,
+                            .fields = try fields.toOwnedSlice(self.alloc),
+                            .commas = try commas.toOwnedSlice(self.alloc),
+                            .rbrace_tok = rbrace_tok,
+                        },
+                    });
+                },
+                else => return error.UnexpectedToken,
+            }
+        }
+
+        const CstParamList = struct { params: []cst.CstTypeParam, commas: []Token };
+
+        fn parseFnParams(self: *@This()) !CstParamList {
+            var params = try std.ArrayList(cst.CstTypeParam).initCapacity(self.alloc, 4);
+            errdefer params.deinit(self.alloc);
+
+            var commas = try std.ArrayList(Token).initCapacity(self.alloc, 4);
+            errdefer commas.deinit(self.alloc);
+
+            while (!self.check(.rparen) and !self.check(.eof)) {
+                var param: cst.CstTypeParam = .{ .name_tok = undefined };
+                if (self.match(.huh)) param.qmark_tok = self.stream.prevToken();
+                const name = self.peek();
+
+                if (name.type != .ident and !std.mem.startsWith(u8, @tagName(name.type), "kw_"))
+                    return error.UnexpectedToken;
+                param.name_tok = self.advance();
+
+                if (self.match(.colon)) {
+                    param.colon_tok = self.stream.prevToken();
+                    param.type = try self.parseExpr();
+                }
+
+                if (self.match(.dotdot)) {
+                    // `...` is two dots; second may be missing on error paths
+                    var dots = try std.ArrayList(Token).initCapacity(self.alloc, 2);
+                    errdefer dots.deinit(self.alloc);
+                    try dots.append(self.alloc, self.stream.prevToken());
+                    if (self.match(.dot)) try dots.append(self.alloc, self.stream.prevToken());
+                    param.dots = try dots.toOwnedSlice(self.alloc);
+                }
+
+                try params.append(self.alloc, param);
+                if (!self.match(.comma)) break;
+
+                try commas.append(self.alloc, self.stream.prevToken());
+            }
+            return .{ .params = try params.toOwnedSlice(self.alloc), .commas = try commas.toOwnedSlice(self.alloc) };
+        }
+    };
 }
 
 /// render a TypeInfo straight to the writer
-/// trailing params past required_count print `?` (for optional)
+/// , trailing params past required_count print `?` (for optional)
 pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void {
     if (opts.short) {
         switch (ti.tag) {
@@ -281,7 +384,7 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
             .table => try writer.writeAll("table"),
             .function => try writer.writeAll("function"),
             // all these are spelled out so a future payload-carrying tag breaks
-            // compilation here instead of just printing its tag name
+            // , compilation here instead of just printing its tag name
             .bool, .number, .string, .resource, .any, .never, .@"union" => try writer.writeAll(@tagName(ti.tag)),
         }
         return;
@@ -289,11 +392,11 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
     switch (ti.tag) {
         .type_var => |n| try writer.writeAll(n),
         // empty atom payload is the "any atom" sentinel
-        .atom => |s| if (s.len == 0) try writer.writeAll("atom") else try writer.print(":{s}", .{ast.atomName(s)}),
+        .atom => |s| if (s.len == 0) try writer.writeAll("atom") else try writer.print(":{s}", .{cst.atomName(s)}),
         .@"union" => |variants| {
             // `T?`, for a 2-union ending in `:nil`
             if (variants.len == 2 and variants[1].types.len == 1 and variants[1].types[0].tag == .atom and
-                std.mem.eql(u8, ast.atomName(variants[1].types[0].tag.atom), "nil"))
+                std.mem.eql(u8, cst.atomName(variants[1].types[0].tag.atom), "nil"))
             {
                 const first = variants[0].types;
                 try printType(first[0], writer, opts);
@@ -310,7 +413,7 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
                 for (fields, 0..) |f, i| {
                     if (i > 0) try writer.writeAll(", ");
                     // numeric names are positional array entries
-                    const positional = ast.isPositionalName(f.name);
+                    const positional = cst.isPositionalName(f.name);
                     if (!positional) {
                         if (f.optional) try writer.writeByte('?');
                         try writer.writeAll(f.name);
@@ -327,7 +430,7 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
                 try writer.writeByte('}');
             } else if (tbl.key == null and tbl.value.tag == .any) {
                 // bare `table` still bare
-                // TODO: remove in favour of `{}`
+                // , todo: remove in favour of `{}`
                 try writer.writeAll("table");
             } else {
                 try writer.writeAll("table<");
@@ -345,7 +448,7 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
             for (sig.params, 0..) |p, i| {
                 if (i > 0) try writer.writeAll(", ");
                 // required params come first, so everything past
-                // required_count is `?`
+                // , required_count is `?`
                 if (i >= sig.required_count) try writer.writeByte('?');
                 const name = if (i < sig.param_names.len) sig.param_names[i] else "";
                 if (name.len > 0) {
@@ -368,7 +471,7 @@ pub fn printType(ti: TypeInfo, writer: *std.Io.Writer, opts: PrintOptions) !void
 }
 
 /// short gives single-word tag names
-/// values appends ` = <preview>` per record field (hover)
+/// , values appends ` = <preview>` per record field (hover)
 pub const PrintOptions = struct {
     short: bool = false,
     values: []const FieldPreview = &.{},
@@ -385,7 +488,7 @@ pub fn formatTypeOpts(alloc: std.mem.Allocator, ti: TypeInfo, opts: PrintOptions
     errdefer buf.deinit();
 
     // allocating writer only fails on oom
-    // printType is generic over writers so its error set is wider than what happens here
+    // , printType error set is wider than what happens here
     printType(ti, &buf.writer, opts) catch |err| {
         if (err != error.OutOfMemory) unreachable;
         return error.OutOfMemory;
@@ -399,17 +502,16 @@ test "qualified optional type is a nilable union" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const tokens = try Lexer.lexAt(alloc, "argparse.ResultMsg?", .{});
+    const tokens = try Lexer.lexAt(alloc, "argparse.ResultMsg?");
     var pos: usize = 0;
-    const te = try parseTypeExpr(tokens, &pos, alloc);
+    const te = try parseCstTypeExpr(tokens, &pos, alloc);
 
-    try std.testing.expect(te.kind == .union_of);
-    const variants = te.kind.union_of;
-    try std.testing.expectEqual(@as(usize, 2), variants.len);
-    try std.testing.expect(variants[0].kind == .qualified);
-    try std.testing.expectEqualStrings("argparse", variants[0].kind.qualified.module);
-    try std.testing.expectEqualStrings("ResultMsg", variants[0].kind.qualified.name);
-    try std.testing.expectEqualStrings(":nil", variants[1].kind.atom);
+    // `a.B?` stays glued until lowering folds it
+    try std.testing.expect(te.kind == .qualified_optional);
+    try std.testing.expectEqualStrings("argparse", te.kind.qualified_optional.mod_tok.text);
+    // lowering folds it to a nilable union like before
+    const ti = try types.evalBare(alloc, te);
+    try std.testing.expect(ti.tag == .@"union");
 }
 
 test "type serde roundtrips" {
@@ -432,9 +534,9 @@ test "type serde roundtrips" {
         defer arena.deinit();
         const alloc = arena.allocator();
 
-        const tokens = try Lexer.lexAt(alloc, c, .{});
+        const tokens = try Lexer.lexAt(alloc, c);
         var pos: usize = 0;
-        const te = try parseTypeExpr(tokens, &pos, alloc);
+        const te = try parseCstTypeExpr(tokens, &pos, alloc);
         const ti = try types.evalBare(alloc, te);
         try std.testing.expectEqualStrings(c, try formatTypeOpts(alloc, ti, .{}));
     }

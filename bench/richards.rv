@@ -4,21 +4,22 @@
 const NO_TASK = :nil
 const NO_WORK = :nil
 
-const IDLER     = 1
-const WORKER    = 2
+const IDLER = 1
+const WORKER = 2
 const HANDLER_A = 3
 const HANDLER_B = 4
-const DEVICE_A  = 5
-const DEVICE_B  = 6
+const DEVICE_A = 5
+const DEVICE_B = 6
 
 # Tracing code has been commented out because Revo doesn't constant fold and DCE it yet
 # const TRACING = :false
 
 const RBObject = { class = :RBObject }
 
+
 fn RBObject:append(packet, queue_head) do
   packet.link = NO_WORK
-  if queue_head == NO_WORK
+  if (queue_head == NO_WORK)
     return packet
 
   let mouse = queue_head
@@ -33,170 +34,200 @@ fn RBObject:append(packet, queue_head) do
   queue_head
 end
 
+
 const DeviceTaskDataRecord = { class = :DeviceTaskDataRecord }
 set_meta(DeviceTaskDataRecord, { __index = RBObject })
+
 
 fn DeviceTaskDataRecord.new() do
   const obj = { pending = NO_WORK }
   set_meta(obj, { __index = DeviceTaskDataRecord })
 end
 
+
 const HandlerTaskDataRecord = { class = :HandlerTaskDataRecord }
 set_meta(HandlerTaskDataRecord, { __index = RBObject })
 
+
 fn HandlerTaskDataRecord.new() do
   const obj = {
-    work_in   = NO_WORK,
+    work_in = NO_WORK,
     device_in = NO_WORK
   }
   set_meta(obj, { __index = HandlerTaskDataRecord })
 end
 
+
 fn HandlerTaskDataRecord:device_in_add(packet)
   self.device_in = self:append(packet, self.device_in)
+
 
 fn HandlerTaskDataRecord:work_in_add(packet)
   self.work_in = self:append(packet, self.work_in)
 
+
 const IdleTaskDataRecord = { class = :IdleTaskDataRecord }
 set_meta(IdleTaskDataRecord, { __index = RBObject })
+
 
 fn IdleTaskDataRecord.new() do
   const obj = {
     control = 1,
-    count   = 10000,
+    count = 10000,
   }
   set_meta(obj, { __index = IdleTaskDataRecord })
 end
 
+
 const WorkerTaskDataRecord = { class = :WorkerTaskDataRecord }
 set_meta(WorkerTaskDataRecord, { __index = RBObject })
+
 
 fn WorkerTaskDataRecord.new() do
   const obj = {
     destination = HANDLER_A,
-    count       = 0
+    count = 0
   }
   set_meta(obj, { __index = WorkerTaskDataRecord })
 end
 
+
 const Packet = { class = :Packet }
 set_meta(Packet, { __index = RBObject })
 
+
 fn Packet.new(link, identity, kind) do
   const obj = {
-    link     = link,
-    kind     = kind,
+    link = link,
+    kind = kind,
     identity = identity,
-    datum    = 1,
-    data     = { 0, 0, 0, 0 }
+    datum = 1,
+    data = { 0, 0, 0, 0 }
   }
   set_meta(obj, { __index = Packet })
 end
 
+
 const TaskState = { class = :TaskState }
 set_meta(TaskState, { __index = RBObject })
 
+
 fn TaskState.new() do
   const obj = {
-    task_holding  = :false,
-    task_waiting  = :false,
+    task_holding = :false,
+    task_waiting = :false,
     packt_pending = :false
   }
   set_meta(obj, { __index = TaskState })
 end
 
+
 fn TaskState:is_packet_pending()
   self.packt_pending
+
 
 fn TaskState:is_task_waiting()
   self.task_waiting
 
+
 fn TaskState:is_task_holding()
   self.task_holding
 
+
 fn TaskState:packet_pending() do
   self.packt_pending = :true
-  self.task_waiting  = :false
-  self.task_holding  = :false
+  self.task_waiting = :false
+  self.task_holding = :false
   self
 end
+
 
 fn TaskState:running() do
   self.packt_pending = :false
-  self.task_waiting  = :false
-  self.task_holding  = :false
+  self.task_waiting = :false
+  self.task_holding = :false
   self
 end
+
 
 fn TaskState:waiting() do
   self.packt_pending = :false
-  self.task_waiting  = :false
-  self.task_holding  = :true
+  self.task_waiting = :false
+  self.task_holding = :true
   self
 end
 
+
 fn TaskState:waiting_with_packet() do
   self.packt_pending = :true
-  self.task_waiting  = :true
-  self.task_holding  = :false
+  self.task_waiting = :true
+  self.task_holding = :false
   self
 end
+
 
 fn TaskState:is_task_holding_or_waiting()
   self.task_holding or (not self.packt_pending and self.task_waiting)
 
+
 fn TaskState:is_waiting_with_packet()
   self.packt_pending and self.task_waiting and not self.task_holding
+
 
 fn TaskState.create_running()
   TaskState.new():running()
 
+
 fn TaskState.create_waiting()
   TaskState.new():waiting()
+
 
 fn TaskState.create_waiting_with_packet()
   TaskState.new():waiting_with_packet()
 
+
 const TaskControlBlock = { class = :TaskControlBlock }
 set_meta(TaskControlBlock, { __index = TaskState })
 
+
 fn TaskControlBlock.new
-  (link, identity, priority, initial_work_queue, initial_state, private_data, func)
+(link, identity, priority, initial_work_queue, initial_state, private_data, func)
 do
   const obj = {
-    link     = link,
+    link = link,
     identity = identity,
     priority = priority,
-    input    = initial_work_queue,
-    handle   = private_data,
+    input = initial_work_queue,
+    handle = private_data,
 
     packt_pending = initial_state:is_packet_pending(),
-    task_waiting  = initial_state:is_task_waiting(),
-    task_holding  = initial_state:is_task_holding(),
+    task_waiting = initial_state:is_task_waiting(),
+    task_holding = initial_state:is_task_holding(),
 
     func = func,
   }
   set_meta(obj, { __index = TaskControlBlock })
 end
 
+
 fn TaskControlBlock:add_input_and_check_priority(packet, old_task) do
   if self.input == NO_WORK do
     self.input = packet
     self.packt_pending = :true
-    if self.priority > old_task.priority
+    if (self.priority > old_task.priority)
       return self
   end else
     self.input = self:append(packet, self.input)
   old_task
 end
 
+
 fn TaskControlBlock:run_task() do
   let message = :nil
   if self:is_waiting_with_packet() do
     message = self.input
     self.input = message.link
-    if self.input == NO_WORK
+    if (self.input == NO_WORK)
       self:running()
     else
       self:packet_pending()
@@ -206,13 +237,15 @@ fn TaskControlBlock:run_task() do
   self.func(message, self.handle)
 end
 
+
 const Scheduler = { class = :Scheduler }
 set_meta(Scheduler, { __index = RBObject })
 
 const DEVICE_PACKET_KIND = 0
-const WORK_PACKET_KIND   = 1
+const WORK_PACKET_KIND = 1
 
 const DATA_SIZE = 4
+
 
 fn Scheduler.new() do
   const obj = {
@@ -220,16 +253,17 @@ fn Scheduler.new() do
     layout = 0,
 
     # init scheduler
-    task_list    = NO_TASK,
+    task_list = NO_TASK,
     current_task = NO_TASK,
     current_task_identity = 0,
     task_table = { NO_TASK, NO_TASK, NO_TASK, NO_TASK, NO_TASK, NO_TASK },
 
     queue_count = 0,
-    hold_count  = 0
+    hold_count = 0
   }
   set_meta(obj, { __index = Scheduler })
 end
+
 
 fn Scheduler:create_device(identity, priority, work, state) do
   self:create_task(identity, priority, work, state,
@@ -237,7 +271,7 @@ fn Scheduler:create_device(identity, priority, work, state) do
     fn(packet, data) do
       if packet == NO_WORK do
         packet = data.pending
-        if packet == NO_WORK
+        if (packet == NO_WORK)
           return self:wait()
         else do
           data.pending = NO_WORK
@@ -253,19 +287,20 @@ fn Scheduler:create_device(identity, priority, work, state) do
   )
 end
 
+
 fn Scheduler:create_handler(identity, priority, work, state) do
   self:create_task(identity, priority, work, state,
     HandlerTaskDataRecord.new(),
     fn(packet, data) do
       if packet != NO_WORK do
-        if packet.kind == WORK_PACKET_KIND
+        if (packet.kind == WORK_PACKET_KIND)
           data:work_in_add(packet)
         else
           data:device_in_add(packet)
       end
 
       const work_packet = data.work_in
-      if work_packet == NO_WORK
+      if (work_packet == NO_WORK)
         return self:wait()
       else do
         const count = work_packet.datum
@@ -274,7 +309,7 @@ fn Scheduler:create_handler(identity, priority, work, state) do
           return self:queue_packet(work_packet)
         end else do
           const device_packet = data.device_in
-          if device_packet == NO_WORK
+          if (device_packet == NO_WORK)
             return self:wait()
           else do
             data.device_in = device_packet.link
@@ -288,12 +323,13 @@ fn Scheduler:create_handler(identity, priority, work, state) do
   )
 end
 
+
 fn Scheduler:create_idler(identity, priority, work, state) do
   self:create_task(identity, priority, work, state,
     IdleTaskDataRecord.new(),
     fn(_, data) do
       data.count = data.count - 1
-      if data.count == 0
+      if (data.count == 0)
         return self:hold_self()
       else do
         if data.control band 1 == 0 do
@@ -308,8 +344,10 @@ fn Scheduler:create_idler(identity, priority, work, state) do
   )
 end
 
+
 fn Scheduler:create_packet(link, identity, kind)
   Packet.new(link, identity, kind)
+
 
 fn Scheduler:create_task(identity, priority, work, state, data, func) do
   const tcb = TaskControlBlock.new(self.task_list, identity, priority, work, state, data, func)
@@ -317,11 +355,12 @@ fn Scheduler:create_task(identity, priority, work, state, data, func) do
   self.task_table[identity - 1] = tcb
 end
 
+
 fn Scheduler:create_worker(identity, priority, work, state) do
   self:create_task(identity, priority, work, state,
     WorkerTaskDataRecord.new(),
     fn(packet, data) do
-      if packet == NO_WORK
+      if (packet == NO_WORK)
         return self:wait()
       else do
         data.destination = (data.destination == HANDLER_A) and HANDLER_B or HANDLER_A
@@ -329,7 +368,7 @@ fn Scheduler:create_worker(identity, priority, work, state) do
         packet.datum = 1
         for i in 1..(DATA_SIZE + 1) do
           data.count = data.count + 1
-          if data.count > 26
+          if (data.count > 26)
             data.count = 1
           packet.data[i - 1] = 65 + data.count - 1
         end
@@ -339,21 +378,22 @@ fn Scheduler:create_worker(identity, priority, work, state) do
   )
 end
 
+
 fn Scheduler:start() do
   self:create_idler(IDLER, 0, NO_WORK, TaskState.create_running())
   let
   queue = self:create_packet(NO_WORK, WORKER, WORK_PACKET_KIND)
-  queue = self:create_packet(queue,   WORKER, WORK_PACKET_KIND)
+  queue = self:create_packet(queue, WORKER, WORK_PACKET_KIND)
 
   self:create_worker(WORKER, 1000, queue, TaskState.create_waiting_with_packet())
   queue = self:create_packet(NO_WORK, DEVICE_A, DEVICE_PACKET_KIND)
-  queue = self:create_packet(queue,   DEVICE_A, DEVICE_PACKET_KIND)
-  queue = self:create_packet(queue,   DEVICE_A, DEVICE_PACKET_KIND)
+  queue = self:create_packet(queue, DEVICE_A, DEVICE_PACKET_KIND)
+  queue = self:create_packet(queue, DEVICE_A, DEVICE_PACKET_KIND)
 
   self:create_handler(HANDLER_A, 2000, queue, TaskState.create_waiting_with_packet())
   queue = self:create_packet(NO_WORK, DEVICE_B, DEVICE_PACKET_KIND)
-  queue = self:create_packet(queue,   DEVICE_B, DEVICE_PACKET_KIND)
-  queue = self:create_packet(queue,   DEVICE_B, DEVICE_PACKET_KIND)
+  queue = self:create_packet(queue, DEVICE_B, DEVICE_PACKET_KIND)
+  queue = self:create_packet(queue, DEVICE_B, DEVICE_PACKET_KIND)
 
   self:create_handler(HANDLER_B, 3000, queue, TaskState.create_waiting_with_packet())
   self:create_device(DEVICE_A, 4000, NO_WORK, TaskState.create_waiting())
@@ -364,11 +404,13 @@ fn Scheduler:start() do
   self.queue_count == 23246 and self.hold_count == 9297
 end
 
+
 fn Scheduler:find_task(identity) do
   const task = self.task_table[identity - 1]
   assert(task != NO_TASK)
   task
 end
+
 
 fn Scheduler:hold_self() do
   self.hold_count = self.hold_count + 1
@@ -377,30 +419,33 @@ fn Scheduler:hold_self() do
   current_task.link
 end
 
+
 fn Scheduler:queue_packet(packet) do
   const task = self:find_task(packet.identity)
-  if task == NO_TASK
+  if (task == NO_TASK)
     return NO_TASK
 
   self.queue_count = self.queue_count + 1
 
-  packet.link     = NO_WORK
+  packet.link = NO_WORK
   packet.identity = self.current_task_identity
   task:add_input_and_check_priority(packet, self.current_task)
 end
 
+
 fn Scheduler:release(identity) do
   const task = self:find_task(identity)
-  if task == NO_TASK
+  if (task == NO_TASK)
     return NO_TASK
 
   task.task_holding = :false
 
-  if task.priority > self.current_task.priority
+  if (task.priority > self.current_task.priority)
     return task
   else
     return self.current_task
 end
+
 
 # fn Scheduler:trace(id) do
 #   const stdout = fs.open("/dev/stdout")? # workaround for printing without automatic newlines
@@ -418,10 +463,11 @@ fn Scheduler:wait() do
   current_task
 end
 
+
 fn Scheduler:schedule() do
   self.current_task = self.task_list
   while self.current_task != NO_TASK do
-    if self.current_task:is_task_holding_or_waiting()
+    if (self.current_task:is_task_holding_or_waiting())
       self.current_task = self.current_task.link
     else do
       self.current_task_identity = self.current_task.identity
@@ -432,11 +478,12 @@ fn Scheduler:schedule() do
   end
 end
 
+
 # warmup runs
 for _ in 0..10 Scheduler.new():start()
 
 const start_time = time.monotonic()
-const n = argv[0] |> number orelse 50 
+const n = argv[0] |> number orelse 50
 for _ in 0..n Scheduler.new():start()
 const total_duration = time.monotonic() - start_time
 

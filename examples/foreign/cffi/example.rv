@@ -29,7 +29,7 @@ rl.set_fps(60)
 
 let col = rl.getcolor(0x101042FF)
 
-while rl.window_should_close{} == 0 do
+while rl.window_should_close {} == 0 do
   rl.begin_draw()
   rl.clear_bg(col)
   rl.draw_fps(0, 0)

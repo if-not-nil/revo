@@ -142,15 +142,14 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const tokens = switch (revo.lang.lexReportAt(alloc, input_slice, .{}) catch return) {
-        .ok => |t| t,
-        .err => {
-            isocline_c.ic_highlight_formatted(henv, input, input);
-            return;
-        },
+    // non-fatal
+    const out = revo.lang.Lexer.lexAll(alloc, input_slice) catch {
+        isocline_c.ic_highlight_formatted(henv, input, input);
+        return;
     };
+    const tokens = out.tokens;
 
-    const ast_map = revo.lang.Workspace.buildASTSpanMap(alloc, input_slice);
+    const cst_map = revo.lang.Workspace.buildCstSpanMap(alloc, input_slice);
 
     var fb = std.ArrayList(u8).initCapacity(alloc, input_len + 32) catch return;
 
@@ -162,9 +161,9 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
 
         if (tstart > last) fb.appendSlice(alloc, input_slice[last..tstart]) catch {};
 
-        const ast_type: ?u32 = if (ast_map) |m| m.get(tstart) else null;
+        const role: ?u32 = if (cst_map) |m| m.get(tstart) else null;
 
-        const style: ?[]const u8 = if (ast_type) |t|
+        const style: ?[]const u8 = if (role) |t|
             switch (@as(revo.lang.TokenClass, @fromBackingInt(@intCast(t)))) {
                 .variable => null,
                 .enum_member => "hash",
@@ -199,25 +198,38 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
     isocline_c.ic_highlight_formatted(henv, input, fb.items.ptr);
 }
 
-fn readLine(init: std.process.Init) ![]u8 {
+const repl_prompt_main = "rεvo ";
+const repl_prompt_cont = "     ";
+
+fn inputPrompt(continuing: bool) [:0]const u8 {
+    return if (continuing) repl_prompt_cont else repl_prompt_main;
+}
+
+fn readLine(init: std.process.Init, continuing: bool) ![]u8 {
     if (build_options.isocline) {
-        const line = isocline_c.ic_readline("rεvo ") orelse return error.EndOfStream;
-        if (line[0] != 0)
-            _ = isocline_c.ic_history_add(line);
+        const line = isocline_c.ic_readline(inputPrompt(continuing).ptr) orelse return error.EndOfStream;
+        const interactive = revo.stdin().isTty(init.io) catch false;
+
+        if (interactive and std.mem.len(line) > 1) isocline_c.ic_history_remove_last();
         const duped = try init.gpa.dupe(u8, std.mem.span(line));
         isocline_c.ic_free(line);
+
         return duped;
     } else {
         var stdout_buffer: [8]u8 = undefined;
         var stdout = revo.stdout().writer(init.io, &stdout_buffer);
-        stdout.interface.writeAll(">> ") catch {};
+
+        stdout.interface.writeAll(if (continuing) ".. " else ">> ") catch {};
         stdout.interface.flush() catch {};
 
         var stdin_buffer: [1024]u8 = undefined;
         var stdin_reader = revo.stdin().reader(init.io, &stdin_buffer);
+
         var writer = std.Io.Writer.Allocating.init(init.gpa);
         defer writer.deinit();
+
         _ = try stdin_reader.interface.streamDelimiter(&writer.writer, '\n');
+
         return try writer.toOwnedSlice();
     }
 }
@@ -264,14 +276,27 @@ pub const Session = struct {
         self.project.deinit(self.gpa);
     }
 
-    fn clearSnippet(self: *Session) void {
+    fn noteHistoryUnit(self: *Session, unit: []const u8) void {
+        if (!build_options.isocline) return;
+        if (unit.len == 0) return;
+
+        const z = self.gpa.dupeSentinel(u8, unit, 0) catch return;
+        defer self.gpa.free(z);
+
+        isocline_c.ic_history_add(z.ptr);
+    }
+
+    fn settleBuffer(self: *Session, source: []const u8) void {
+        self.noteHistoryUnit(std.mem.trimEnd(u8, source, "\r\n"));
         self.source_acc.clearRetainingCapacity();
     }
 
     fn printResult(self: *Session, out: *std.Io.Writer) !void {
         var w = std.Io.Writer.Allocating.init(self.gpa);
         defer w.deinit();
+
         try self.vm.mainResult().write(&w.writer, self.vm, .pretty, self.vm.runtime.supports_color);
+
         try out.writeAll(w.written());
         try out.writeAll("\n");
     }
@@ -279,15 +304,19 @@ pub const Session = struct {
     fn printBuildError(self: *Session, out: *std.Io.Writer, source: []const u8, err: revo.lang.Error) !void {
         var buf = std.Io.Writer.Allocating.init(self.gpa);
         defer buf.deinit();
-        try revo.lang.renderError(self.gpa, &buf.writer, .{ .name = "<repl>", .text = source }, err, .{ .color = self.vm.runtime.supports_color });
+
+        try revo.lang.renderError(&buf.writer, .{ .name = "<repl>", .text = source }, err, .{ .color = self.vm.runtime.supports_color });
         try out.writeAll(buf.written());
-        revo.lang.deinitError(self.gpa, err);
+
+        revo.lang.deinitError(err);
     }
 
     fn printRuntimeFailure(self: *Session, out: *std.Io.Writer, source: []const u8, failure: revo.RunFailure) !void {
         var buf = std.Io.Writer.Allocating.init(self.gpa);
+
         defer buf.deinit();
-        try failure.render(self.gpa, &buf.writer, source, self.vm.runtime.supports_color);
+        try failure.render(&buf.writer, source, self.vm.runtime.supports_color);
+
         try out.writeAll(buf.written());
     }
 
@@ -314,14 +343,13 @@ pub const Session = struct {
                 .function => "fn",
                 .type_alias => "alias",
                 .param => "param",
-                .macro => "macro",
             };
             try out.print("{s} {s} : {d}\n", .{ kind, s.name, s.range.start.line });
         }
     }
 
     /// :h <name>
-    /// session decls first, then baselib
+    /// , session decls first, then baselib
     fn helpTopic(self: *Session, out: *std.Io.Writer, name: []const u8) !bool {
         if (self.last_file) |fid| {
             if (try self.workspace.hoverByName(self.gpa, fid, name)) |text| {
@@ -342,7 +370,7 @@ pub const Session = struct {
     }
 
     /// :h <module>
-    /// group doc plus one signature per member
+    /// , group doc plus one signature per member
     fn helpModule(self: *Session, out: *std.Io.Writer, name: []const u8) !bool {
         var found = false;
         for (revo.baselib.specs.full_specs) |group| for (group) |*spec| {
@@ -373,19 +401,25 @@ pub const Session = struct {
         defer self.vm.runtime.resetDiagArena();
 
         if (line.len == 0) return true;
-        if (std.mem.eql(u8, line, ":q") or std.mem.eql(u8, line, ":quit")) return false;
+        if (std.mem.eql(u8, line, ":q") or std.mem.eql(u8, line, ":quit")) {
+            self.noteHistoryUnit(line);
+            return false;
+        }
 
         if (std.mem.eql(u8, line, ":features")) {
+            self.noteHistoryUnit(line);
             try out.print("isocline={any}, lsp={any}\n", .{ build_options.isocline, build_options.lsp_enabled });
             return true;
         }
 
         if (std.mem.eql(u8, line, ":h")) {
+            self.noteHistoryUnit(line);
             try out.writeAll("usage: :h <name>\n");
             return true;
         }
 
         if (std.mem.startsWith(u8, line, ":h ")) {
+            self.noteHistoryUnit(line);
             const topic = std.mem.trim(u8, line[3..], " \t");
             if (!try self.helpTopic(out, topic)) {
                 try out.print("no docs for {s}\n", .{topic});
@@ -394,41 +428,19 @@ pub const Session = struct {
         }
 
         if (std.mem.eql(u8, line, ":outline")) {
+            self.noteHistoryUnit(line);
             try self.printOutline(out);
             return true;
         }
 
-        // do null-terminated snippet with trailing newline on the stack when
-        // possible; fall back to heap for super long lines
-        var snippet_buf = try std.ArrayList(u8).initCapacity(self.gpa, 8);
-        defer snippet_buf.deinit(self.gpa);
-        try snippet_buf.appendSlice(self.gpa, line);
-        try snippet_buf.append(self.gpa, '\n');
-        const snippet = snippet_buf.items;
+        try self.source_acc.appendSlice(self.gpa, line);
+        try self.source_acc.append(self.gpa, '\n');
+        if (revo.lang.Parser.needsMoreInput(self.source_acc.items, self.gpa)) return true;
+        return self.evalSource(out, self.source_acc.items);
+    }
 
-        // try parsing the snippet on its own first to decide whether it is a
-        // complete expression or an unfinished fragment like opening of a block
-        var parse_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-        defer parse_arena.deinit();
-
-        const parse_ok = switch (revo.lang.parseSourceReport(
-            parse_arena.allocator(),
-            snippet,
-            .{ .repl_mode = true },
-        ) catch |err| {
-            try out.print("parse error: {}\n", .{err});
-            return true;
-        }) {
-            .ok => true,
-            .err => false,
-        };
-
-        const source = if (parse_ok) snippet else blk: {
-            try self.source_acc.appendSlice(self.gpa, line);
-            try self.source_acc.append(self.gpa, '\n');
-            break :blk self.source_acc.items;
-        };
-
+    /// analyze + compile + run the buffer, settled runs record history + reset
+    fn evalSource(self: *Session, out: *std.Io.Writer, source: []const u8) !bool {
         const file_id = self.workspace.open("<repl>", source, .{}) catch |err| {
             try out.print("repl open error: {}\n", .{err});
             return true;
@@ -446,14 +458,14 @@ pub const Session = struct {
         if (analysis.diagnostics) |lang_err| {
             try self.printBuildError(out, source, lang_err);
             analysis.diagnostics = null;
-            self.clearSnippet();
+            self.settleBuffer(source);
             return true;
         }
 
         if (analysis.warnings) |w| {
             var buf = std.Io.Writer.Allocating.init(self.gpa);
             defer buf.deinit();
-            try revo.lang.renderWarnings(self.gpa, &buf.writer, .{ .name = "<repl>", .text = source }, w, .{ .color = self.vm.runtime.supports_color });
+            try revo.lang.renderWarnings(&buf.writer, .{ .name = "<repl>", .text = source }, w, .{ .color = self.vm.runtime.supports_color });
             try out.writeAll(buf.written());
         }
 
@@ -470,18 +482,18 @@ pub const Session = struct {
             bytecode.instructions,
         ) catch |err| {
             try out.print("runtime error: {}\n", .{err});
-            self.clearSnippet();
+            self.settleBuffer(source);
             return true;
         };
 
         switch (run_result) {
             .ok => {
-                if (!parse_ok) self.source_acc.clearRetainingCapacity();
+                self.settleBuffer(source);
                 try self.printResult(out);
             },
             .err => |failure| {
                 try self.printRuntimeFailure(out, source, failure);
-                self.clearSnippet();
+                self.settleBuffer(source);
             },
         }
 
@@ -526,7 +538,7 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             try std.mem.printSentinel(&b, ".revo_history", .{}, 0);
         isocline_c.ic_set_history(hist_path.ptr, 1000);
 
-        // lfeatures
+        // features
         _ = isocline_c.ic_enable_color(true);
         _ = isocline_c.ic_enable_inline_help(true);
         _ = isocline_c.ic_enable_completion_preview(true);
@@ -547,12 +559,12 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
             sigint_received.store(false, .seq_cst);
             try writer.writeAll("\n");
             try writer.flush();
-            session.clearSnippet();
+            session.source_acc.clearRetainingCapacity();
             session.last_file = null;
             continue;
         }
 
-        const raw = readLine(init) catch break;
+        const raw = readLine(init, session.source_acc.items.len > 0) catch break;
         defer init.gpa.free(raw);
         if (!try session.evalLine(writer, raw)) break;
         try writer.flush();
@@ -578,9 +590,8 @@ fn initTestEnv(alloc: std.mem.Allocator) !TestEnv {
     return TestEnv{ .vm = vm, .session = session, .out = out };
 }
 
-// a __index metamethod that parks (recv on an empty channel) must land its
-// result in the dispatch instruction's result register after resume, not the
-// synthetic host-call frame's register
+// a __index metamethod that parks must land its result in dispatch result reg
+// , not synthetic host-call frame reg, after resume
 test "repl parked metamethod resumes with correct result" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -597,8 +608,8 @@ test "repl parked metamethod resumes with correct result" {
     try std.testing.expect(std.mem.find(u8, env.out.written(), "42") != null);
 }
 
-// closing a socket while a fiber is parked on recv must wake that fiber with
-// an error instead of dispatching on_ready against the freed SocketEntry
+// closing a socket while a fiber parked on recv must wake it with error
+// , instead of dispatching on_ready against freed SocketEntry
 test "repl closing a socket wakes a parked recv with SocketClosed" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -727,8 +738,8 @@ test "repl can call a global function later" {
     try std.testing.expect(std.mem.findPos(u8, env.out.written(), before_call, "4\n") != null);
 }
 
-// the workspace caches compiled bytecode by FileId; re-opening <repl> with
-// new text via change() should invalidate caches
+// the workspace caches compiled bytecode by FileId, re-opening <repl> with
+// , new text via change() should invalidate caches
 test "repl string methods work on multiple string literals" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

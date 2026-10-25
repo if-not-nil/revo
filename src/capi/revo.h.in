@@ -145,7 +145,6 @@ typedef int (*RevoFn)(void *vm, size_t argc, RevoValue *argv,
 #define REVO_ERR_TYPE 2
 #define REVO_ERR_OTHER 3
 
-// function binding; types live in revo (ascribed re-exports), not here
 typedef struct {
   const char *name;
   RevoFn fn;

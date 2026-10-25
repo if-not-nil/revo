@@ -1,13 +1,11 @@
-#!
-demo the c extension
+#!/usr/bin/env revo
+  demo the c extension
 
-build the library first:
+  build the library first:
 
-```bash
-make extension
-```
-
-the shapes live in extension.rv, the values come from extension.so
+  ```bash
+  make extension
+  ```
 !#
 
 const extension = import "./extension.rv"
@@ -22,7 +20,7 @@ print(extension.regex("^h", "hello"))
 print(extension.concat({"a", "b", "c"}, "-"))
 print(extension.concat({"revo", "rules"}, ", "))
 
-# resource demo ::: the counter lives in malloc d c memory, revo holds the handle
+# resource demo ::: the counter is in malloc d c memory, revo holds the handle
 let t = extension.total_new()
 print(typeof(t))  # :resource
 print(extension.total_add(t, 5))
