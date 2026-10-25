@@ -14,7 +14,7 @@ you likely want to use them instead
 pub declare fmt = fn(format: string, args: any...) -> string
 
 #* returns length of string or table *#
-pub declare len = fn(value: any) -> num
+pub declare len = fn(value: any) -> number
 
 #* prints one value and returns it back *#
 pub declare inspect = fn(value: any) -> any
@@ -25,7 +25,7 @@ pub declare get_meta = fn(value: any) -> table | :undef
 #* sets metatable of value *#
 pub declare set_meta = fn(value: any, meta: table|:undef) -> any
 
-#* returns type of value as atom: nil, num, string, atom, function, table, opaque, resource *#
+#* returns type of value as atom: nil, number, string, atom, function, table, opaque, resource *#
 pub declare typeof = fn(value: any) -> atom
 
 #* used in tests, returns value or {:err, :ExpectFailed} tuple *#
@@ -46,32 +46,32 @@ pub declare set_debug = fn(flags: {dump: bool?, trace: bool?, instr: bool?, stac
 #* returns debug info as a table *#
 pub declare debug_info = fn() -> {
   flags: {dump: bool, trace: bool, instr: bool, stack: bool},
-  fiber_id: num,
-  pc: num,
-  stack_depth: num,
-  frame_depth: num,
-  program_len: num,
+  fiber_id: number,
+  pc: number,
+  stack_depth: number,
+  frame_depth: number,
+  program_len: number,
   has_debug_info: bool,
   source_name: string|:nil,
   source: string|:nil,
-  span_count: num,
+  span_count: number,
   panic_message: string|:nil,
 }
 
 #* creates a new channel with optional buffer size *#
-pub declare chan = fn(?capacity: num...) -> {:chan, num}
+pub declare chan = fn(?capacity: number...) -> {:chan, number}
 
 #* sends value to channel *#
-pub declare send = fn(chan: {:chan, num}, value: any) -> :ok
+pub declare send = fn(chan: {:chan, number}, value: any) -> :ok
 
 #* receives value from channel, parks if empty *#
-pub declare recv = fn(chan: {:chan, num}) -> any
+pub declare recv = fn(chan: {:chan, number}) -> any
 
 #* blocks until the fiber completes and returns its result *#
-pub declare join = fn(handle: {:fiber, num}) -> any
+pub declare join = fn(handle: {:fiber, number}) -> any
 
 #* sleeps current fiber for given milliseconds *#
-pub declare sleep = fn(ms: num) -> :parked
+pub declare sleep = fn(ms: number) -> :parked
 
 #* panics with given message *#
 pub declare panic = fn(args: any...) -> never
@@ -80,7 +80,7 @@ pub declare panic = fn(args: any...) -> never
 pub declare print = fn(args: any...) -> :ok
 
 #* hashes any value *#
-pub declare hash = fn(val: any) -> num
+pub declare hash = fn(val: any) -> number
 
 # os
 
@@ -93,7 +93,7 @@ pub declare input = fn(?opts: os.InputOpts...) -> !string
 pub declare cwd = fn() -> string
 
 #* exists the program with a status *#
-pub declare exit = fn(status: num) -> never
+pub declare exit = fn(status: number) -> never
 
 #* runs a subprocess and returns (stdout, stderr) *#
 pub declare system = fn(args: table<string>) -> !{string, string}
@@ -173,13 +173,13 @@ pub declare number = {
 #* global string helpers, calllable as `"hello   world":split(" ")` and `string.split("hello  world", " ")` *#
 pub declare string = {
   #* returns length of string *#
-  len: fn(self: string) -> num,
+  len: fn(self: string) -> number,
   #* converts string to uppercase *#
   upper: fn(self: string) -> string,
   #* converts string to lowercase *#
   lower: fn(self: string) -> string,
   #* extracts substring from start with given length *#
-  sub: fn(self: string, start: num, length: num) -> string,
+  sub: fn(self: string, start: number, length: number) -> string,
   #* replaces all occurrences of old with new *#
   replace: fn(self: string, old: string, new: string) -> string,
   #* splits string by delimiter into table *#
@@ -208,7 +208,7 @@ pub declare string = {
   replaces character at index with given char or byte
   index is 0-based
   *#
-  with: fn(self: string, idx: num, char: string|num) -> string,
+  with: fn(self: string, idx: number, char: string|number) -> string,
   #*
   converts string to table of characters
   
@@ -224,11 +224,11 @@ pub declare string = {
   "a":ascii() => 97
   ```
   *#
-  ascii: fn(self: string) -> num,
+  ascii: fn(self: string) -> number,
   #* checks if string contains substring *#
   contains?: fn(self: string, substr: string) -> bool,
   #* ret 0-based index of substring or nil *#
-  index_of: fn(self: string, substr: string) -> num|:nil,
+  index_of: fn(self: string, substr: string) -> number|:nil,
   #*
   creates string from ASCII code(s)
   
@@ -236,7 +236,7 @@ pub declare string = {
   of_ascii(97) => "a"
   ```
   *#
-  of_ascii: fn(code: num) -> string,
+  of_ascii: fn(code: number) -> string,
   #* joins table elements into string with separator *#
   join: fn(table: table<string>, sep: string) -> string,
   #* converts value to string: string(x) *#
@@ -244,7 +244,7 @@ pub declare string = {
   #* concatenates two strings *#
   concat: fn(self: string, other: string) -> string,
   #* repeats string n times *#
-  repeat: fn(self: string, n: num) -> string,
+  repeat: fn(self: string, n: number) -> string,
 }
 
 #* global table helpers, calllable as `{1, 2}:at(0)` and `table.at({1, 2}, 0)` *#
@@ -258,11 +258,11 @@ pub declare table = {
   gets array element at 0-based index, metatable-ignoring
   returns :undef when out of range
   *#
-  at: fn<T>(self: table<T>, index: num) -> T | :undef,
+  at: fn<T>(self: table<T>, index: number) -> T | :undef,
   #*
   whether a 0-based index holds an array element, metatable-ignoring
   *#
-  at?: fn(self: table, index: num) -> bool,
+  at?: fn(self: table, index: number) -> bool,
   #*
   gets map value, metatable-ignoring
   returns :undef if key missing
@@ -285,7 +285,7 @@ pub declare table = {
   #* extracts error from result, panics if not :err *#
   unwrap_err: fn<T>(self: {:err, T} | table) -> T,
   #* inserts value at position, shifting elements right *#
-  insert: fn<T>(self: table<T>, pos: num, value: T) -> :ok,
+  insert: fn<T>(self: table<T>, pos: number, value: T) -> :ok,
   #* inserts elements as last *#
   push: fn(self: table, values: any...) -> table,
   #* removes and returns the last array element, or :undef if empty *#
@@ -314,19 +314,19 @@ pub declare table = {
   #* flattens nested tables into single array (non-table elements pass through) *#
   flatten: fn(self: table<any>) -> table<any>,
   #* returns 0-based index of value in the array part, or nil if not found *#
-  index_of: fn(self: {}, value: any) -> num|:nil,
+  index_of: fn(self: {}, value: any) -> number|:nil,
   #* returns the number of times a specified value appears in a table's array part *#
-  count_of: fn(self: {}, search_val: any) -> num,
+  count_of: fn(self: {}, search_val: any) -> number,
   #* checks if table contains value *#
   contains?: fn(self: table, value: any) -> bool,
   #* removes duplicate elements *#
   unique: fn<T>(self: table<T>) -> table<T>,
   #* returns total length of table (array part + keyed entries) *#
-  len: fn(self: table) -> num,
+  len: fn(self: table) -> number,
   #* returns length of table array part only *#
-  alen: fn(self: table) -> num,
+  alen: fn(self: table) -> number,
   #* returns length of table keyed entries only *#
-  klen: fn(self: table) -> num,
+  klen: fn(self: table) -> number,
   #* reports whether the table holds no entries at all *#
   empty?: fn(self: table) -> bool,
   #* creates a deep copy of the table, duplicating nested tables (cycles map to their in-progress copy) *#
@@ -334,9 +334,9 @@ pub declare table = {
   #* applies fn to the value at key (missing reads as :nil) and stores the result back, returns self *#
   update: fn<T>(self: table<T>, key: any, fn: function) -> table<T>,
   #* returns a new table with array items [start, end), end defaults to the array length, bounds clamp *#
-  slice: fn<T>(self: table<T>, start: num, end: num...) -> table<T>,
+  slice: fn<T>(self: table<T>, start: number, end: number...) -> table<T>,
   #* repeats table array part n times *#
-  repeat: fn<T>(self: table<T>, n: num) -> table<T>,
+  repeat: fn<T>(self: table<T>, n: number) -> table<T>,
 }
 
 #* dataframe functions *#
@@ -345,11 +345,11 @@ pub declare dataframe = {
   #*
   returns the length of the dataframe, ensuring column lengths are equal
   *#
-  len: fn(input: table<string, table<any>>) -> num,
+  len: fn(input: table<string, table<any>>) -> number,
   #*
   returns the dataframe row at the given index
   *#
-  row: fn(input: table<string, table<any>>, idx: num) -> table<string, any>,
+  row: fn(input: table<string, table<any>>, idx: number) -> table<string, any>,
   #*
   selects only the given columns for a new dataframe, in the input order
   *#
@@ -377,7 +377,7 @@ pub declare iter = {
      range(0, 10, 2)    # 0, 2, 4, 6, 8
      range(5, 0, -1)    # 5, 4, 3, 2, 1
   *#
-  range: fn(end: num, rest: num...) -> function,
+  range: fn(end: number, rest: number...) -> function,
   #*
   returns a lazy iterator that transforms each element
   an arity-2 fn receives (value, index/key); materialize with iter.collect()
@@ -394,12 +394,12 @@ pub declare iter = {
   returns a lazy iterator of the first n elements
      iter.collect(iter.take({1, 2, 3, 4}, 2))
   *#
-  take: fn(collection: any, n: num) -> function,
+  take: fn(collection: any, n: number) -> function,
   #*
   returns a lazy iterator without the first n elements
      iter.collect(iter.drop({1, 2, 3, 4}, 2))
   *#
-  drop: fn(collection: any, n: num) -> function,
+  drop: fn(collection: any, n: number) -> function,
   #*
   returns a lazy iterator of pairs, one element from each iterable
   takes two or more, stops at the shortest
@@ -415,7 +415,7 @@ pub declare iter = {
   returns a lazy iterator of n-element table chunks
      iter.collect(iter.chunk({1, 2, 3, 4, 5}, 2))   # {{1, 2}, {3, 4}, {5}}
   *#
-  chunk: fn(collection: any, n: num) -> function,
+  chunk: fn(collection: any, n: number) -> function,
   #*
   maps each element to an iterable and yields its elements lazily
      iter.collect(iter.flat_map({1, 2}, fn(x) {x, x * 10}))   # {1, 10, 2, 20}
@@ -427,7 +427,7 @@ pub declare iter = {
   *#
   collect: fn(iterable: any) -> table,
   #*
-  collects string/num elements from an iterable into a string
+  collects string/number elements from an iterable into a string
   numbers are clamped to byte values
      iter.collect_string(iter.filter("hello", fn(c) c != "l"))
   *#
@@ -470,12 +470,12 @@ pub declare iter = {
      iter.count({1, 2, 3, 4})
      iter.count({1, 2, 3, 4}, fn(x) x > 2)
   *#
-  count: fn(collection: any, ?pred: function) -> num,
+  count: fn(collection: any, ?pred: function) -> number,
   #*
   sums numeric elements, skipping non-numbers
      iter.sum({1, 2, "x", 3})
   *#
-  sum: fn(collection: any) -> num,
+  sum: fn(collection: any) -> number,
 }
 
 #*
@@ -489,55 +489,55 @@ pub declare to_iter = fn(obj: any) -> function
 #* numeric math *#
 pub declare math = {
   #* absolute value *#
-  abs: fn(x: num) -> num,
+  abs: fn(x: number) -> number,
   #* floor of x *#
-  floor: fn(x: num) -> num,
+  floor: fn(x: number) -> number,
   #* ceiling of x *#
-  ceil: fn(x: num) -> num,
+  ceil: fn(x: number) -> number,
   #* square root, errors if x is negative *#
-  sqrt: fn(x: num) -> num,
+  sqrt: fn(x: number) -> number,
   #* base raised to exponent *#
-  pow: fn(base: num, exponent: num) -> num,
+  pow: fn(base: number, exponent: number) -> number,
   #* min of all arguments, at least one required *#
-  min: fn(first: num, args: num...) -> num,
+  min: fn(first: number, args: number...) -> number,
   #* max of all arguments, at least one required *#
-  max: fn(first: num, args: num...) -> num,
+  max: fn(first: number, args: number...) -> number,
   #* sine of x (x in radians) *#
-  sin: fn(x: num) -> num,
+  sin: fn(x: number) -> number,
   #* arc-sine of x (x in radians) *#
-  asin: fn(x: num) -> num,
+  asin: fn(x: number) -> number,
   #* hyperbolic sine of x (x in radians) *#
-  sinh: fn(x: num) -> num,
+  sinh: fn(x: number) -> number,
   #* hyperbolic arc-sine of x (x in radians) *#
-  asinh: fn(x: num) -> num,
+  asinh: fn(x: number) -> number,
   #* cosine of x (x in radians) *#
-  cos: fn(x: num) -> num,
+  cos: fn(x: number) -> number,
   #* arc-cosine of x (x in radians) *#
-  acos: fn(x: num) -> num,
+  acos: fn(x: number) -> number,
   #* hyperbolic cosine of x (x in radians) *#
-  cosh: fn(x: num) -> num,
+  cosh: fn(x: number) -> number,
   #* hyperbolic arc-cosine of x (x in radians) *#
-  acosh: fn(x: num) -> num,
+  acosh: fn(x: number) -> number,
   #* tangent of x (x in radians) *#
-  tan: fn(x: num) -> num,
+  tan: fn(x: number) -> number,
   #* arc-tangent of x (x in radians) *#
-  atan: fn(x: num) -> num,
+  atan: fn(x: number) -> number,
   #* hyperbolic tangent of x (x in radians) *#
-  tanh: fn(x: num) -> num,
+  tanh: fn(x: number) -> number,
   #* hyperbolic arc-tangent of x (x in radians) *#
-  atanh: fn(x: num) -> num,
+  atanh: fn(x: number) -> number,
   #* arc-tangent of y and x (y and x in radians) *#
-  atan2: fn(y: num, x: num) -> num,
+  atan2: fn(y: number, x: number) -> number,
   #* hypotenuse of sides x and y *#
-  hypot: fn(x: num, y: num) -> num,
+  hypot: fn(x: number, y: number) -> number,
   #* natural logarithm, panics if x <= 0 *#
-  log: fn(x: num) -> num,
+  log: fn(x: number) -> number,
   #* e raised to x *#
-  exp: fn(x: num) -> num,
+  exp: fn(x: number) -> number,
   #* sign of value (-1, 0, 1) *#
-  sign: fn(value: num) -> num,
+  sign: fn(value: number) -> number,
   #* test whether two values are close within the given number of decimal places *#
-  close?: fn(x: num, y: num, places: num) -> bool,
+  close?: fn(x: number, y: number, places: number) -> bool,
 }
 
 #* statistics functions *#
@@ -545,11 +545,11 @@ pub declare stats = {
   #*
   counts frequencies of elements in an array table and returns a mapping of elements to their counts
   *#
-  frequencies: fn(input: table<any>) -> table<any, num>,
+  frequencies: fn(input: table<any>) -> table<any, number>,
   #*
   middle value of input data
   *#
-  median: fn(input: table<num>) -> num,
+  median: fn(input: table<number>) -> number,
   #*
   most frequent occuring value of input data
   *#
@@ -557,38 +557,38 @@ pub declare stats = {
   #*
   table of all statistics of the input data
   *#
-  statistics: fn(input: table<num>) -> {
-    n: num,
+  statistics: fn(input: table<number>) -> {
+    n: number,
     frequencies: table,
-    mean: num,
-    median: num,
-    mode: num,
-    geomean: num,
-    minimum: num,
-    maximum: num,
-    sum: num,
-    sum_of_squares: num,
-    product: num,
-    stdev: num,
-    sample_stdev: num,
-    variance: num,
-    sample_variance: num,
-    skewness: num,
-    sample_skewness: num,
-    kurtosis: num,
-    sample_kurtosis: num,
+    mean: number,
+    median: number,
+    mode: number,
+    geomean: number,
+    minimum: number,
+    maximum: number,
+    sum: number,
+    sum_of_squares: number,
+    product: number,
+    stdev: number,
+    sample_stdev: number,
+    variance: number,
+    sample_variance: number,
+    skewness: number,
+    sample_skewness: number,
+    kurtosis: number,
+    sample_kurtosis: number,
   },
   #*
   table of regression statistics of the input data
   *#
-  regression: fn(input1: table<num>, input2: table<num>) -> {
-    n: num,
-    sum_of_products: num,
-    slope: num,
-    intercept: num,
-    correlation: num,
-    covariance: num,
-    sample_covariance: num,
+  regression: fn(input1: table<number>, input2: table<number>) -> {
+    n: number,
+    sum_of_products: number,
+    slope: number,
+    intercept: number,
+    correlation: number,
+    covariance: number,
+    sample_covariance: number,
   },
 }
 
@@ -659,13 +659,13 @@ pub declare csv = {
 #* clocks *#
 pub declare time = {
   #* returns current wall-clock time in milliseconds *#
-  now: fn() -> num,
+  now: fn() -> number,
   #* returns current wall-clock time in nanoseconds since the first call *#
-  now_ns: fn() -> num,
+  now_ns: fn() -> number,
   #* returns monotonic clock in milliseconds *#
-  monotonic: fn() -> num,
+  monotonic: fn() -> number,
   #* returns monotonic clock in nanoseconds since the first call *#
-  monotonic_ns: fn() -> num,
+  monotonic_ns: fn() -> number,
 }
 
 #* you already know what it is (might merge into time, idk) *#
@@ -677,9 +677,9 @@ pub declare datetime = {
 #* tcp sockets: connect, listen, accept, send and receive *#
 pub declare net = {
   #* connects to a remote host and port, returns a socket handle *#
-  connect: fn(host: string, port: num) -> !table,
+  connect: fn(host: string, port: number) -> !table,
   #* listens for incoming connections on the given port, returns server socket *#
-  listen: fn(port: num, ?backlog: num...) -> !table,
+  listen: fn(port: number, ?backlog: number...) -> !table,
 }
 
 #* tcp sockets: connect, listen, accept, send and receive *#
@@ -687,7 +687,7 @@ pub declare socket = {
   #* accepts an incoming client connection on a server socket *#
   accept: fn(self: table) -> !table,
   #* sends data over the socket, returns number of bytes sent *#
-  send: fn(self: table, data: string) -> !num,
+  send: fn(self: table, data: string) -> !number,
   #* receives data according to opts *#
   recv: fn(self: table, opts: socket.RecvOpts) -> !string,
   #* closes the socket *#
@@ -695,7 +695,7 @@ pub declare socket = {
   #* recv options *#
   RecvOpts: {
     ?mode: :read_some | :read_all | :read_line,
-    ?max_bytes: num,
+    ?max_bytes: number,
     ?delimiter: string,
   }
 }
@@ -726,11 +726,11 @@ pub declare http = {
   FetchOpts: {
     ?headers: table<string, http.HeaderValue>,
     ?body: string,
-    ?max_redirects: num,
+    ?max_redirects: number,
   }
 }
 
-type http.HeaderValue = string | num | :nil
+type http.HeaderValue = string | number | :nil
 
 # uri
 
@@ -775,9 +775,9 @@ pub declare uri = {
     ?user: string,
     ?host: string,
     ?path: string,
-    ?query: table<string, string | num>,
+    ?query: table<string, string | number>,
     ?fragment: string,
-    ?port: num,
+    ?port: number,
   }
 }
 
@@ -801,7 +801,7 @@ pub declare fs = {
   *#
   remove: fn(path: string, recursive: bool?) -> !atom,
   #* creates a directory; parents optional, defaults to :false: :true creates missing parents like `mkdir -p`. permissions optional, platform default when omitted *#
-  mkdir: fn(path: string, parents: bool?, permissions: num?) -> !atom,
+  mkdir: fn(path: string, parents: bool?, permissions: number?) -> !atom,
   #* ensures a file exists, creating it empty when missing and leaving existing entries alone *#
   touch: fn(path: string) -> !atom,
   #* copies a file to a new path, overwriting the destination *#
@@ -812,12 +812,12 @@ pub declare fs = {
   stat: fn(path: string, follow: bool?) -> !fs.Stat,
   #* file metadata as returned by file.stat and fs.stat *#
   Stat: {
-    size: num,
+    size: number,
     kind: atom,
-    permissions: num,
-    mtime: num,
-    atime: num,
-    ctime: num,
+    permissions: number,
+    mtime: number,
+    atime: number,
+    ctime: number,
   },
   #* changes cwd to the given path *#
   chdir: fn(path: string) -> !atom,
@@ -826,7 +826,7 @@ pub declare fs = {
   recursive optional, defaults to :false: :true causes "**" to match all directories and subdirectories until it reaches an endpoint, this can be quite cpu heavy on large directories
   depth_limit optional, defaults to 100: this is used to set an endpoint where glob must stop matching files after a certain recursion depth.  
   *#
-  glob: fn(pattern: string, recursive: bool?, depth_limit: num?) -> !table,
+  glob: fn(pattern: string, recursive: bool?, depth_limit: number?) -> !table,
 }
 
 #* filesystem access & ops *#
@@ -839,7 +839,7 @@ pub declare file = {
   overwrites the file with the provided string, or appends when append is :true
   optional permissions default to the platform file default
   *#
-  write: fn(self: table, data: string, append: bool?, permissions: num?) -> !num,
+  write: fn(self: table, data: string, append: bool?, permissions: number?) -> !number,
   #* get file metadata as a table; follow optional, defaults to :true: :false leaves symlinks alone *#
   stat: fn(self: table, follow: bool?) -> !fs.Stat,
   #*
@@ -857,7 +857,7 @@ pub declare revo = {
   structured diagnostic returned in `{:err, ...}` by functions that run revo code
 
   ```
-  match revo.eval("let x: num = 'hi'") | {:ok, v} => v | {:err, e} => e.message
+  match revo.eval("let x: number = 'hi'") | {:ok, v} => v | {:err, e} => e.message
   ```
   *#
   EvalError: {
@@ -868,9 +868,9 @@ pub declare revo = {
     #* kebab-case problem slug like "type-mismatch", :nil when none *#
     code: string | :nil,
     #* primary span position, :nil when the error has no span *#
-    line: num | :nil,
+    line: number | :nil,
     #* primary span position, :nil when the error has no span *#
-    column: num | :nil,
+    column: number | :nil,
     #* module name or path the error came from, :nil when unknown *#
     source: string | :nil,
     #* full multi-line report as the cli would print it (no colors) *#
@@ -904,17 +904,17 @@ pub declare revo = {
     type: string,
     class: string,
     text: string,
-    line: num,
-    column: num,
-    start: num,
-    end: num,
+    line: number,
+    column: number,
+    start: number,
+    end: number,
   },
   #* lex source into an array of revo.LexToken tables *#
   lex: fn(code: string) -> !table<revo.LexToken>/revo.EvalError,
   #* version of your revo installation, like "revo v1.2.3" *#
   version: fn() -> string,
   #* worker thread count (see --threads) *#
-  threads: fn() -> num,
+  threads: fn() -> number,
 }
 
 #* compress & decompress stuff *#
@@ -950,15 +950,15 @@ pub declare compress = {
 #* pseudo-random numbers with a settable seed *#
 pub declare rng = {
   #* Statically sets the seed used for generation of pseudo-random numbers. *#
-  set_seed: fn(seed: num),
+  set_seed: fn(seed: number),
   #* Reverts seed back to using the current time at the time of generation. *#
   revert_seed: fn(),
   #* Returns a random integer in the range [0, upper_bound] *#
-  rand: fn(upper_bound: num) -> num,
+  rand: fn(upper_bound: number) -> number,
   #* Returns a random integer in the range [lower_bound, upper_bound] *#
-  range: fn(lower_bound: num, upper_bound: num) -> num,
+  range: fn(lower_bound: number, upper_bound: number) -> number,
   #* Returns a random float in the range [0, 1] *#
-  rand_float: fn() -> num,
+  rand_float: fn() -> number,
   #* Returns a random element from a table, or :nil if empty (note: this function *ignores* key value pairs.) *#
   choice: fn<T>(input: table<T>) -> T | :nil,
 }

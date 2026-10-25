@@ -32,21 +32,21 @@ test "baselib sigs: global return types reach the compiler" {
     // against .any now errors before codegen
     try t.expectSemanticError(
         \\ let x = cwd()
-        \\ let n: num = x
+        \\ let n: number = x
     );
     try t.expectSemanticError(
         \\ let x = read({delimiter = :eof})
-        \\ let n: num = x?
+        \\ let n: number = x?
     );
 }
 
 test "baselib sigs source fn shadows baselib global" {
     try t.topNumber(
-        \\ const cwd = fn(x: num) x + 1
+        \\ const cwd = fn(x: number) x + 1
         \\ cwd(41)
     , 42);
     try t.expectSemanticError(
-        \\ const cwd = fn(x: num) x + 1
+        \\ const cwd = fn(x: number) x + 1
         \\ cwd("nope")
     );
 }
@@ -166,7 +166,7 @@ test "error-union sugar and the literal form are the same union" {
 
 test "declare typed const is usable in type positions" {
     try t.topNumber(
-        \\ declare MAX_ITEMS = num
+        \\ declare MAX_ITEMS = number
         \\ const x: MAX_ITEMS = 5
         \\ x
     , 5);
@@ -174,7 +174,7 @@ test "declare typed const is usable in type positions" {
 
 test "declare fn calls typecheck and run into undefined variable" {
     try t.expectRuntimeError(
-        \\ declare lamp = fn(volume: num, label: string) -> bool
+        \\ declare lamp = fn(volume: number, label: string) -> bool
         \\ lamp(1, "x")
     , .UndefinedVariable);
 }
@@ -185,7 +185,7 @@ test "declare fn return type reaches the compiler" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ declare add = fn(a: num, b: num) -> num
+        \\ declare add = fn(a: number, b: number) -> number
         \\ add(1, 2) + 1
         ,
     }, .{});
@@ -202,8 +202,8 @@ test "declare fn return type reaches the compiler" {
 
 test "declare rejects duplicate names" {
     try t.expectSemanticError(
-        \\ declare MAX_ITEMS = num
-        \\ declare MAX_ITEMS = num
+        \\ declare MAX_ITEMS = number
+        \\ declare MAX_ITEMS = number
     );
 }
 
@@ -248,14 +248,14 @@ test "one name bound by sibling matchers is fine" {
 test "declare rejects non-top-level placement" {
     try t.expectSemanticError(
         \\ fn f() do
-        \\     declare y = num
+        \\     declare y = number
         \\ end
     );
 }
 
 test "dotted pub type resolves bare in the same file" {
     try t.topNumber(
-        \\ pub type geo.Port = num
+        \\ pub type geo.Port = number
         \\ const p: Port = 8080
         \\ p
     , 8080);
@@ -498,16 +498,16 @@ test "destructuring assignment" {
     );
     // holds the target type"
     try t.expectSemanticError(
-        \\let src: {num, num} = {3, 4}
+        \\let src: {number, number} = {3, 4}
         \\let a: string = ""
-        \\let b: num = 0
+        \\let b: number = 0
         \\{a, b} = src
     );
     // accepts a matching target type
     try t.topTrue(
-        \\let src: {num, num} = {3, 4}
-        \\let a: num = 0
-        \\let b: num = 0
+        \\let src: {number, number} = {3, 4}
+        \\let a: number = 0
+        \\let b: number = 0
         \\{a, b} = src
         \\a == 3 and b == 4
     );

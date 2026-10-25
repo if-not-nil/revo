@@ -2870,7 +2870,7 @@ test "parses pub type with pub_ flag" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const root = try testing.parseOne(alloc, "pub type MyInt = int");
+    const root = try testing.parseOne(alloc, "pub type MyInt = number");
     try std.testing.expect(root.kind == .decl);
     try std.testing.expect(root.kind.decl.pub_);
     try std.testing.expect(root.kind.decl.kind == .type_alias_decl);
@@ -2920,7 +2920,7 @@ test "declare defaults to pub" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const root = try testing.parseOne(alloc, "declare ring = fn() -> int");
+    const root = try testing.parseOne(alloc, "declare ring = fn() -> number");
     try std.testing.expect(root.kind.decl.pub_);
 }
 
@@ -2997,7 +2997,7 @@ test "dotted heads" {
 
     // reject core slots and deep paths
     for ([_][]const u8{
-        "pub type string:foo = num",
+        "pub type string:foo = number",
     }) |source| {
         try std.testing.expectError(error.UnexpectedToken, testing.parseOne(alloc, source));
     }
@@ -3008,11 +3008,11 @@ test "generic call angle brackets" {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    const node = try testing.parseOne(alloc, "id<num>(42)");
+    const node = try testing.parseOne(alloc, "id<number>(42)");
     const call = node.kind.generic_call;
     try std.testing.expectEqualStrings("id", call.receiver.kind.ident.tok.text);
     try std.testing.expectEqual(@as(usize, 1), call.type_args.len);
-    try std.testing.expectEqualStrings("num", call.type_args[0].text);
+    try std.testing.expectEqualStrings("number", call.type_args[0].text);
     try std.testing.expectEqual(@as(usize, 1), call.args.len);
 
     const dotted = try testing.parseOne(alloc, "m.id<T, U>(a, b)");

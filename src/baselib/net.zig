@@ -28,7 +28,7 @@ pub const Impl = struct {
     pub fn connect(vm: *VM, host: Args.string, port: Args.number) !HostResult {
         const host_str = vm.stringValue(@backingInt(host));
         const port_int: u16 = root.host.numToInt(u16, port) orelse
-            return .errType(1, "port num 0..65535", root.typeof(Value.new.num(port), vm));
+            return .errType(1, "port number 0..65535", root.typeof(Value.new.num(port), vm));
 
         const host_to_use = if (std.mem.eql(u8, host_str, "localhost")) "127.0.0.1" else host_str;
         const addr = std.Io.net.IpAddress.parseIp4(host_to_use, port_int) catch |err| {
@@ -275,12 +275,12 @@ else
         .{ .name = "listen", .f = root.host.defineVariadic(&.{.number}, listen_fn) },
     };
 
-/// > net:listen(port: num [, backlog: num]) -> socket
+/// > net:listen(port: number [, backlog: number]) -> socket
 fn listen_fn(args: []const Value, vm: *VM) !HostResult {
     const port: u16 = root.host.numToInt(u16, args[0].asNumOpt().?) orelse
-        return .errType(0, "port num 0..65535", root.typeof(args[0], vm));
+        return .errType(0, "port number 0..65535", root.typeof(args[0], vm));
     const backlog: u31 = if (args.len > 1)
-        root.host.numToInt(u31, args[1].asNumOpt().?) orelse return .errType(1, "backlog num", root.typeof(args[1], vm))
+        root.host.numToInt(u31, args[1].asNumOpt().?) orelse return .errType(1, "backlog number", root.typeof(args[1], vm))
     else
         128;
 

@@ -12,7 +12,7 @@ setlocal iskeyword=48-57,A-Z,a-z,_,?,!
 
 syn keyword revoKeyword const let macro test suite skip fn if unless else match when do end loop for while global break continue return import spawn yield comp proc pub declare
 syn keyword revoOperator in is and or not band bor bxor shl shr orelse
-syn keyword revoType number num int string bool any table function atom never
+syn keyword revoType number string bool any table function atom never
 syn keyword revoTypedef type
 syn keyword revoBuiltin print inspect input assert
 

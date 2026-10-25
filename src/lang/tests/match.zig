@@ -138,13 +138,13 @@ test "match ascriptions" {
     try t.topNumber(
         \\ let a = 123
         \\ match a
-        \\ | x: num => x
+        \\ | x: number => x
         \\ | x: string => 0
     , 123);
     try t.topNumber(
         \\ let a = "hi"
         \\ match a
-        \\ | x: num => 0
+        \\ | x: number => 0
         \\ | x: string => 7
         \\ | _ => 8
     , 7);

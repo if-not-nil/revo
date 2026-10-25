@@ -418,7 +418,7 @@ pub const Impl = struct {
         return .data(Value.new.table(result_table_id));
     }
 
-    // stats.median(table) -> num
+    // stats.median(table) -> number
     // Middle value of input data.
     pub fn median(vm: *VM, table_id: Args.table) !HostResult {
         // copy instead of doing it ourselves
@@ -449,7 +449,7 @@ pub const Impl = struct {
     // do not comptime inline-for this in impls
     //
 
-    // stats.mode(table) -> num
+    // stats.mode(table) -> number
     // Most frequent occuring value of input data.
     pub fn mode(vm: *VM, table_id: Args.table) !HostResult {
         const table = try vm.tables.get(@backingInt(table_id));

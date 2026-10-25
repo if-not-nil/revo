@@ -162,8 +162,8 @@ fn isBoolAtom(atom: mem.AtomID) bool {
     return atom == true_id or atom == false_id;
 }
 
-/// converts a num to an integer of type ArgTypes; null when the value is not a
-/// finite integral num representable in ArgTypes
+/// converts a number to an integer of type ArgTypes; null when the value is not a
+/// finite integral number representable in ArgTypes
 pub const numToInt = revo.vm.memory.numToInt;
 
 fn makeResult(vm: *VM, comptime tag: Outcome, value: Value) !HostResult {

@@ -5,7 +5,7 @@ do  # [ ] the docs are not inherited from rng.rand into x
   a
 end
 
-do  # [ ] type of x should be num | string
+do  # [ ] type of x should be number | string
   let b =
     match input()
     | {:ok, v} => v

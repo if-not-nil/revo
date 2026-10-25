@@ -13,7 +13,7 @@ const CORPUS_PATH = "_ign-data-smaller.txt"
 type Rng = { state: number, next: function }
 
 
-fn rng_next(self: Rng, n: int) do
+fn rng_next(self: Rng, n: number) do
   self.state = (self.state * 1103515245 + 12345) % 2147483648
   self.state % n
   # |> inspect
@@ -47,7 +47,7 @@ const NOWORD = string.of_ascii(10)
 type Chain = { state: table<string, table>, starts: table, sent_starts: table, add: function, train: function, take: function }
 
 
-fn chain_add(self: Chain, idx: int, val: string) do
+fn chain_add(self: Chain, idx: number, val: string) do
   # missing keys come back as :undef, so we can create the bucket lazily
   if (not self.state[idx])
     self.state[idx] = {}
@@ -100,7 +100,7 @@ end
 
 
 fn chain_take(self: Chain, params: table) -> string do
-  if (not (let count: int = params.count))
+  if (not (let count: number = params.count))
     panic("params must contain a count")
 
   let out = ""

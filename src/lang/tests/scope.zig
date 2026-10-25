@@ -190,9 +190,9 @@ test "keyed tables do not destructure" {
     );
 }
 
-test "num alias works in range bounds" {
+test "number alias works in range bounds" {
     try t.topNumber(
-        \\ fn f(count: num) do
+        \\ fn f(count: number) do
         \\     let out = 0
         \\     for i in 0..count do
         \\         out = out + 1
@@ -209,7 +209,7 @@ test "typed binding label names the expected type" {
 
     const result = try lang.build(&vm, .{
         .text =
-        \\ const x: int = "nope"
+        \\ const x: number = "nope"
         ,
     }, .{ .install_debug_info = false });
 
@@ -282,7 +282,7 @@ test "typed call reports multiple bad arguments" {
 
     const result = try lang.build(&vm, .{
         .text =
-        \\ const f = fn(a: int, b: string) a
+        \\ const f = fn(a: number, b: string) a
         \\ f("nope", 2)
         ,
     }, .{
@@ -319,7 +319,7 @@ test "named call reports multiple bad parameters" {
 
     const result = try lang.build(&vm, .{
         .text =
-        \\ const f = fn(a: int, b: int) a + b
+        \\ const f = fn(a: number, b: number) a + b
         \\ f(x = 1, y = 2)
         ,
     }, .{

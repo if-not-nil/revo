@@ -10,7 +10,7 @@ const t = revo.lang.test_helpers;
 test "import typed function reports arg type mismatch" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "adder.rv", .data =
-        \\ pub fn add(a: int, b: int) a + b
+        \\ pub fn add(a: number, b: number) a + b
         },
     });
     defer m.deinit();
@@ -84,36 +84,36 @@ test "ascribed pub re-export types the import" {
 // type system
 //
 
-test "typed num/string bindings accept and reject" {
+test "typed number/string bindings accept and reject" {
     try t.topNumber(
-        \\ let x: num = 42
+        \\ let x: number = 42
         \\ x
     , 42);
     try t.expectSemanticError(
-        \\ let x: num = "hello"
+        \\ let x: number = "hello"
     );
     try t.expectSemanticError(
         \\ let x: string = 42
     );
 }
 
-test "typed binding table<num> accepts positional table literal" {
+test "typed binding table<number> accepts positional table literal" {
     try t.topNumber(
-        \\ let nums: table<num> = { 1, 2, 3 }
+        \\ let nums: table<number> = { 1, 2, 3 }
         \\ 1
     , 1);
 }
 
-test "typed binding table<string, num> accepts keyed table literal" {
+test "typed binding table<string, number> accepts keyed table literal" {
     try t.topNumber(
-        \\ let pairs: table<string, num> = { a = 1, b = 2 }
+        \\ let pairs: table<string, number> = { a = 1, b = 2 }
         \\ 1
     , 1);
 }
 
 test "records accept matching shapes" {
     try t.topNumber(
-        \\ let u: { name: string, age: num } = { name = "alice", age = 30 }
+        \\ let u: { name: string, age: number } = { name = "alice", age = 30 }
         \\ u.age
     , 30);
     try t.topString(
@@ -121,7 +121,7 @@ test "records accept matching shapes" {
         \\ u.name
     , "alice");
     try t.topNumber(
-        \\ let u: { name: string, age: num } = { name = "alice", age = 30 }
+        \\ let u: { name: string, age: number } = { name = "alice", age = 30 }
         \\ u.age + 12
     , 42);
     try t.topString(
@@ -129,7 +129,7 @@ test "records accept matching shapes" {
         \\ greet({ name = "bob", age = 40 })
     , "bob");
     try t.topNumber(
-        \\ type User = { name: string, age: num }
+        \\ type User = { name: string, age: number }
         \\ let u: User = { name = "alice", age = 30 }
         \\ u.age
     , 30);
@@ -157,55 +157,55 @@ test "records accept matching shapes" {
 
 test "optional ?field: accepts absent keys" {
     try t.topNumber(
-        \\ fn f(opts: {?max_bytes: num}) -> num do 0 end
+        \\ fn f(opts: {?max_bytes: number}) -> number do 0 end
         \\ f({})
     , 0);
     try t.topNumber(
-        \\ fn f(opts: {?max_bytes: num}) -> num do 0 end
+        \\ fn f(opts: {?max_bytes: number}) -> number do 0 end
         \\ f({max_bytes = 5})
     , 0);
     try t.topNumber(
-        \\ type Opts = {?a: num?, ?b: string}
+        \\ type Opts = {?a: number?, ?b: string}
         \\ let o: Opts = {a = :nil}
         \\ 1
     , 1);
 
     // present-but-wrong-typed still rejects
     try t.expectSemanticError(
-        \\ fn f(opts: {?max_bytes: num}) -> num do 0 end
+        \\ fn f(opts: {?max_bytes: number}) -> number do 0 end
         \\ f({max_bytes = "lots"})
     );
 
     // required fields still reject absent keys
     try t.expectSemanticError(
-        \\ fn f(opts: {max_bytes: num}) -> num do 0 end
+        \\ fn f(opts: {max_bytes: number}) -> number do 0 end
         \\ f({})
     );
 }
 
 test "records reject mismatched shapes" {
     try t.expectSemanticError(
-        \\ let u: { name: string, age: num } = { name = "alice" }
+        \\ let u: { name: string, age: number } = { name = "alice" }
     );
     try t.expectSemanticError(
         \\ let u: { name: string } = { name = 42 }
     );
     try t.expectSemanticError(
         \\ let u: { name: string } = { name = "alice" }
-        \\ let x: num = u.name
+        \\ let x: number = u.name
     );
     try t.expectSemanticError(
-        \\ fn greet(u: { name: string, age: num }) u.name
+        \\ fn greet(u: { name: string, age: number }) u.name
         \\ greet({ name = "bob" })
     );
     try t.expectSemanticError(
         \\ let t: { user: { name: string } } = { user = { name = 42 } }
     );
     try t.expectSemanticError(
-        \\ let a: { name: num } = {}
+        \\ let a: { name: number } = {}
     );
     try t.expectSemanticError(
-        \\ let a: { name: num } = { 1, 2, 3 }
+        \\ let a: { name: number } = { 1, 2, 3 }
     );
     try t.expectSemanticError(
         \\ let a: {number, string} = {1, 2}
@@ -217,7 +217,7 @@ test "records reject mismatched shapes" {
 
 test "fn alias enforces arity at call sites" {
     try t.expectSemanticError(
-        \\ type F = fn(num, num) -> num
+        \\ type F = fn(number, number) -> number
         \\ fn apply(f: F) f(1)
     );
 }
@@ -267,18 +267,18 @@ test "assigned and dynamic fields are not flagged" {
 
 test "typed function params accept correct types" {
     try t.topNumber(
-        \\ const add = fn(a: num, b: num) a + b
+        \\ const add = fn(a: number, b: number) a + b
         \\ add(3, 4)
     , 7);
 }
 
 test "typed function rejects wrong arg types" {
     try t.expectSemanticError(
-        \\ const add = fn(a: num, b: num) a + b
+        \\ const add = fn(a: number, b: number) a + b
         \\ add(3, "wrong")
     );
     try t.expectSemanticError(
-        \\ const add = fn(a: num, b: num) a + b
+        \\ const add = fn(a: number, b: number) a + b
         \\ add("wrong", 4)
     );
 }
@@ -303,14 +303,14 @@ test "atom union alias accepts literal and alias value in calls" {
     , "two");
 }
 
-test "binary num + num emits add" {
+test "binary number + number emits add" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: num = 5
-        \\ let b: num = 3
+        \\ let a: number = 5
+        \\ let b: number = 3
         \\ a + b
         ,
     }, .{});
@@ -325,13 +325,13 @@ test "binary num + num emits add" {
     try std.testing.expect(saw_add);
 }
 
-test "negate num emits negate" {
+test "negate number emits negate" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let x: num = 5
+        \\ let x: number = 5
         \\ let y = -x
         \\ y
         ,
@@ -347,14 +347,14 @@ test "negate num emits negate" {
     try std.testing.expect(saw_neg);
 }
 
-test "comparison num == num emits eq_int" {
+test "comparison number == number emits eq_int" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: num = 5
-        \\ let b: num = 5
+        \\ let a: number = 5
+        \\ let b: number = 5
         \\ a == b
         ,
     }, .{});
@@ -383,8 +383,8 @@ test "untyped code still works" {
 
 test "nested function with typed params" {
     try t.topNumber(
-        \\ const outer = fn(x: num) do
-        \\     const inner = fn(y: num) y * 2
+        \\ const outer = fn(x: number) do
+        \\     const inner = fn(y: number) y * 2
         \\     inner(x) + 1
         \\ end
         \\ outer(5)
@@ -393,7 +393,7 @@ test "nested function with typed params" {
 
 test "function call with multiple typed params" {
     try t.topNumber(
-        \\ const calc = fn(a: num, b: num, c: num) do
+        \\ const calc = fn(a: number, b: number, c: number) do
         \\     a + b + c
         \\ end
         \\ calc(1, 2.5, 3)
@@ -402,7 +402,7 @@ test "function call with multiple typed params" {
 
 test "return type validation accepts correct type" {
     try t.topNumber(
-        \\ const get_num = fn() -> num do
+        \\ const get_num = fn() -> number do
         \\     return 42
         \\ end
         \\ get_num()
@@ -414,7 +414,7 @@ test "return type validation accepts correct type" {
 //
 test "typed const and global bindings accept and reject" {
     try t.topNumber(
-        \\ const x: num = 42
+        \\ const x: number = 42
         \\ x
     , 42);
     try t.topString(
@@ -422,10 +422,10 @@ test "typed const and global bindings accept and reject" {
         \\ s
     , "hello");
     try t.expectSemanticError(
-        \\ const x: num = "hello"
+        \\ const x: number = "hello"
     );
     try t.topNumber(
-        \\ global x: num = 42
+        \\ global x: number = 42
         \\ x
     , 42);
 }
@@ -435,13 +435,13 @@ test "typed const and global bindings accept and reject" {
 //
 test "type aliases work in function params" {
     try t.topNumber(
-        \\ type MyInt = num
+        \\ type MyInt = number
         \\ const double = fn(x: MyInt) -> MyInt x * 2
         \\ double(21)
     , 42);
     try t.topNumber(
-        \\ type Num = num
-        \\ const add = fn(a: Num, b: Num) -> num a + b
+        \\ type Num = number
+        \\ const add = fn(a: Num, b: Num) -> number a + b
         \\ add(3, 4)
     , 7);
 }
@@ -456,7 +456,7 @@ test "type alias used in binding" {
 
 test "type alias rejects type not in union" {
     try t.expectSemanticError(
-        \\ type MyInt = num
+        \\ type MyInt = number
         \\ const x: MyInt = "string"
     );
 }
@@ -484,7 +484,7 @@ test "named union variants match to ok and err" {
 //
 test "return type mismatch detects wrong explicit return" {
     try t.expectSemanticError(
-        \\ fn get() -> num do
+        \\ fn get() -> number do
         \\     return "hello"
         \\ end
     );
@@ -492,7 +492,7 @@ test "return type mismatch detects wrong explicit return" {
 
 test "explicit returns match the return type" {
     try t.topNumber(
-        \\ fn get() -> num do
+        \\ fn get() -> number do
         \\     return 42
         \\ end
         \\ get()
@@ -504,22 +504,22 @@ test "explicit returns match the return type" {
 //
 test "if/else typed branches unify" {
     try t.topNumber(
-        \\ let x: num = 5
+        \\ let x: number = 5
         \\ let y = if x > 0 10 else 20
         \\ y
     , 10);
     try t.topString(
-        \\ let x: num = 0
+        \\ let x: number = 0
         \\ let y = if x > 0 "pos" else "non-pos"
         \\ y
     , "non-pos");
     try t.topNumber(
-        \\ let x: num = 5
+        \\ let x: number = 5
         \\ let y = unless x > 0 10 else 20
         \\ y
     , 20);
     try t.topString(
-        \\ let x: num = 0
+        \\ let x: number = 0
         \\ let y = unless x > 0 "pos" else "non-pos"
         \\ y
     , "pos");
@@ -599,7 +599,7 @@ test "string negative index accesses nth-last character" {
 //
 // any type accepts everything
 //
-test "any accepts num, table, and bindings" {
+test "any accepts number, table, and bindings" {
     try t.topNumber(
         \\ const id = fn(x: any) x
         \\ id(42)
@@ -621,7 +621,7 @@ test "any accepts num, table, and bindings" {
 //
 test "block types propagate last expr and reject mismatch" {
     try t.topNumber(
-        \\ let x: num = do
+        \\ let x: number = do
         \\     let a = 1
         \\     let b = 2
         \\     a + b
@@ -629,7 +629,7 @@ test "block types propagate last expr and reject mismatch" {
         \\ x
     , 3);
     try t.expectSemanticError(
-        \\ let x: num = do
+        \\ let x: number = do
         \\     "hello"
         \\ end
     );
@@ -644,9 +644,9 @@ test "chained typed math emits add and mul" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ let a: num = 1
-        \\ let b: num = 2
-        \\ let c: num = 3
+        \\ let a: number = 1
+        \\ let b: number = 2
+        \\ let c: number = 3
         \\ a + b * c
         ,
     }, .{});
@@ -701,7 +701,7 @@ test "nil and void bindings return nil" {
 
 test "assignments respect annotations" {
     try t.expectSemanticError(
-        \\ let x: num = 5
+        \\ let x: number = 5
         \\ x = "hello"
     );
     try t.topString(
@@ -730,7 +730,7 @@ test "bool bindings accept bool and stay bool" {
 
 test "implicit return validates block-local variable type" {
     try t.expectSemanticError(
-        \\ fn f() -> num do
+        \\ fn f() -> number do
         \\   let x = "hello"
         \\   x
         \\ end
@@ -748,7 +748,7 @@ test "loop expression infers correct return type" {
 test "upvalue assignment respects type annotation" {
     try t.expectSemanticError(
         \\ const outer = fn() do
-        \\     let x: num = 5
+        \\     let x: number = 5
         \\     const inner = fn() do x = "hello" end
         \\ end
     );
@@ -756,7 +756,7 @@ test "upvalue assignment respects type annotation" {
 
 test "dynamic callee validates argument types" {
     try t.expectCompileError(
-        \\ const f: function = fn(x: num) x
+        \\ const f: function = fn(x: number) x
         \\ f("hello")
     , .ParseError);
 }
@@ -768,7 +768,7 @@ test "for loop expression produces loop atom" {
         \\ f()
     , "loop");
     try t.topNumber(
-        \\ fn f() -> num do
+        \\ fn f() -> number do
         \\   for/l i in 0..5 do
         \\     if i == 4 break/l(i)
         \\   end

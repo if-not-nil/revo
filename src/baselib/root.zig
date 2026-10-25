@@ -369,7 +369,7 @@ fn asStackIndex(value: Value) ?usize {
     return revo.asIndex(num) catch null;
 }
 
-/// > chan(capacity?: num) -> table
+/// > chan(capacity?: number) -> table
 /// creates a new channel with optional buffer size
 ///     chan()        # unbuffered
 ///     chan(5)       # buffer of 5
@@ -489,7 +489,7 @@ pub fn number_(args: []const Value, vm: *VM) !host.HostResult {
         const parsed = try std.fmt.parseFloat(f64, vm.stringValue(id));
         return host.HostResult.Ok(vm, Value.new.num(parsed));
     }
-    return .errType(0, "num, string", typeof(args[0], vm));
+    return .errType(0, "number, string", typeof(args[0], vm));
 }
 
 /// > assert(what: any) -> what
@@ -870,23 +870,10 @@ pub fn registerTypePredicates(vm: *VM) !void {
         try vm.user_globals.put(atom, val);
         try vm.builtin_globals.put(atom, val);
     }
-    const is_number = struct {
-        fn number(args: []const Value, _: *VM) !host.HostResult {
-            for (args) |arg| {
-                if (!arg.isNumber()) return ._bool(false);
-            }
-            return ._bool(true);
-        }
-    }.number;
-    const id = try vm.callable.create(.{ .host = host.define(&[_]host.ParamType{.any}, is_number) });
-    const atom = try vm.internAtom("num?");
-    const val = Value.new.function(id);
-    try vm.user_globals.put(atom, val);
-    try vm.builtin_globals.put(atom, val);
 }
 
 test "type predicates" {
-    try testing.topTrue("num?(42)");
+    try testing.topTrue("number?(42)");
     try testing.topTrue("string?(\"hello\")");
     try testing.topTrue("table?({})");
     try testing.topTrue("atom?(:ok)");
@@ -900,7 +887,7 @@ test "debug_info() links its nested flags table without a stale pointer" {
     // is written through a dangling pointer.
     try testing.topTrue("table?(debug_info().flags)");
     try testing.topFalse("debug_info().flags.dump");
-    try testing.topTrue("num?(debug_info().stack_depth)");
+    try testing.topTrue("number?(debug_info().stack_depth)");
 }
 
 test "array sort" {

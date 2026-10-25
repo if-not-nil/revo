@@ -16,7 +16,7 @@ the code above should work like
 [ ] eliminaaate all unbounded lookahead
 ##
 fn identity<T>(x: T) x
-let id_int = identity<int>(42)
+let id_int = identity<number>(42)
 
 do
   total = total + len(detector_handle_frame(det, sim_simulate(sim, time)))

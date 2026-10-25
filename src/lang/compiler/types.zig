@@ -926,8 +926,6 @@ pub fn collectVariants(alloc: std.mem.Allocator, ti: TypeInfo, variants: *std.Ar
 
 pub const type_name_map: std.StaticStringMap(TypeInfo) = std.StaticStringMap(TypeInfo).initComptime(.{
     .{ "number", TypeInfo{ .tag = .number } },
-    .{ "num", TypeInfo{ .tag = .number } },
-    .{ "int", TypeInfo{ .tag = .number } },
     .{ "string", TypeInfo{ .tag = .string } },
     .{ "bool", TypeInfo{ .tag = .bool } },
     .{ "any", TypeInfo{ .tag = .any } },
@@ -1192,7 +1190,7 @@ pub fn inferBlockResultType(ctx: CheckCtx, exprs: []const *const cst.CstNode) Ty
 /// ctx is any CheckCtx scope: aliases resolve in the caller's scope
 pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
     switch (te.kind) {
-        // "number" -> int (from type_name_map), unknown names -> any
+        // "number" -> number (from type_name_map), unknown names -> any
         .named => |n| {
             const name = n.tok.text;
             if (scope.isTypeParam(name)) return .{ .tag = .{ .type_var = name } };
@@ -1209,7 +1207,7 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
         },
         // ":nil", ":ok" -> atom
         .atom => |a| return .{ .tag = .{ .atom = a.tok.text } },
-        // "int | :nil" -> union(@[{name="", types=@[int]}, {name="", types=@[:nil]}])
+        // "number | :nil" -> union(@[{name="", types=@[number]}, {name="", types=@[:nil]}])
         // "number?" folds like `union_of(named("number"), atom(":nil"))` from lowering
         .union_of => |u| {
             var collected = try std.ArrayList(UnionVariant).initCapacity(scope.alloc, 4);
@@ -1244,7 +1242,7 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
 
             return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(scope.alloc) } };
         },
-        // "fn(int) -> bool" -> function(param_types=@[int], return_type=bool)
+        // "fn(number) -> bool" -> function(param_types=@[number], return_type=bool)
         .function => |f| {
             var param_types = try std.ArrayList(TypeInfo).initCapacity(scope.alloc, f.params.len);
             errdefer param_types.deinit(scope.alloc);
@@ -1279,7 +1277,7 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
 
             return .{ .tag = .{ .function = sig } };
         },
-        // "table<int>" -> table(key=null, value=int), "table<string, int>" -> table(key=string, value=int)
+        // "table<number>" -> table(key=null, value=number), "table<string, number>" -> table(key=string, value=number)
         .parameterized => |p| {
             var params = try std.ArrayList(TypeInfo).initCapacity(scope.alloc, p.args.len);
             errdefer params.deinit(scope.alloc);
@@ -1316,7 +1314,7 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
             return .{ .tag = .{ .@"union" = try collected.toOwnedSlice(scope.alloc) } };
         },
         .paren => |p| return evalTypeExpr(scope, p.inner),
-        // "{ name: string, age: num }" -> table with per-field types
+        // "{ name: string, age: number }" -> table with per-field types
         // names borrow source text like .named does, owners clone
         .record => |r| {
             const owned = try scope.alloc.alloc(RecordField, r.fields.len);
@@ -1344,8 +1342,8 @@ pub fn evalTypeExpr(scope: AliasScope, te: *const cst.CstType) !TypeInfo {
         },
         // `T/tag` carries a tag for lowering; the type is the inner one
         .slashed => |s| return evalTypeExpr(scope, s.inner),
-        // "!int" -> union(@[{name="", types=@[{:ok, int}]}, {name="", types=@[{:err, any}]}])
-        // the same shape the literal `{:ok, int} | {:err, any}` produces
+        // "!number" -> union(@[{name="", types=@[{:ok, number}]}, {name="", types=@[{:err, any}]}])
+        // the same shape the literal `{:ok, number} | {:err, any}` produces
         .error_union => |e| {
             const t = try evalTypeExpr(scope, e.inner);
             var collected = try std.ArrayList(UnionVariant).initCapacity(scope.alloc, 2);

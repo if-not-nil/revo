@@ -47,7 +47,7 @@ test "colon calls need parens around a bare argument" {
 test "generic calls need parens around a bare argument" {
     try expectParseError(
         \\ fn id<T>(x) x
-        \\ id<int> "x"
+        \\ id<number> "x"
     , "generic calls need parentheses");
 }
 

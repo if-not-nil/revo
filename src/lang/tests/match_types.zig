@@ -12,8 +12,8 @@ const types = lang.compiler.types;
 test "type alias gets unaliased" {
     try t.topTrue(
         \\ type Als =
-        \\       {:aa, num}
-        \\     | {:bb, num}
+        \\       {:aa, number}
+        \\     | {:bb, number}
         \\
         \\ let x: Als = {:aa, 55}
         \\ let y: Als = {:bb, 100.1}
@@ -21,7 +21,7 @@ test "type alias gets unaliased" {
         \\ x[1] + y[1] == 155.1
     );
 }
-test "comp block infers num from literal" {
+test "comp block infers number from literal" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
 
@@ -54,10 +54,10 @@ test "never collapses in if and orelse inference" {
 }
 
 test "never arms don't poison match result type" {
-    // the panic arm is `never`: the match result is the `:ok` payload (num),
+    // the panic arm is `never`: the match result is the `:ok` payload (number),
     // so `?` on it is rejected as a non-result (it would pass as `.any`)
     try t.expectSemanticError(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ let r = match x
         \\ | {:ok, v} => v
@@ -74,7 +74,7 @@ test "match narrowing works for call subjects" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ fn g() -> Res do {:ok, 42} end
         \\ match g()
         \\ | {:ok, v} => v + 1
@@ -93,13 +93,13 @@ test "match narrowing works for call subjects" {
 }
 
 test "match narrowing enables specialized add_imm from table union payload" {
-    // `v` narrows to num so `v + 1` emits add_imm
+    // `v` narrows to number so `v + 1` emits add_imm
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v + 1
@@ -118,7 +118,7 @@ test "match narrowing enables specialized add_imm from table union payload" {
 }
 
 test "match ascriptions narrow to the annotated type" {
-    // `v: num` narrows even with an `any` subject
+    // `v: number` narrows even with an `any` subject
     //   ; so `v + 1` emits add_imm
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
@@ -127,7 +127,7 @@ test "match ascriptions narrow to the annotated type" {
         .text =
         \\ let x: any = {41}
         \\ match x
-        \\ | {v: num} => v + 1
+        \\ | {v: number} => v + 1
         \\ | _ => 0
         ,
     }, .{});

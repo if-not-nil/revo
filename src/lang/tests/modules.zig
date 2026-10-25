@@ -105,7 +105,7 @@ test "import in function body binds correctly" {
 test "pub type alias from imported module is available" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "types.rv", .data =
-        \\ pub type UserId = int
+        \\ pub type UserId = number
         \\ pub fn greet(id: UserId) id
         },
     });
@@ -120,7 +120,7 @@ test "pub type alias from imported module is available" {
 test "non-pub type alias in imported module does not pollute importer" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "priv_types.rv", .data =
-        \\ type Hidden = int
+        \\ type Hidden = number
         \\ pub const val = 42
         },
     });
@@ -134,7 +134,7 @@ test "non-pub type alias in imported module does not pollute importer" {
 test "pub type alias referencing another type alias from same module" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "chain.rv", .data =
-        \\ pub type Id = int
+        \\ pub type Id = number
         \\ pub type Alias = Id
         \\ pub fn take(n: Alias) n
         },
@@ -149,7 +149,7 @@ test "pub type alias referencing another type alias from same module" {
 test "pub type alias works in type annotation after import" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "alias_mod.rv", .data =
-        \\ pub type Code = int
+        \\ pub type Code = number
         \\ pub fn lookup(c: Code) c
         },
     });

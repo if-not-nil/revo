@@ -140,8 +140,8 @@ pub const Impl = struct {
 
     pub fn repeat(vm: *VM, self: Args.string, n: Args.number) !HostResult {
         const str = vm.stringValue(@backingInt(self));
-        const times: i64 = root.host.numToInt(i64, n) orelse return .errType(1, "integer num", "non-integer num");
-        if (times < 0) return .errType(1, "non-negative num", "negative num");
+        const times: i64 = root.host.numToInt(i64, n) orelse return .errType(1, "integer number", "non-integer numberber");
+        if (times < 0) return .errType(1, "non-negative numberber", "negative number");
         const count: usize = @intCast(times);
         if (count == 0) return .data(try vm.ownValueString(""));
         if (count == 1) return .data(Value.new.str(@backingInt(self)));

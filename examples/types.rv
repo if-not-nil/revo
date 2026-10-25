@@ -30,20 +30,20 @@ for y in 0..1000
 print(acc)
 
 
-const id = fn(x: int, y: int) x * 2
+const id = fn(x: number, y: number) x * 2
 
 
 # optional: T? expands to T | :nil
-let maybe: int? = 42
-let nothing: int? = :nil
-# let bad: int? = "str"   # expected int | :nil, got string
+let maybe: number? = 42
+let nothing: number? = :nil
+# let bad: number? = "str"   # expected number | :nil, got string
 
 # union types with |
-const num_or_str: int | string = 42
-const other: int | string = "hi"
+const num_or_str: number | string = 42
+const other: number | string = "hi"
 
-let nums: table<int> = { 1, 2, 3 }
-let pairs: table<string, int> = { a = 1, b = 2 }
+let nums: table<number> = { 1, 2, 3 }
+let pairs: table<string, number> = { a = 1, b = 2 }
 
 if (:true) 1 else "asdf"
 type A = {:ok, any} | {:err, atom}
@@ -83,35 +83,35 @@ pick({:err, :Boom})
 # hi()
 
 # typed bindings: number literal inferred as number
-let x: int = 42
-# let bad_int: int = "hello"      # type mismatch: expected number, got string
+let x: number = 42
+# let bad_int: number = "hello"      # type mismatch: expected number, got string
 
 # typed bindings: float literal inferred as number
 let y: number = 3.14
 
-# int coerces to number (allowed)
+# numbers cover both integers and floats
 let z: number = 10
 
 
 # functions & params
 
-# typed function params: both args must be int, result inferred
-fn add(a: int, b: int) a + b
+# typed function params: both args must be number, result inferred
+fn add(a: number, b: number) a + b
 
 
 let sum = add(3, 4)
 
 
-# add(3, "wrong")    # argument 2 to `add` expects int, got string
-# add("wrong", 3)    # argument 1 to `add` expects int, got string
+# add(3, "wrong")    # argument 2 to `add` expects number, got string
+# add("wrong", 3)    # argument 1 to `add` expects number, got string
 
 # typed function return validation
-# fn bad_return() -> int do
+# fn bad_return() -> number do
 #     return "oops"
 # end
 
 # typed function with return type annotation
-fn double(n: int) -> int do
+fn double(n: number) -> number do
   return n * 2
 end
 
@@ -119,7 +119,7 @@ end
 let doubled = double(5)
 
 
-# double("hello")  # argument 1 to `double` expects int, got string
+# double("hello")  # argument 1 to `double` expects number, got string
 
 # typed function with mixed params
 const scale = fn(v: number, factor: number) v * factor
@@ -129,8 +129,8 @@ let scaled = scale(2.5, 4)
 
 
 # nested function with typed params
-const outer = fn(n: int) do
-  const inner = fn(x: int) x * 2
+const outer = fn(n: number) do
+  const inner = fn(x: number) x * 2
   inner(n) + 1
 end
 
@@ -184,7 +184,7 @@ fn make<T>(x) -> T
 
 
 # let y = make(1)                # cannot infer T: only used in return
-let y = make<int>(1)  # explicit T=int makes it work
+let y = make<number>(1)  # explicit T=number makes it work
 
 
 # return-only type param (zero runtime args)
@@ -192,7 +192,7 @@ fn zero<T>() -> T
   return 0
 
 
-let z = zero<int>()  # T=int, returns int 0
+let z = zero<number>()  # T=number, returns number 0
 
 # tables & field validation
 # > table fields use `number` at runtime

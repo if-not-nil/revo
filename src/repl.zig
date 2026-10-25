@@ -716,7 +716,7 @@ test "repl keeps globals after runtime failure" {
     var env = try initTestEnv(alloc);
 
     try std.testing.expect(try env.session.evalLine(&env.out.writer,
-        \\ global a = fn(x: int, y: string) "asdf"
+        \\ global a = fn(x: number, y: string) "asdf"
     ));
 
     const before_call = env.out.written().len;

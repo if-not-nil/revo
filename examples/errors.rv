@@ -60,7 +60,7 @@ study("parse: unterminated string", "'abc")
 
 study("sema: unknown name", "pritn('hi')")
 
-study("sema: type mismatch", "let x: num = 'hi'")
+study("sema: type mismatch", "let x: number = 'hi'")
 
 study("sema: multiline expression", """
 let s: string = 1 +

@@ -159,7 +159,7 @@ test "recursive typed calls stay specialized" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ fn fib(n: int) -> int
+        \\ fn fib(n: number) -> number
         \\   if n < 2 n
         \\   else fib(n - 1) + fib(n - 2)
         \\ print(fib(5))

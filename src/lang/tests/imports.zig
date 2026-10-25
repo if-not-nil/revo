@@ -126,7 +126,7 @@ test "imported module assignment is private to module cache" {
 test "imported module members work  and are typed" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "calc.rv", .data =
-        \\ pub fn double(n: num) n * 2
+        \\ pub fn double(n: number) n * 2
         \\ pub const version = 3
         \\ const hidden = 99
         },
@@ -202,7 +202,7 @@ test "imported qualified types check values" {
 test "imported unknown member calls are errors" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "calc.rv", .data =
-        \\ pub fn double(n: num) n * 2
+        \\ pub fn double(n: number) n * 2
         \\ pub const version = 3
         },
     });

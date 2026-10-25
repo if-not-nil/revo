@@ -413,7 +413,7 @@ test "workspace hover over baselib module name shows member card" {
     try std.testing.expect(hov != null);
     try std.testing.expect(std.mem.find(u8, hov.?.text, "module `math`") != null);
     try std.testing.expect(std.mem.find(u8, hov.?.text, "numeric math") != null);
-    try std.testing.expect(std.mem.find(u8, hov.?.text, "math.floor(x: num) -> num") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "math.floor(x: number) -> number") != null);
 }
 
 test "workspace hover over qualified member prefers its module" {
@@ -436,5 +436,5 @@ test "workspace hover over qualified member prefers its module" {
     var hov = try ws.hover(alloc, id, .{ .line = 1, .character = 13 }, query_opts);
     defer if (hov) |*h| h.deinit(alloc);
     try std.testing.expect(hov != null);
-    try std.testing.expect(std.mem.find(u8, hov.?.text, "math.floor(x: num) -> num") != null);
+    try std.testing.expect(std.mem.find(u8, hov.?.text, "math.floor(x: number) -> number") != null);
 }

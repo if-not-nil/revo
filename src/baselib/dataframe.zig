@@ -79,7 +79,7 @@ fn getDFRowIterator(frame_table: *const Table, vm: *VM) !DFRowIterator {
 
 pub const Impl = struct {
 
-    // dataframe.len(Dataframe) -> num
+    // dataframe.len(Dataframe) -> number
     pub fn len(vm: *VM, frame_table_id: Args.table) !HostResult {
         const frame_table = try vm.tables.get(@backingInt(frame_table_id));
         var df_cols_itr = frame_table.hash.orderedIterator();
@@ -101,7 +101,7 @@ pub const Impl = struct {
         return .data(Value.new.num(@as(f64, @floatFromInt(count.?))));
     }
 
-    // dataframe.row(Dataframe, num) -> table
+    // dataframe.row(Dataframe, number) -> table
     pub fn row(vm: *VM, frame_table_id: Args.table, idx: Args.number) !HostResult {
         const frame_table = try vm.tables.get(@backingInt(frame_table_id));
         var df_rows_itr = try getDFRowIterator(frame_table, vm);

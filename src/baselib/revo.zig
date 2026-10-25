@@ -206,13 +206,13 @@ test "revo.lex" {
 
 test "eval diags" {
     try testing.topAtom(
-        \\ match revo.eval("let x: num = 'hi'") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase
+        \\ match revo.eval("let x: number = 'hi'") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase
     , "semantic");
     try testing.topString(
-        \\ match revo.eval("let x: num = 'hi'") | {:ok, _} => "unexpected-ok" | {:err, e} => e.code
+        \\ match revo.eval("let x: number = 'hi'") | {:ok, _} => "unexpected-ok" | {:err, e} => e.code
     , "type-mismatch");
     try testing.topNumber(
-        \\ match revo.eval("let x: num = 'hi'") | {:ok, _} => -1 | {:err, e} => e.line
+        \\ match revo.eval("let x: number = 'hi'") | {:ok, _} => -1 | {:err, e} => e.line
     , 1);
     try testing.topAtom(
         \\ match revo.eval("1 + * 2") | {:ok, _} => :unexpected_ok | {:err, e} => e.phase

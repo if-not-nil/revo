@@ -11,24 +11,24 @@ const types = lang.compiler.types;
 
 test "non-exhaustive match" {
     try t.expectSemanticError(
-        \\ let n: num = 1
-        \\ let x: num = match n
+        \\ let n: number = 1
+        \\ let x: number = match n
         \\ | 1 => 2
         \\ | 2 => 3
     );
 
     // partial result match carries :nil in its type
     try t.expectSemanticError(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
-        \\ let y: num = match x
+        \\ let y: number = match x
         \\ | {:ok, v} => v
     );
 
     // wildcard match has no :nil
     try t.topNumber(
-        \\ let n: num = 5
-        \\ let x: num = match n
+        \\ let n: number = 5
+        \\ let x: number = match n
         \\ | 1 => 10
         \\ | _ => 20
         \\ x
@@ -37,7 +37,7 @@ test "non-exhaustive match" {
     // exhaustive bool match has no :nil
     try t.topNumber(
         \\ let b = 1 == 1
-        \\ let x: num = match b
+        \\ let x: number = match b
         \\ | :true => 10
         \\ | :false => 20
         \\ x
@@ -45,9 +45,9 @@ test "non-exhaustive match" {
 
     // exhaustive result match has no :nil
     try t.topNumber(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
-        \\ let y: num = match x
+        \\ let y: number = match x
         \\ | {:ok, v} => v
         \\ | {:err, _} => 0
         \\ y
@@ -55,17 +55,17 @@ test "non-exhaustive match" {
 
     // ascribed arm can cover the subject
     try t.topNumber(
-        \\ let n: num = 5
-        \\ let x: num = match n
-        \\ | v: num => v
+        \\ let n: number = 5
+        \\ let x: number = match n
+        \\ | v: number => v
         \\ x
     , 5);
 
     // exhaustive bool match is precise, not any
-    // `let s: string` only fails when x is exactly num; any would compile
+    // `let s: string` only fails when x is exactly number; any would compile
     try t.expectSemanticError(
         \\ let b = 1 == 1
-        \\ let x: num = match b
+        \\ let x: number = match b
         \\ | :true => 10
         \\ | :false => 20
         \\ let s: string = x
@@ -73,7 +73,7 @@ test "non-exhaustive match" {
 
     // exhaustive result match is precise, not any
     try t.expectSemanticError(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ let y = match x
         \\ | {:ok, v} => v
@@ -83,7 +83,7 @@ test "non-exhaustive match" {
 
     // never arm does not widen match to any
     try t.expectSemanticError(
-        \\ type R = {:ok, num} | {:err, string}
+        \\ type R = {:ok, number} | {:err, string}
         \\ let x: R = {:ok, 1}
         \\ let a = match x
         \\ | {:ok, v} => v
@@ -96,7 +96,7 @@ test "non-exhaustive match" {
     // x may later hold {:ok, "str"},
     //   so v is any and the match is any
     //
-    // narrowing to num would be unsound
+    // narrowing to number would be unsound
     try t.topNumber(
         \\ type R = {:ok, any} | {:err, string}
         \\ let x: R = {:ok, 1}
@@ -117,7 +117,7 @@ test "non-exhaustive match" {
 test "non exhaustiveness warnings" {
     // non-exhaustive match warns w uncovered tag
     try t.expectWarning(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v
@@ -125,14 +125,14 @@ test "non exhaustiveness warnings" {
 
     // partial literal match warns for subject type
     try t.expectWarning(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | 1 => 2
     , "number");
 
     // exhaustive match warns nothing
     try t.expectNoWarning(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v
@@ -141,7 +141,7 @@ test "non exhaustiveness warnings" {
 
     // wildcard match warns nothing"
     try t.expectNoWarning(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | 1 => 2
         \\ | _ => 3
@@ -151,7 +151,7 @@ test "non exhaustiveness warnings" {
 test "dead match arms" {
     // wildcard first cuts later arms off
     try t.expectWarning(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | _ => 1
         \\ | 1 => 2
@@ -159,7 +159,7 @@ test "dead match arms" {
 
     // duplicate literal
     try t.expectWarning(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | 1 => 10
         \\ | 1 => 20
@@ -168,7 +168,7 @@ test "dead match arms" {
 
     // covered tag
     try t.expectWarning(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, _} => 1
@@ -187,7 +187,7 @@ test "dead match arms" {
 
     // disjoint pattern never fires
     try t.expectWarning(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | :ok => 1
         \\ | _ => 2
@@ -224,21 +224,21 @@ test "comma arms" {
 
 test "match warning codes" {
     try t.expectWarningCode(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | _ => 1
         \\ | 1 => 2
     , "unreachable-match-arm");
 
     try t.expectWarningCode(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | :ok => 1
         \\ | _ => 2
     , "impossible-match-arm");
 
     try t.expectWarningCode(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v
@@ -248,7 +248,7 @@ test "match warning codes" {
 test "match suggestion" {
     // uncovered tag becomes a named arm, not a wildcard
     try t.expectSuggestion(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v
@@ -256,7 +256,7 @@ test "match suggestion" {
 
     // the suggested arm closes the warning
     try t.expectNoWarning(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v
@@ -265,13 +265,13 @@ test "match suggestion" {
 
     // infinite domains fall back to a wildcard arm
     try t.expectSuggestion(
-        \\ let n: num = 1
+        \\ let n: number = 1
         \\ match n
         \\ | 1 => 2
     , "| _ => :nil");
 
     try t.expectNoWarning(
-        \\ type Res = {:ok, num} | {:err, string}
+        \\ type Res = {:ok, number} | {:err, string}
         \\ let x: Res = {:ok, 42}
         \\ match x
         \\ | {:ok, v} => v
@@ -282,7 +282,7 @@ test "match suggestion" {
 test "error codes" {
     // type mismatch carries its code
     try t.expectErrorCode(
-        \\ let x: num = "hi"
+        \\ let x: number = "hi"
     , "type-mismatch");
 
     // unknown name carries its code
@@ -295,7 +295,7 @@ test "return type propagation: const binding with annotated fn" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ const add = fn(a: num, b: num) a + b
+        \\ const add = fn(a: number, b: number) a + b
         \\ let x = add(3, 4)
         \\ x + 1
         ,
@@ -339,7 +339,7 @@ test "annotated function return type propagates to caller via pointer" {
 
     const built = try lang.build(&vm, .{
         .text =
-        \\ fn add(a: num, b: num) a + b
+        \\ fn add(a: number, b: number) a + b
         \\ let x = add(3, 4)
         \\ x + 1
         ,
@@ -514,11 +514,11 @@ test "generics repeated type param works" {
 test "explicit call-site type args resolve return types" {
     try t.topNumber(
         \\ fn make<T>() -> T 5
-        \\ make<num>()
+        \\ make<number>()
     , 5);
     try t.topNumber(
         \\ fn id<T>(x: T) -> T x
-        \\ id<num>(42)
+        \\ id<number>(42)
     , 42);
 }
 
@@ -526,17 +526,17 @@ test "explicit type args work on dotted receivers" {
     try t.topNumber(
         \\ fn id<T>(x: T) -> T x
         \\ const m = {id = id}
-        \\ m.id<num>(42)
+        \\ m.id<number>(42)
     , 42);
 }
 
 test "unhugged brackets parse as comparison" {
-    // `id <num>(42)` is `(id < num) > (42)`, not a generic call:
-    // `num` is unbound either way, so this must be a semantic error
+    // `id <T>(42)` is `(id < T) > (42)`, not a generic call:
+    // `T` is a type param, not a value, so this must be a semantic error
     // rather than evaluating to 42
     try t.expectSemanticError(
         \\ fn id<T>(x: T) -> T x
-        \\ id <num>(42)
+        \\ id <T>(42)
     );
 }
 
@@ -582,7 +582,7 @@ test "implicit generics" {
     try t.expectSemanticError(
         \\ fn v2_new(x, y) { x = x, y = y }
         \\ let t = v2_new(:hi, "str here")
-        \\ let n: num = t.x
+        \\ let n: number = t.x
     );
     //
     // unannotated identity specializes return
@@ -606,7 +606,7 @@ test "implicit generics" {
     try t.expectSemanticError(
         \\ fn Hi(field) { field = field, get_field = fn(self) self.field }
         \\ const t = Hi("hi")
-        \\ let n: num = t.field
+        \\ let n: number = t.field
     );
 }
 

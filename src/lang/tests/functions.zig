@@ -72,7 +72,7 @@ test "bare calls" {
 
 test "typed function alias call is checked" {
     try t.expectSemanticFailure(
-        \\ const id = fn(x: int) x
+        \\ const id = fn(x: number) x
         \\ const f = id
         \\ f("nope")
     ,

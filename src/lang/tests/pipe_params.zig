@@ -186,15 +186,15 @@ test "pipe: nested scope capture" {
 
 test "compiler: named parameters" {
     try t.topNumber(
-        \\ const add = fn(x: int, y: int) do x + y end
+        \\ const add = fn(x: number, y: number) do x + y end
         \\ add(x = 5, y = 3)
     , 8);
     try t.topNumber(
-        \\ const add = fn(x: int, y: int) do x + y end
+        \\ const add = fn(x: number, y: number) do x + y end
         \\ add(y = 3, x = 5)
     , 8);
     try t.topNumber(
-        \\ const add3 = fn(x: int, y: int, z: int) do x + y + z end
+        \\ const add3 = fn(x: number, y: number, z: number) do x + y + z end
         \\ add3(1, y = 2, z = 3)
     , 6);
 }
@@ -202,15 +202,15 @@ test "compiler: named parameters" {
 test "compiler: named parameters errors" {
     // unknown names surface at compilation, duplicates and mixing at semantic
     try t.expectCompileError(
-        \\ const add = fn(x: int, y: int) do x + y end
+        \\ const add = fn(x: number, y: number) do x + y end
         \\ add(x = 5, z = 3)
     , .ParseError);
     try t.expectSemanticError(
-        \\ const add = fn(x: int, y: int) do x + y end
+        \\ const add = fn(x: number, y: number) do x + y end
         \\ add(x = 5, x = 3)
     );
     try t.expectSemanticError(
-        \\ const add = fn(x: int, y: int) do x + y end
+        \\ const add = fn(x: number, y: number) do x + y end
         \\ add(x = 5, 3)
     );
 }

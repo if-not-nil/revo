@@ -61,7 +61,7 @@ test "predeclFn skips non-eligible shapes" {
         "const _ = fn() 1", // discards bind nothing
         "const f = (fn() 42)", // parenthesized value
         "(const f = fn() 42)", // parenthesized decl
-        "type T = num", // not a binding
+        "type T = number", // not a binding
         "42", // not a decl
     };
     for (cases) |src| {

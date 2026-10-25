@@ -19,7 +19,7 @@ test "compile report carries span and message" {
 
 test "compile report includes function call argument detail" {
     try t.expectSemanticFailure(
-        \\ const id = fn(x: int) x
+        \\ const id = fn(x: number) x
         \\ id("nope")
     ,
         2,

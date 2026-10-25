@@ -1785,8 +1785,8 @@ const SemanticChecker = struct {
     }
 
     /// narrow match pattern bindings when the subject type is a tagged union
-    /// `{:ok, v}` patterns against `{:ok, int} | {:err, string}`
-    /// bind `v` as `.int`, not `.any`
+    /// `{:ok, v}` patterns against `{:ok, number} | {:err, string}`
+    /// bind `v` as `.number`, not `.any`
     fn narrowPatternNames(self: *SemanticChecker, pattern: *const cst.CstNode, subject_type: types_mod.TypeInfo) !void {
         // ascriptions apply regardless of subject type
         //   ; and win over union narrowing

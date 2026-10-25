@@ -261,6 +261,10 @@ most breaking change yet
 
 ### Changed
 
+- `number` is the only spelling of the number type
+  `num` and `int` no longer exist, so `let x: num` is now an untyped binding
+  the `num?` type predicate is gone too, use `number?`
+
 - bare calls tightened
   - chained args (`f "x" "y"`) and bare calls on call results are parse errors
   - `f (x)` still means `f` then `(x)`, but now warns with `space-before-call` and suggests `f; x`

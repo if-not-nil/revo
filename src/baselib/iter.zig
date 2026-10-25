@@ -41,7 +41,7 @@ pub const Impl = struct {
             } else if (v.asNumOpt()) |n| {
                 try buf.append(vm.runtime.alloc, @as(u8, @intFromFloat(std.math.clamp(@round(n), 0, 255))));
             } else {
-                return .errType(0, "string or num", typeof(v, vm));
+                return .errType(0, "string or number", typeof(v, vm));
             }
         }
         return .data(try vm.adoptValueString(try buf.toOwnedSlice(vm.runtime.alloc)));
@@ -169,18 +169,18 @@ const Kind = enum(usize) {
 
 pub fn range_fn(args: []const Value, vm: *VM) !HostResult {
     const start: f64 = if (args.len == 1) 0 else blk: {
-        const n = args[0].asNumOpt() orelse return .errType(0, "num", typeof(args[0], vm));
+        const n = args[0].asNumOpt() orelse return .errType(0, "number", typeof(args[0], vm));
         break :blk n;
     };
     const end: f64 = if (args.len == 1) blk: {
-        const n = args[0].asNumOpt() orelse return .errType(0, "num", typeof(args[0], vm));
+        const n = args[0].asNumOpt() orelse return .errType(0, "number", typeof(args[0], vm));
         break :blk n;
     } else blk: {
-        const n = args[1].asNumOpt() orelse return .errType(1, "num", typeof(args[1], vm));
+        const n = args[1].asNumOpt() orelse return .errType(1, "number", typeof(args[1], vm));
         break :blk n;
     };
     const step: f64 = if (args.len >= 3) blk: {
-        const n = args[2].asNumOpt() orelse return .errType(2, "num", typeof(args[2], vm));
+        const n = args[2].asNumOpt() orelse return .errType(2, "number", typeof(args[2], vm));
         break :blk n;
     } else 1;
     if (step == 0) return .errType(2, "non-zero step", "0");
@@ -210,7 +210,7 @@ fn boundedFn(comptime kind: Kind) root.host.HostFn {
         fn f(args: []const Value, vm: *VM) anyerror!HostResult {
             const up = (try wrapIterable(vm, args[0])) orelse
                 return .errType(0, "iterable", typeof(args[0], vm));
-            const n = args[1].asNumOpt() orelse return .errType(1, "num", typeof(args[1], vm));
+            const n = args[1].asNumOpt() orelse return .errType(1, "number", typeof(args[1], vm));
             const it_id = try makeIterator(vm, kind);
             try putState(vm, it_id, .up, up);
             try putState(vm, it_id, .n, Value.new.num(n));

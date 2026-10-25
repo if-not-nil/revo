@@ -174,8 +174,6 @@ fn implFor(impls: []const []const Impl, spec: *const FnSpec, k: usize) ?HostFunc
 /// and both are the same promise
 const checkable_types: std.StaticStringMap(ParamType) = std.StaticStringMap(ParamType).initComptime(.{
     .{ "number", .number },
-    .{ "num", .number },
-    .{ "int", .number },
     .{ "string", .string },
     .{ "bool", .bool },
     .{ "atom", .atom },
@@ -926,7 +924,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     const src =
         \\# random comment is skipped
         \\#* single-line doc *#
-        \\pub declare iter.range = fn(bound: num, rest: num...) -> function
+        \\pub declare iter.range = fn(bound: number, rest: number...) -> function
         \\
         \\#*
         \\finds first occurrence
@@ -943,7 +941,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
         \\fizz(1) => 2
         \\```
         \\*#
-        \\pub declare num.__call = fn(value: any) -> num
+        \\pub declare number.__call = fn(value: any) -> number
         \\
         \\#* generic suffix *#
         \\pub declare table.unwrap_err<T> = fn(self: {:err, T}) -> T
@@ -966,14 +964,14 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     {
         const sig = try renderAlloc(testing.allocator, range);
         defer testing.allocator.free(sig);
-        try testing.expectEqualStrings("iter.range(bound: num, rest: num...) -> function", sig);
+        try testing.expectEqualStrings("iter.range(bound: number, rest: number...) -> function", sig);
     }
     try testing.expectEqual(@as(usize, 2), range.type.kind.function.params.len);
     try testing.expectEqualStrings("bound", range.type.kind.function.params[0].name_tok.text);
-    try testing.expectEqualStrings("num", range.type.kind.function.params[0].type.?.kind.named.tok.text);
+    try testing.expectEqualStrings("number", range.type.kind.function.params[0].type.?.kind.named.tok.text);
     try testing.expectEqualStrings("rest", range.type.kind.function.params[1].name_tok.text);
     try testing.expect(range.type.kind.function.params[1].dots.len == 2);
-    try testing.expectEqualStrings("num", range.type.kind.function.params[1].type.?.kind.named.tok.text);
+    try testing.expectEqualStrings("number", range.type.kind.function.params[1].type.?.kind.named.tok.text);
     try testing.expect(isVariadic(&range));
     try testing.expectEqualStrings("single-line doc", range.doc);
 
@@ -986,7 +984,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
     {
         const sig = try renderAlloc(testing.allocator, call);
         defer testing.allocator.free(sig);
-        try testing.expectEqualStrings("num.__call(value: any) -> num", sig);
+        try testing.expectEqualStrings("number.__call(value: any) -> number", sig);
     }
     try testing.expectEqual(revo.CoreAtoms.__call, coreKey(&call).?);
     try testing.expectEqualStrings("converts value\n\nfizz(1) => 2", call.doc);
@@ -1034,7 +1032,7 @@ test "parseGroup round trip: sig, params, doc, variadic, core key" {
 
 test "parseGroup accepts resource params and nested methods" {
     const src =
-        \\pub declare total_add = fn(handle: resource, amount: num) -> num
+        \\pub declare total_add = fn(handle: resource, amount: number) -> number
         \\pub declare resource = {
         \\  close: fn(self: resource),
         \\}
@@ -1070,7 +1068,7 @@ test "checkImplSig catches a surface that lies about the impl" {
             }.call,
         } },
         // a param the impl receives as a string, the surface says number
-        .{ .src = "pub declare fs.exists? = fn(path: num) -> bool", .bad = true, .f = .{
+        .{ .src = "pub declare fs.exists? = fn(path: number) -> bool", .bad = true, .f = .{
             .arity = 1,
             .param_types = &.{.string},
             .func = struct {
@@ -1131,17 +1129,17 @@ test "checkImplSig catches a surface that lies about the impl" {
 test "parseGroup collects pub type as type-only alias" {
     const src =
         \\#* a port number *#
-        \\pub type Port = num
+        \\pub type Port = number
         \\
         \\pub declare open = fn(path: string) -> string
         \\
         \\#* handler alias over fn type stays a type, not a callable *#
-        \\pub type Handler = fn(x: num) -> num
+        \\pub type Handler = fn(x: number) -> number
         \\
         \\#* namespaced alias keeps its head with a bare name *#
         \\pub type uri.Hi = {n: string}
         \\
-        \\type Private = num
+        \\type Private = number
     ;
     const specs = try parseGroup(testing.allocator, src);
     defer {
@@ -1156,7 +1154,7 @@ test "parseGroup collects pub type as type-only alias" {
     var pbuf = std.Io.Writer.Allocating.init(testing.allocator);
     defer pbuf.deinit();
     try cst.printCstType(port.type, &pbuf.writer);
-    try testing.expectEqualStrings("num", pbuf.written());
+    try testing.expectEqualStrings("number", pbuf.written());
 
     const open = specs[1];
     try testing.expect(!open.is_type);
@@ -1188,13 +1186,13 @@ test "parseGroup expands table declare into headed specs" {
         \\pub declare fs = {
         \\  #* opens a path *#
         \\  open: fn(path: string) -> !table,
-        \\  Stat: { size: num },
+        \\  Stat: { size: number },
         \\}
         \\
         \\pub declare string = {
         \\  #* length *#
-        \\  len: fn(self: string) -> num,
-        \\  at: fn<T>(self: table<T>, index: num) -> T | :undef,
+        \\  len: fn(self: string) -> number,
+        \\  at: fn<T>(self: table<T>, index: number) -> T | :undef,
         \\  __call: fn(value: any) -> string,
         \\}
     ;
@@ -1254,7 +1252,7 @@ test "module doc keeps paragraphs" {
         \\second paragraph
         \\*#
         \\pub declare mymod = {
-        \\  go: fn(n: num) -> num,
+        \\  go: fn(n: number) -> number,
         \\}
     ;
     const parsed = try revo.lang.parseSourceReport(a, src, .{});

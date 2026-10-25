@@ -1061,7 +1061,7 @@ fn typeCompareHint(type_expr: *const Node, value_expr: *const Node) ?TypeHint {
 }
 
 fn typeNameInfo(name: []const u8) ?types_mod.TypeInfo {
-    if (std.mem.eql(u8, name, "num") or std.mem.eql(u8, name, "number")) return .{
+    if (std.mem.eql(u8, name, "number")) return .{
         .tag = .{ .@"union" = &.{
             .{ .name = "", .types = &.{.{ .tag = .number }} },
             .{ .name = "", .types = &.{.{ .tag = .number }} },

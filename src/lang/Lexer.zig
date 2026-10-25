@@ -776,7 +776,7 @@ fn exponentFollows(self: *Lexer) bool {
 fn lexNumber(self: *Lexer, start: usize, line: u32, column: u32) std.mem.Allocator.Error!Token {
     var base: u8 = 10;
 
-    // keep `t.0.1` split, hugging dot lexes as int
+    // keep `t.0.1` split, hugging dot lexes as number
     const hugging_dot = !self.saw_space and self.prev_kind != null and self.prev_kind.? == .dot;
 
     if (self.source[start] == '0') {

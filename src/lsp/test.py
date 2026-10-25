@@ -680,7 +680,7 @@ async def test_multiple_errors_keep_own_messages(client: LanguageClient):
         params=DidOpenTextDocumentParams(
             text_document=TextDocumentItem(
                 uri=uri, language_id="revo", version=1,
-                text='let t = { name = "me" }\nt.a\nlet x: num = "hi"\n',
+                text='let t = { name = "me" }\nt.a\nlet x: number = "hi"\n',
             )
         )
     )
@@ -704,7 +704,7 @@ async def test_match_warning_severity_and_code(client: LanguageClient):
         params=DidOpenTextDocumentParams(
             text_document=TextDocumentItem(
                 uri=uri, language_id="revo", version=1,
-                text='type Res = {:ok, num} | {:err, string}\nlet x: Res = {:ok, 42}\nmatch x\n| {:ok, v} => v\n',
+                text='type Res = {:ok, number} | {:err, string}\nlet x: Res = {:ok, 42}\nmatch x\n| {:ok, v} => v\n',
             )
         )
     )
@@ -932,7 +932,7 @@ async def test_inlay_hints(client: LanguageClient):
     )
     print("  inlay hints:", result)
     assert result is not None
-    # `x` is `let x = 42` -> should have a type hint ": num"
+    # `x` is `let x = 42` -> should have a type hint ": number"
     found_x = [h for h in result if h.position.line == 0]
     assert len(found_x) >= 1, f"expected hint for x, got hints: {result}"
     hint = found_x[0]
@@ -1001,10 +1001,10 @@ async def test_code_action(client: LanguageClient):
         assert any("inline" in t.lower() for t in titles)
 
 
-ONE_RV_CONTENT = """pub fn hi(a: num, b: num) -> num
+ONE_RV_CONTENT = """pub fn hi(a: number, b: number) -> number
   a * b
 
-pub const CT: int = 5
+pub const CT: number = 5
 """
 
 TWO_RV_CONTENT = """import "one.rv"
@@ -1054,7 +1054,7 @@ async def test_import_hover(client: LanguageClient):
         assert contents is not None
         assert "hi" in contents.value, f"expected 'hi' in hover, got: {
             contents.value}"
-        assert "fn hi" in contents.value or "num" in contents.value, (
+        assert "fn hi" in contents.value or "number" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )
 
@@ -1280,7 +1280,7 @@ async def test_import_hover_module_name(client: LanguageClient):
         assert contents.value.count("fn hi(") == 1, (
             f"expected no duplicate members, got: {contents.value}"
         )
-        assert "const CT: int = 5" in contents.value, (
+        assert "const CT: number = 5" in contents.value, (
             f"expected const export in hover, got: {contents.value}"
         )
 
@@ -1316,6 +1316,6 @@ async def test_import_hover_autoopen(client: LanguageClient):
         assert contents is not None
         assert "hi" in contents.value, f"expected 'hi' in hover, got: {
             contents.value}"
-        assert "fn hi" in contents.value or "num" in contents.value, (
+        assert "fn hi" in contents.value or "number" in contents.value, (
             f"expected fn signature in hover, got: {contents.value}"
         )

@@ -693,7 +693,7 @@ test "workspace diagnostics merge semantic and compile failures" {
 
     const source =
         \\ type Result = {:ok, any} | {:err, atom}
-        \\ fn bind(what: any, where: num) -> Result do
+        \\ fn bind(what: any, where: number) -> Result do
         \\   "ok"
         \\ end
         \\ bind(1, "hi")
@@ -726,8 +726,8 @@ test "workspace sig map survives typed fn invalidation" {
     defer ws.deinit();
 
     const id = try ws.open("<sig>",
-        \\const f = fn(x: table, y: fn(num) -> str) x
-        \\type T = fn(table<int>, num) -> table<string, int>
+        \\const f = fn(x: table, y: fn(number) -> str) x
+        \\type T = fn(table<number>, number) -> table<string, number>
         \\
     , .{});
     _ = try ws.inspectDetailed(alloc, id, .{});

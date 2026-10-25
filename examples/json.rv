@@ -12,7 +12,7 @@
 !#
 
 #* the entrypoint *#
-fn parse_json(s: string) -> !{num, table}
+fn parse_json(s: string) -> !{number, table}
   parse(s, 0)
 
 

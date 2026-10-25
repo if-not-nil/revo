@@ -6,7 +6,7 @@ pub const Impl = struct {
 
     pub fn at(vm: *VM, self: Args.table, index: Args.number) !HostResult {
         const t = try vm.tables.get(@backingInt(self));
-        const idx = root.host.numToInt(isize, index) orelse return .errType(1, "integer num", typeof(Value.new.num(index), vm));
+        const idx = root.host.numToInt(isize, index) orelse return .errType(1, "integer number", typeof(Value.new.num(index), vm));
         if (idx < 0) return .data(revo.Value.new.core(.undef));
         const f: f64 = @floatFromInt(idx);
         return .data(t.getRaw(Value.new.num(f), vm) orelse revo.Value.new.core(.undef));
@@ -84,11 +84,11 @@ pub const Impl = struct {
         );
         const pos: i64 = root.host.numToInt(i64, pos_num) orelse return .errType(
             1,
-            "integer num",
+            "integer number",
             typeof(Value.new.num(pos_num), vm),
         );
 
-        if (pos < 0) return .errType(1, "non-negative num", typeof(Value.new.num(pos_num), vm));
+        if (pos < 0) return .errType(1, "non-negative numberber", typeof(Value.new.num(pos_num), vm));
         const pos_usize: usize = @intCast(pos);
         if (pos_usize <= table.array.items.len) {
             try table.array.insert(vm.runtime.alloc, pos_usize, val);
@@ -301,8 +301,8 @@ pub const Impl = struct {
     }
 
     pub fn repeat(vm: *VM, self: Args.table, n: Args.number) !HostResult {
-        const times: i64 = root.host.numToInt(i64, n) orelse return .errType(1, "integer num", typeof(Value.new.num(n), vm));
-        if (times < 0) return .errType(1, "non-negative num", "negative num");
+        const times: i64 = root.host.numToInt(i64, n) orelse return .errType(1, "integer number", typeof(Value.new.num(n), vm));
+        if (times < 0) return .errType(1, "non-negative numberber", "negative number");
 
         const count: usize = @intCast(times);
         const left = try vm.tables.get(@backingInt(self));
@@ -356,15 +356,15 @@ fn push(args: []const Value, vm: *VM) !HostResult {
 fn sliceRange(args: []const Value, vm: *VM) !HostResult {
     const table = vm.tables.get(args[0].asTable().?) catch return .errType(0, "table", typeof(args[0], vm));
     const alen = table.array.items.len;
-    const start_num = args[1].asNumOpt() orelse return .errType(1, "integer num", typeof(args[1], vm));
+    const start_num = args[1].asNumOpt() orelse return .errType(1, "integer number", typeof(args[1], vm));
     const end_num = if (args.len > 2)
-        args[2].asNumOpt() orelse return .errType(2, "integer num", typeof(args[2], vm))
+        args[2].asNumOpt() orelse return .errType(2, "integer number", typeof(args[2], vm))
     else
         @as(f64, @floatFromInt(alen));
     if (start_num < 0.0 or end_num < 0.0) return .errAssertionFailed("range cannot be negative");
     if (start_num > end_num) return .errAssertionFailed("range start cannot be greater than end");
-    const start_isize = root.host.numToInt(isize, start_num) orelse return .errType(1, "integer num", typeof(args[1], vm));
-    const end_isize = root.host.numToInt(isize, end_num) orelse return .errType(2, "integer num", typeof(args[2], vm));
+    const start_isize = root.host.numToInt(isize, start_num) orelse return .errType(1, "integer number", typeof(args[1], vm));
+    const end_isize = root.host.numToInt(isize, end_num) orelse return .errType(2, "integer number", typeof(args[2], vm));
     const lo: usize = @intCast(@max(start_isize, 0));
     const hi: usize = @intCast(@min(end_isize, @as(isize, @intCast(alen))));
     if (lo >= hi) return .data(try vm.tableOfSlice(&.{}));
