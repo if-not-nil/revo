@@ -33,7 +33,7 @@
 //! [] - a `do` on an aligned continuation line indents its body and `end` from
 //!      the aligned column: `fn(a,\n           b) do` puts `end` under `b`,
 //!      not under `let`
-//! [] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
+//! [x] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
 //!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
 //! [x] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
 //! [x] - unary after unary hugs: `- -1` -> `--1`
@@ -86,6 +86,11 @@ test "formatter" {
             .name = "spaced lparen isnt a call",
             .src = "let o = (if self.cur == cur ('> ') else '  ')\n",
             .want = "let o = (if (self.cur == cur) ('> ') else '  ')\n",
+        },
+        .{
+            .name = "an atom only hugs as a method",
+            .src = "let a = if x == 1 :yes else :no\nlet s = foo() :len()\n",
+            .want = "let a = if (x == 1) :yes else :no\nlet s = foo():len()\n",
         },
         .{
             .name = "unary after unary",
@@ -1167,7 +1172,7 @@ fn inferCol(anchor: Line, from: usize, src_col: u32) ?u32 {
 
     for (anchor.items, 0..) |it, i| {
         if (std.mem.indexOfScalar(u8, it.text, '\n') != null) return null;
-        if (prev) |p| col += @intCast(separator(prev2, p, it, i + 1 == anchor.items.len).len);
+        if (prev) |p| col += @intCast(separator(prev2, p, it, nextItem(anchor.items, i)).len);
         if (i >= from and !it.trivia and !it.synth and it.src_col == src_col) return col;
 
         col += @intCast(it.text.len);
@@ -1186,6 +1191,10 @@ fn firstCodeIndex(items: []const Item) ?usize {
 
 fn firstCodeItem(items: []const Item) ?Item {
     return if (firstCodeIndex(items)) |i| items[i] else null;
+}
+
+fn nextItem(items: []const Item, i: usize) ?Item {
+    return if (i + 1 < items.len) items[i + 1] else null;
 }
 
 fn lastCodeItem(items: []const Item) ?Item {
@@ -1210,7 +1219,7 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
         var prev: ?Item = null;
         var prev2: ?Item = null;
         for (line.items, 0..) |it, i| {
-            if (prev) |p| try out.appendSlice(allocator, separator(prev2, p, it, i + 1 == line.items.len));
+            if (prev) |p| try out.appendSlice(allocator, separator(prev2, p, it, nextItem(line.items, i)));
             if (it.trivia or it.kind == .doc_comment) {
                 // a multi-line comment keeps its shape: later lines move as far as the first did
                 const delta = @as(i64, srcCol(out.items, out.items.len)) - it.src_col;
@@ -1251,11 +1260,11 @@ fn oneOf(k: TokenType, comptime set: []const TokenType) bool {
 }
 
 /// what goes between `p` and `c`; `prev2` tells unary from binary,
-/// `ends_line` is set when `c` is the last item on its line
-fn separator(prev2: ?Item, p: Item, c: Item, ends_line: bool) []const u8 {
+/// `next` is the item after `c` on its line
+fn separator(prev2: ?Item, p: Item, c: Item, next: ?Item) []const u8 {
     // trailing comments get two spaces, per the house style; a `## ##` with
     // code after it gets one
-    if (c.trivia) return if (ends_line) "  " else " ";
+    if (c.trivia) return if (next == null) "  " else " ";
     const gap: []const u8 = if (c.space_before) " " else "";
 
     // unary `-`/`+` hug their operand, but not another sign (`- -1`, not `--1`)
@@ -1277,8 +1286,10 @@ fn separator(prev2: ?Item, p: Item, c: Item, ends_line: bool) []const u8 {
     // `f[0]` hugs, `if (` doesnt: a call target is anything that can end an
     // expression, plus the `fn` keyword, but not `end`
     if (c.kind == .lbracket and (p.kind == .kw_fn or (p.kind != .kw_end and endsExpr(p.kind)))) return "";
-    // `x:method()`
-    if (c.kind == .atom and oneOf(p.kind, &.{ .ident, .number, .string, .rparen, .rbracket, .rsquiggly })) return "";
+    // `x:method()`; an atom is only a method when a `(` hugs it, so
+    // `if (x == 1) :yes` keeps its space
+    const method = if (next) |n| n.kind == .lparen and !n.space_before else false;
+    if (c.kind == .atom and method and oneOf(p.kind, &.{ .ident, .number, .string, .rparen, .rbracket, .rsquiggly })) return "";
     return " ";
 }
 
