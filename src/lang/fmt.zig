@@ -241,6 +241,33 @@ test "formatter" {
         \\end
         \\
         },
+        .{ .name = "multi-line comments move as a whole", .src =
+        \\fn f() do
+        \\if (a) do
+        \\## line one
+        \\
+        \\   line two ##
+        \\print(1)
+        \\end
+        \\end
+        \\    #* doc one
+        \\     * doc two *#
+        \\fn g() 1
+        \\
+        , .want =
+        \\fn f() do
+        \\  if a do
+        \\    ## line one
+        \\
+        \\       line two ##
+        \\    print(1)
+        \\  end
+        \\end
+        \\#* doc one
+        \\ * doc two *#
+        \\fn g() 1
+        \\
+        },
         .{ .name = "continuations keep their alignment", .src =
         \\let t = {a = 1,
         \\         b = 2}
@@ -1124,7 +1151,11 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
         var prev2: ?Item = null;
         for (line.items) |it| {
             if (prev) |p| try out.appendSlice(allocator, separator(prev2, p, it));
-            try out.appendSlice(allocator, it.text);
+            if (it.trivia or it.kind == .doc_comment) {
+                // a multi-line comment keeps its shape: later lines move as far as the first did
+                const delta = @as(i64, srcCol(out.items, out.items.len)) - it.src_col;
+                try appendShifted(allocator, &out, it.text, delta);
+            } else try out.appendSlice(allocator, it.text);
             prev2 = prev;
             prev = it;
         }
@@ -1132,6 +1163,22 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
     }
 
     return out.toOwnedSlice(allocator);
+}
+
+/// `text` with every line after the first moved `delta` columns, never past column 0
+fn appendShifted(allocator: std.mem.Allocator, out: *std.ArrayList(u8), text: []const u8, delta: i64) !void {
+    if (delta == 0) return out.appendSlice(allocator, text);
+    var rows = std.mem.splitScalar(u8, text, '\n');
+    try out.appendSlice(allocator, rows.first());
+    while (rows.next()) |row| {
+        try out.append(allocator, '\n');
+        // shortcut: only leading spaces move, a tab-indented comment line keeps its tabs
+        const rest = std.mem.trimStart(u8, row, " ");
+        if (rest.len == 0) continue;
+        const pad = @max(0, @as(i64, @intCast(row.len - rest.len)) + delta);
+        try out.appendNTimes(allocator, ' ', @intCast(pad));
+        try out.appendSlice(allocator, rest);
+    }
 }
 
 // -- [spacing] ---------------------------------------------------------------
