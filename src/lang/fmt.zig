@@ -35,7 +35,7 @@
 //!      not under `let`
 //! [] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
 //!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
-//! [] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
+//! [x] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
 //! [x] - unary after unary hugs: `- -1` -> `--1`
 //! [] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
 //!      leaves `2` at column 0
@@ -275,6 +275,15 @@ test "formatter" {
         \\let x = 1  # trailing
         \\# leading
         \\let y = 2
+        \\
+        },
+        .{ .name = "mid-line comments get one space", .src =
+        \\let x = ## c ## 1
+        \\let y = 2 ## c ##
+        \\
+        , .want =
+        \\let x = ## c ## 1
+        \\let y = 2  ## c ##
         \\
         },
         .{ .name = "comments stay in the body", .src =
@@ -1158,7 +1167,7 @@ fn inferCol(anchor: Line, from: usize, src_col: u32) ?u32 {
 
     for (anchor.items, 0..) |it, i| {
         if (std.mem.indexOfScalar(u8, it.text, '\n') != null) return null;
-        if (prev) |p| col += @intCast(separator(prev2, p, it).len);
+        if (prev) |p| col += @intCast(separator(prev2, p, it, i + 1 == anchor.items.len).len);
         if (i >= from and !it.trivia and !it.synth and it.src_col == src_col) return col;
 
         col += @intCast(it.text.len);
@@ -1200,8 +1209,8 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
 
         var prev: ?Item = null;
         var prev2: ?Item = null;
-        for (line.items) |it| {
-            if (prev) |p| try out.appendSlice(allocator, separator(prev2, p, it));
+        for (line.items, 0..) |it, i| {
+            if (prev) |p| try out.appendSlice(allocator, separator(prev2, p, it, i + 1 == line.items.len));
             if (it.trivia or it.kind == .doc_comment) {
                 // a multi-line comment keeps its shape: later lines move as far as the first did
                 const delta = @as(i64, srcCol(out.items, out.items.len)) - it.src_col;
@@ -1241,10 +1250,12 @@ fn oneOf(k: TokenType, comptime set: []const TokenType) bool {
     return false;
 }
 
-/// what goes between `p` and `c`; `prev2` tells unary from binary
-fn separator(prev2: ?Item, p: Item, c: Item) []const u8 {
-    // trailing comments get two spaces, per the house style
-    if (c.trivia) return "  ";
+/// what goes between `p` and `c`; `prev2` tells unary from binary,
+/// `ends_line` is set when `c` is the last item on its line
+fn separator(prev2: ?Item, p: Item, c: Item, ends_line: bool) []const u8 {
+    // trailing comments get two spaces, per the house style; a `## ##` with
+    // code after it gets one
+    if (c.trivia) return if (ends_line) "  " else " ";
     const gap: []const u8 = if (c.space_before) " " else "";
 
     // unary `-`/`+` hug their operand, but not another sign (`- -1`, not `--1`)
