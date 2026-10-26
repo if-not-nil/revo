@@ -10,7 +10,7 @@ test "formatter" {
     const cases = [_]Case{
         // spacing
         .{ .name = "spacing", .src =
-        \\setfps {60}
+        \\setfps{60}
         \\let col = getcolor {0x101042FF}
         \\while winshcl {} == 0 do
         \\  begindraw {}
@@ -23,10 +23,10 @@ test "formatter" {
         \\let neg = f(- 1) * - 2
         \\
         , .want =
-        \\setfps{60}
-        \\let col = getcolor{0x101042FF}
-        \\while winshcl{} == 0 do
-        \\  begindraw{}
+        \\setfps {60}
+        \\let col = getcolor {0x101042FF}
+        \\while winshcl {} == 0 do
+        \\  begindraw {}
         \\end
         \\let x = 1
         \\let y = f(1, 2)
@@ -47,6 +47,8 @@ test "formatter" {
         \\let xs = make<number>(1)
         \\let n = self.tl[ch]
         \\let c = count()
+        \\fn d(b) if (b == 0) {:err, 1} else {:ok, 2}
+        \\fn p(x) -> Point {x = x}
         \\let a = { x = 1 }
         \\let b = {x = 2}
         \\type R = { token: string }
@@ -1112,8 +1114,6 @@ fn separator(prev2: ?Item, p: Item, c: Item) []const u8 {
     // `?` hugs a postfix target (`x?:read()`) but spaces in prefix
     // positions (`, ?opts`, `a: ?number`)
     if (c.kind == .huh) return if (oneOf(p.kind, &.{ .lparen, .lbracket, .lsquiggly }) or endsExpr(p.kind)) "" else " ";
-    // bare calls with a table arg hug: `f{1, 2}`, `f{}`
-    if (c.kind == .lsquiggly and endsExpr(p.kind)) return "";
     // braces keep their padding (`{a = 1}`, `{ token: string }`), and
     // `/ < > |` keep their gaps: tight in types (`!any/:Fail`, `make<number>`,
     // `number|:nil`), spaced as operators
