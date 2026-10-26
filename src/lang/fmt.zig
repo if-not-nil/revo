@@ -37,7 +37,7 @@
 //!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
 //! [x] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
 //! [x] - unary after unary hugs: `- -1` -> `--1`
-//! [] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
+//! [x] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
 //!      leaves `2` at column 0
 //! [] - "doesnt change semantics" is only "output parses"; compare the token
 //!      streams of input and output, minus synth/dropped parens
@@ -411,6 +411,23 @@ test "formatter" {
         \\fn f() do
         \\  x
         \\end
+        \\
+        },
+        .{ .name = "a blank line keeps the continuation", .src =
+        \\let b = 1 +
+        \\
+        \\2
+        \\let c = 1 and
+        \\
+        \\ 2
+        \\
+        , .want =
+        \\let b = 1 +
+        \\
+        \\  2
+        \\let c = 1 and
+        \\
+        \\  2
         \\
         },
 
@@ -1087,7 +1104,7 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
             else => false,
         } else false;
         const tail = if (prev_kind) |k| isContinuationTail(k) else false;
-        const continued = leads or (line.blanks == 0 and tail);
+        const continued = leads or tail;
 
         // the statement this line belongs to, if it is a continuation
         while (heads.items.len > 0 and heads.items[heads.items.len - 1].depth > depth) _ = heads.pop();
