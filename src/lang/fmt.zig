@@ -36,7 +36,7 @@
 //! [] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
 //!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
 //! [] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
-//! [] - unary after unary hugs: `- -1` -> `--1`
+//! [x] - unary after unary hugs: `- -1` -> `--1`
 //! [] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
 //!      leaves `2` at column 0
 //! [] - "doesnt change semantics" is only "output parses"; compare the token
@@ -86,6 +86,11 @@ test "formatter" {
             .name = "spaced lparen isnt a call",
             .src = "let o = (if self.cur == cur ('> ') else '  ')\n",
             .want = "let o = (if (self.cur == cur) ('> ') else '  ')\n",
+        },
+        .{
+            .name = "unary after unary",
+            .src = "let a = - -1\nlet b = --1\nlet c = 2 - -1\n",
+            .want = "let a = - -1\nlet b = - -1\nlet c = 2 - -1\n",
         },
         .{ .name = "spacing stays put", .src =
         \\let r = fs.open("x")?:read()
@@ -1242,8 +1247,9 @@ fn separator(prev2: ?Item, p: Item, c: Item) []const u8 {
     if (c.trivia) return "  ";
     const gap: []const u8 = if (c.space_before) " " else "";
 
-    // unary `-`/`+` hug their operand
-    if (oneOf(p.kind, &.{ .minus, .plus }) and (prev2 == null or !endsExpr(prev2.?.kind))) return "";
+    // unary `-`/`+` hug their operand, but not another sign (`- -1`, not `--1`)
+    if (oneOf(p.kind, &.{ .minus, .plus }) and !oneOf(c.kind, &.{ .minus, .plus }) and
+        (prev2 == null or !endsExpr(prev2.?.kind))) return "";
     // `f(x)` is a call, `f (x)` is not (also `f<T>(x)`)
     if (c.kind == .lparen) return gap;
     // `?` hugs a postfix target (`x?:read()`) but spaces in prefix
