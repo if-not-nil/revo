@@ -6,6 +6,52 @@
 //! ~ doesnt change semantics
 //!
 //! one test per rule right here check it out pretty sick right
+//!
+//! !- THOSE ITEMS WHERE FOUND USING AI CODING AGENTS -!
+//! !- BUT ALL THE CODE FOR THEM IS WRITEN BY ME(w0x7y) -!
+//! what is left todo:
+//!
+//! missing, next to clang-format
+//! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
+//! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
+//! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
+//!      minimal edits from `revo.diff` (`-cursor`, replacements)
+//! [] - align trailing comments on consecutive lines (`AlignTrailingComments`)
+//! [] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
+//! [] - strip trailing whitespace inside multi-line comments
+//! [] - brace padding is kept as typed: `{a = 1 }`, `{ }` (`Cpp11BracedListStyle`,
+//!      `SpaceInEmptyBlock`)
+//! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
+//!      (clang always spaces binary operators); needs type vs expr context from the walk
+//! [] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
+//!      (`RemoveParentheses: MultipleParentheses`)
+//! [] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
+//! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
+//! [] - blank line between top-level definitions? (`SeparateDefinitionBlocks`)
+//!
+//! bugs
+//! [] - a `do` on an aligned continuation line indents its body and `end` from
+//!      the aligned column: `fn(a,\n           b) do` puts `end` under `b`,
+//!      not under `let`
+//! [] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
+//!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
+//! [] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
+//! [] - unary after unary hugs: `- -1` -> `--1`
+//! [] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
+//!      leaves `2` at column 0
+//! [] - "doesnt change semantics" is only "output parses"; compare the token
+//!      streams of input and output, minus synth/dropped parens
+//! [] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
+//!      alignment
+//!
+//! optimizations
+//! [] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
+//!      every floor for every line (twice), `has` scans `ends`/`drops`/`cuts`
+//!      per token; sort floors and sweep, binary search the sets
+//! [] - cli `fmt` parses, then `format` lexes + parses, then parses its output:
+//!      3 parses per file; let `format` hand back the parse failure instead
+//! [] - synth parens go in front and the whole item list gets sorted; insert
+//!      them in place during the token loop
 test "formatter" {
     const cases = [_]Case{
         // spacing
