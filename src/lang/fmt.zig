@@ -139,6 +139,37 @@ test "formatter" {
         \\  |> inspect
         \\
         },
+        .{ .name = "a block ending a continued line indents from that line", .src =
+        \\let v = x
+        \\|> fn(c) do
+        \\c * 2
+        \\end
+        \\|> inspect
+        \\const f =
+        \\fn() do
+        \\1
+        \\end
+        \\for i in xs
+        \\|> filter(p) do
+        \\print(i)
+        \\end
+        \\
+        , .want =
+        \\let v = x
+        \\  |> fn(c) do
+        \\    c * 2
+        \\  end
+        \\  |> inspect
+        \\const f =
+        \\  fn() do
+        \\    1
+        \\  end
+        \\for i in xs
+        \\  |> filter(p) do
+        \\  print(i)
+        \\end
+        \\
+        },
         .{ .name = "method chains continue", .src =
         \\const w =
         \\fs.open(c)?:read()?
@@ -642,7 +673,7 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
     const items = try collectItems(arena, source, lexed, &walk);
     const lines = try splitLines(arena, items, walk.cuts.items);
     trimBlanks(lines);
-    try assignLevels(arena, lines, walk.floors.items);
+    try assignLevels(arena, lines, walk.floors.items, walk.cond_dos.items);
     const out = try emit(allocator, lines);
     errdefer allocator.free(out);
 
@@ -680,6 +711,8 @@ const Walk = struct {
     parens: std.ArrayList(Parens) = .empty,
     /// paren tokens to drop around a `do`-block condition
     drops: std.ArrayList(usize) = .empty,
+    /// offsets of the `do`s that end an `if`/`while`/`for` condition
+    cond_dos: std.ArrayList(usize) = .empty,
 
     /// append and flag oom so the walk stops
     fn push(self: *Walk, list: anytype, item: std.meta.Child(@TypeOf(list.items))) void {
@@ -724,12 +757,17 @@ const Walk = struct {
                     self.pin(at, t.start);
                 }
                 self.condParens(i.cond, i.then);
+                self.condDo(i.then);
             },
             .while_loop => |w| {
                 self.body(at, w.body);
                 self.condParens(w.pred, w.body);
+                self.condDo(w.body);
             },
-            .for_loop => |f| self.body(at, f.body),
+            .for_loop => |f| {
+                self.body(at, f.body);
+                self.condDo(f.body);
+            },
             .loop_expr => |l| self.body(at, l.body),
             .fn_def => |f| self.body(at, f.body),
             .fn_method => |f| self.body(at, f.body),
@@ -755,6 +793,10 @@ const Walk = struct {
     /// the line starting at `offset` lines up with the line holding `anchor`
     fn pin(self: *Walk, anchor: usize, offset: usize) void {
         self.push(&self.floors, .{ .anchor = anchor, .start = offset, .end = offset + 1, .indent = 0 });
+    }
+
+    fn condDo(self: *Walk, body_node: *const cst.CstNode) void {
+        if (body_node.kind == .do_block) self.push(&self.cond_dos, body_node.kind.do_block.do_tok.start);
     }
 
     /// `if (cond) 4` wraps, `if cond do` unwraps: parens delimit an
@@ -932,7 +974,7 @@ fn trimBlanks(lines: []Line) void {
 ///
 /// a line that was aligned under a token of its statements head line, or
 /// under an item after an open bracket that went on, stays under that token
-fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor) FormatError!void {
+fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_dos: []const usize) FormatError!void {
     var stack: std.ArrayList(Open) = .empty;
     var heads: std.ArrayList(Head) = .empty;
     var prev_kind: ?TokenType = null;
@@ -999,9 +1041,9 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor) Format
             }
 
             if (isOpener(it.kind)) {
-                // a `do` that ends a continuation hangs its body off the
-                // statement, not off the continuation line
-                const from = if (it.kind == .kw_do and continued and stack.items.len <= depth) stmt_col else col;
+                // a `do` that ends a wrapped condition hangs its body off the
+                // statement; any other `do` (`|> fn(c) do`) hangs off its own line
+                const from = if (continued and stack.items.len <= depth and has(cond_dos, it.start)) stmt_col else col;
                 const goes_on = it.kind != .kw_do and firstCodeIndex(slice[idx + 1 ..]) != null;
                 try stack.append(arena, .{
                     .col = from + indent_cols,
