@@ -32,7 +32,7 @@
 //! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
 //!      minimal edits from `revo.diff` (`-cursor`, replacements)
 //! [] - align trailing comments on consecutive lines (`AlignTrailingComments`)
-//! [] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
+//! [x] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
 //! [x] - strip trailing whitespace inside multi-line comments
 //! [] - brace padding is kept as typed: `{a = 1 }`, `{ }` (`Cpp11BracedListStyle`,
 //!      `SpaceInEmptyBlock`)
@@ -348,6 +348,23 @@ test "formatter" {
             .name = "comments lose trailing whitespace",
             .src = "let x = 1 # c \t\n## a  \n  \t\n  b \n##\n#* d  \r\n *#\nfn g() 1\n",
             .want = "let x = 1  # c\n## a\n\n  b\n##\n#* d\n *#\nfn g() 1\n",
+        },
+        .{ .name = "line comments get a space after the #", .src =
+        \\#note
+        \\#é
+        \\#----
+        \\#
+        \\##block##
+        \\let x = 1 #c
+        \\
+        , .want =
+        \\# note
+        \\# é
+        \\#----
+        \\#
+        \\##block##
+        \\let x = 1  # c
+        \\
         },
         .{ .name = "continuations keep their alignment", .src =
         \\let t = {a = 1,
@@ -905,11 +922,11 @@ fn sameTokens(arena: std.mem.Allocator, lexed: Lexer.LexOutput, w: *const Walk, 
 }
 
 /// a comment's later lines move with the code and lose trailing whitespace,
-/// see `appendShifted`
+/// and `#note` gains a space, see `emit`
 fn sameText(kind: TokenType, a: []const u8, b: []const u8) bool {
     if (!oneOf(kind, &.{ .comment, .doc_comment, .module_doc })) return std.mem.eql(u8, a, b);
-    var rows_a = std.mem.splitScalar(u8, a, '\n');
-    var rows_b = std.mem.splitScalar(u8, b, '\n');
+    var rows_a = std.mem.splitScalar(u8, pastHash(kind, a), '\n');
+    var rows_b = std.mem.splitScalar(u8, pastHash(kind, b), '\n');
     while (rows_a.next()) |row| {
         const other = rows_b.next() orelse return false;
         const x = std.mem.trimEnd(u8, std.mem.trimStart(u8, row, " "), trailing_space);
@@ -917,6 +934,12 @@ fn sameText(kind: TokenType, a: []const u8, b: []const u8) bool {
         if (!std.mem.eql(u8, x, y)) return false;
     }
     return rows_b.next() == null;
+}
+
+/// a line comment past its `#`, so the row compare skips the space after it
+fn pastHash(kind: TokenType, text: []const u8) []const u8 {
+    if (kind != .comment or text.len == 0 or std.mem.startsWith(u8, text, "##")) return text;
+    return text[1..];
 }
 
 // -- [structure] -------------------------------------------------------------
@@ -1362,7 +1385,10 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
             if (it.trivia or it.kind == .doc_comment) {
                 // a multi-line comment keeps its shape: later lines move as far as the first did
                 const delta = @as(i64, srcCol(out.items, out.items.len)) - it.src_col;
-                try appendShifted(allocator, &out, it.text, delta);
+                if (unspacedLineComment(it)) {
+                    try out.appendSlice(allocator, "# ");
+                    try appendShifted(allocator, &out, it.text[1..], delta);
+                } else try appendShifted(allocator, &out, it.text, delta);
             } else try out.appendSlice(allocator, it.text);
             prev2 = prev;
             prev = it;
@@ -1371,6 +1397,12 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
     }
 
     return out.toOwnedSlice(allocator);
+}
+
+/// `#note` -> `# note`; `##`, `#----` and a tab after the `#` stay as typed
+fn unspacedLineComment(it: Item) bool {
+    if (it.kind != .comment or it.text.len < 2) return false;
+    return std.ascii.isAlphanumeric(it.text[1]) or it.text[1] >= 0x80;
 }
 
 /// `text` with every line after the first moved `delta` columns, never past column 0,
