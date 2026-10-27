@@ -33,7 +33,7 @@
 //!      minimal edits from `revo.diff` (`-cursor`, replacements)
 //! [] - align trailing comments on consecutive lines (`AlignTrailingComments`)
 //! [] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
-//! [] - strip trailing whitespace inside multi-line comments
+//! [x] - strip trailing whitespace inside multi-line comments
 //! [] - brace padding is kept as typed: `{a = 1 }`, `{ }` (`Cpp11BracedListStyle`,
 //!      `SpaceInEmptyBlock`)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
@@ -343,6 +343,11 @@ test "formatter" {
         \\ * doc two *#
         \\fn g() 1
         \\
+        },
+        .{
+            .name = "comments lose trailing whitespace",
+            .src = "let x = 1 # c \t\n## a  \n  \t\n  b \n##\n#* d  \r\n *#\nfn g() 1\n",
+            .want = "let x = 1  # c\n## a\n\n  b\n##\n#* d\n *#\nfn g() 1\n",
         },
         .{ .name = "continuations keep their alignment", .src =
         \\let t = {a = 1,
@@ -714,6 +719,9 @@ const indent_cols: u32 = indent_unit.len;
 /// longest run of blank lines to keep
 const max_blanks: u32 = 2;
 
+/// stripped from the end of every comment line
+const trailing_space = " \t\r";
+
 pub const FormatError = error{ OutOfMemory, InvalidSource, FormatterBug };
 
 // -- [test helpers] ----------------------------------------------------------
@@ -896,14 +904,17 @@ fn sameTokens(arena: std.mem.Allocator, lexed: Lexer.LexOutput, w: *const Walk, 
     return true;
 }
 
-/// a comment's later lines move with the code, see `appendShifted`
+/// a comment's later lines move with the code and lose trailing whitespace,
+/// see `appendShifted`
 fn sameText(kind: TokenType, a: []const u8, b: []const u8) bool {
     if (!oneOf(kind, &.{ .comment, .doc_comment, .module_doc })) return std.mem.eql(u8, a, b);
     var rows_a = std.mem.splitScalar(u8, a, '\n');
     var rows_b = std.mem.splitScalar(u8, b, '\n');
     while (rows_a.next()) |row| {
         const other = rows_b.next() orelse return false;
-        if (!std.mem.eql(u8, std.mem.trimStart(u8, row, " "), std.mem.trimStart(u8, other, " "))) return false;
+        const x = std.mem.trimEnd(u8, std.mem.trimStart(u8, row, " "), trailing_space);
+        const y = std.mem.trimEnd(u8, std.mem.trimStart(u8, other, " "), trailing_space);
+        if (!std.mem.eql(u8, x, y)) return false;
     }
     return rows_b.next() == null;
 }
@@ -1362,13 +1373,14 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
     return out.toOwnedSlice(allocator);
 }
 
-/// `text` with every line after the first moved `delta` columns, never past column 0
+/// `text` with every line after the first moved `delta` columns, never past column 0,
+/// and no line ending in whitespace
 fn appendShifted(allocator: std.mem.Allocator, out: *std.ArrayList(u8), text: []const u8, delta: i64) !void {
-    if (delta == 0) return out.appendSlice(allocator, text);
     var rows = std.mem.splitScalar(u8, text, '\n');
-    try out.appendSlice(allocator, rows.first());
-    while (rows.next()) |row| {
+    try out.appendSlice(allocator, std.mem.trimEnd(u8, rows.first(), trailing_space));
+    while (rows.next()) |full| {
         try out.append(allocator, '\n');
+        const row = std.mem.trimEnd(u8, full, trailing_space);
         // shortcut: only leading spaces move, a tab-indented comment line keeps its tabs
         const rest = std.mem.trimStart(u8, row, " ");
         if (rest.len == 0) continue;
