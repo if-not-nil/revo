@@ -38,7 +38,7 @@
 //!      `SpaceInEmptyBlock`)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
-//! [] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
+//! [x] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
 //!      (`RemoveParentheses: MultipleParentheses`)
 //! [x] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
@@ -507,6 +507,17 @@ test "formatter" {
         \\end
         \\if (x)
         \\  4
+        \\
+        },
+        .{ .name = "an inline body keeps one pair of parens", .src =
+        \\if ((x)) 4
+        \\while (((y))) f()
+        \\if ((a)) (b)
+        \\
+        , .want =
+        \\if (x) 4
+        \\while (y) f()
+        \\if (a) (b)
         \\
         },
         .{ .name = "while takes parens, do drops them", .src =
@@ -1051,22 +1062,25 @@ const Walk = struct {
     /// `if (cond) 4` wraps, `if cond do` unwraps: parens delimit an
     /// inline body, a `do` block already does
     fn condParens(self: *Walk, cond: *const cst.CstNode, body_node: *const cst.CstNode) void {
-        if (body_node.kind == .do_block) {
-            var cur = cond;
-            while (cur.kind == .paren) {
-                const p = cur.kind.paren;
-                const inner = p.expr orelse return;
-                self.push(&self.drops, p.lparen_tok.start);
-                self.push(&self.drops, p.rparen_tok.start);
-                cur = inner;
-            }
-        } else if (cond.kind != .paren) {
+        const do_body = body_node.kind == .do_block;
+        if (!do_body and cond.kind != .paren) {
             self.push(&self.parens, .{
                 .open_at = cond.span.start,
                 .close_at = cond.span.end,
                 .open_line = cond.span.line,
                 .close_line = self.endLine(cond.span),
             });
+            return;
+        }
+        // an inline body keeps the innermost pair: `if ((x)) 4` -> `if (x) 4`
+        var cur = cond;
+        while (cur.kind == .paren) {
+            const p = cur.kind.paren;
+            const inner = p.expr orelse return;
+            if (!do_body and inner.kind != .paren) return;
+            self.push(&self.drops, p.lparen_tok.start);
+            self.push(&self.drops, p.rparen_tok.start);
+            cur = inner;
         }
     }
 
@@ -1083,8 +1097,8 @@ fn has(set: []const usize, x: usize) bool {
 // -- [items] -----------------------------------------------------------------
 
 /// code tokens + their leading comments + absorbed strings, in source order;
-/// wraps conditions that need parens and drops the parens a `do` block makes
-/// redundant
+/// wraps conditions that need parens and drops the parens a `do` block or an
+/// inner pair makes redundant
 fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOutput, w: *const Walk) ![]Item {
     var items: std.ArrayList(Item) = .empty;
 
@@ -1095,6 +1109,8 @@ fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOu
     }
 
     var i: usize = 0;
+    // a dropped paren hands its gap on, so `if ((x)) 4` keeps `if (`
+    var dropped_gap = false;
     while (i < lexed.tokens.len) {
         const tok = lexed.tokens[i];
         for (lexed.leadingTrivia(tok)) |c| try items.append(arena, .{
@@ -1107,7 +1123,10 @@ fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOu
         });
         if (tok.type == .eof) break;
         i += 1;
-        if (has(w.drops.items, tok.start)) continue;
+        if (has(w.drops.items, tok.start)) {
+            dropped_gap = dropped_gap or tok.space_before;
+            continue;
+        }
 
         // a whole `"..."`/`"""..."""` is one item, interp code included
         var end = tok.end;
@@ -1133,8 +1152,9 @@ fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOu
             .line = tok.line,
             .start = tok.start,
             .src_col = srcCol(source, tok.start),
-            .space_before = tok.space_before,
+            .space_before = tok.space_before or dropped_gap,
         });
+        dropped_gap = false;
     }
     // stable, so a synthetic paren lands before the token it sits on
     std.mem.sort(Item, items.items, {}, lessItem);
