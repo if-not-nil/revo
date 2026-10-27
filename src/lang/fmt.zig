@@ -700,7 +700,7 @@ const indent_cols: u32 = indent_unit.len;
 /// longest run of blank lines to keep
 const max_blanks: u32 = 2;
 
-pub const FormatError = error{ OutOfMemory, InvalidSource };
+pub const FormatError = error{ OutOfMemory, InvalidSource, FormatterBug };
 
 // -- [test helpers] ----------------------------------------------------------
 
@@ -805,7 +805,8 @@ const Parens = struct {
 // -- [entry] -----------------------------------------------------------------
 
 /// format `source`, caller owns the result
-/// `InvalidSource` on anything the parser wont take
+/// `InvalidSource` on anything the parser wont take, `FormatterBug` when the
+/// output wouldnt parse or would mean something else
 pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8 {
     var arena_state = std.heap.ArenaAllocator.init(allocator);
     defer arena_state.deinit();
@@ -833,10 +834,10 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
     // , so never hand back something the parser wouldnt take
     switch (try parse(arena, out)) {
         .ok => {},
-        .err => return error.InvalidSource,
+        .err => return error.FormatterBug,
     }
     // parsing alone misses `f (1)` -> `f(1)`, which parses but now calls `f`
-    if (!try sameTokens(arena, lexed, &walk, out)) return error.InvalidSource;
+    if (!try sameTokens(arena, lexed, &walk, out)) return error.FormatterBug;
     return out;
 }
 
