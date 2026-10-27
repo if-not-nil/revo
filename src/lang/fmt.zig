@@ -39,7 +39,7 @@
 //! [x] - unary after unary hugs: `- -1` -> `--1`
 //! [x] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
 //!      leaves `2` at column 0
-//! [] - "doesnt change semantics" is only "output parses"; compare the token
+//! [x] - "doesnt change semantics" is only "output parses"; compare the token
 //!      streams of input and output, minus synth/dropped parens
 //! [] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
 //!      alignment
@@ -655,6 +655,23 @@ test "formatter" {
     }
 }
 
+test "output with other tokens is refused" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src = "let w = f (1)\nif (x) do\n  g()\nend\nif y 4\n";
+    const lexed = try Lexer.lexAll(arena, src);
+    var walk: Walk = .{ .alloc = arena, .source = src };
+    walk.visit((try parse(arena, src)).ok);
+
+    try testing.expect(try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
+    // `f (1)` isnt a call, `f(1)` is
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f(1)\nif x do\n  g()\nend\nif (y) 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\nend\nif (y) 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\n  g()\nend\nif y 4\n"));
+}
+
 const std = @import("std");
 
 const cst = @import("cst.zig");
@@ -805,6 +822,8 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
         .ok => {},
         .err => return error.InvalidSource,
     }
+    // parsing alone misses `f (1)` -> `f(1)`, which parses but now calls `f`
+    if (!try sameTokens(arena, lexed, &walk, out)) return error.InvalidSource;
     return out;
 }
 
@@ -813,6 +832,44 @@ fn parse(arena: std.mem.Allocator, source: []const u8) FormatError!Parser.ParseR
         error.OutOfMemory => error.OutOfMemory,
         else => error.InvalidSource,
     };
+}
+
+/// `out` lexes to the source's tokens, minus the dropped parens and plus the
+/// synthetic ones, and keeps every gap that picks a call over a grouping
+fn sameTokens(arena: std.mem.Allocator, lexed: Lexer.LexOutput, w: *const Walk, out: []const u8) FormatError!bool {
+    const got = (try Lexer.lexAll(arena, out)).tokens;
+
+    const open: Lexer.Token = .{ .type = .lparen, .text = "(", .line = 0, .column = 0, .start = 0, .end = 0, .space_before = true };
+    const close: Lexer.Token = .{ .type = .rparen, .text = ")", .line = 0, .column = 0, .start = 0, .end = 0 };
+    var want: std.ArrayList(Lexer.Token) = .empty;
+    for (lexed.tokens) |tok| {
+        for (w.parens.items) |p| if (p.open_at == tok.start) try want.append(arena, open);
+        if (!has(w.drops.items, tok.start)) try want.append(arena, tok);
+        for (w.parens.items) |p| if (p.close_at == tok.end) try want.append(arena, close);
+    }
+    if (got.len != want.items.len) return false;
+
+    for (got, want.items, 0..) |g, x, i| {
+        if (g.type != x.type or !sameText(g.type, g.text, x.text)) return false;
+        // `f(x)` and `f<T>(x)` call, `f (x)` and `a < b` dont; after a
+        // keyword or a dropped paren the gap means nothing
+        const prev = if (i > 0) want.items[i - 1].type else continue;
+        const after_expr = endsExpr(prev) or oneOf(prev, &.{ .string_end, .ml_string_end });
+        if (oneOf(g.type, &.{ .lparen, .lt }) and after_expr and g.space_before != x.space_before) return false;
+    }
+    return true;
+}
+
+/// a doc comment's later lines move with the code, see `appendShifted`
+fn sameText(kind: TokenType, a: []const u8, b: []const u8) bool {
+    if (kind != .doc_comment) return std.mem.eql(u8, a, b);
+    var rows_a = std.mem.splitScalar(u8, a, '\n');
+    var rows_b = std.mem.splitScalar(u8, b, '\n');
+    while (rows_a.next()) |row| {
+        const other = rows_b.next() orelse return false;
+        if (!std.mem.eql(u8, std.mem.trimStart(u8, row, " "), std.mem.trimStart(u8, other, " "))) return false;
+    }
+    return rows_b.next() == null;
 }
 
 // -- [structure] -------------------------------------------------------------
