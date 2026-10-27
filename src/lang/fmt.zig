@@ -11,6 +11,21 @@
 //! !- BUT ALL THE CODE FOR THEM IS WRITEN BY ME(w0x7y) -!
 //! what is left todo:
 //!
+//! bugs - Finished
+//! [x] - a `do` on an aligned continuation line indents its body and `end` from
+//!      the aligned column: `fn(a,\n           b) do` puts `end` under `b`,
+//!      not under `let`
+//! [x] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
+//!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
+//! [x] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
+//! [x] - unary after unary hugs: `- -1` -> `--1`
+//! [x] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
+//!      leaves `2` at column 0
+//! [x] - "doesnt change semantics" is only "output parses"; compare the token
+//!      streams of input and output, minus synth/dropped parens
+//! [x] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
+//!      alignment
+//!
 //! missing, next to clang-format
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
 //! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
@@ -28,21 +43,6 @@
 //! [] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
 //! [] - blank line between top-level definitions? (`SeparateDefinitionBlocks`)
-//!
-//! bugs
-//! [x] - a `do` on an aligned continuation line indents its body and `end` from
-//!      the aligned column: `fn(a,\n           b) do` puts `end` under `b`,
-//!      not under `let`
-//! [x] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
-//!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
-//! [x] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
-//! [x] - unary after unary hugs: `- -1` -> `--1`
-//! [x] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
-//!      leaves `2` at column 0
-//! [x] - "doesnt change semantics" is only "output parses"; compare the token
-//!      streams of input and output, minus synth/dropped parens
-//! [x] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
-//!      alignment
 //!
 //! optimizations
 //! [] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
