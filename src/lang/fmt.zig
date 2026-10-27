@@ -40,7 +40,7 @@
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
 //! [] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
 //!      (`RemoveParentheses: MultipleParentheses`)
-//! [] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
+//! [x] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
 //! [] - blank line between top-level definitions? (`SeparateDefinitionBlocks`)
 //!
@@ -237,6 +237,17 @@ test "formatter" {
         \\  fs.open(c)?:read()?
         \\  :replace("a", "b")
         \\  :split(" ")
+        \\
+        },
+        .{ .name = "field chains continue", .src =
+        \\let n = self
+        \\.tl
+        \\.len
+        \\
+        , .want =
+        \\let n = self
+        \\  .tl
+        \\  .len
         \\
         },
         .{ .name = "trailing operators continue, comments too", .src =
@@ -1191,7 +1202,7 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
 
         // how does the line opens
         const leads = if (first_idx) |fi| switch (slice[fi].kind) {
-            .pipe_forward, .kw_and, .kw_or, .kw_orelse => true,
+            .pipe_forward, .kw_and, .kw_or, .kw_orelse, .dot => true,
             // a bare `:atom` is its own statement, `:m(` continues
             .atom => if (firstCodeIndex(slice[fi + 1 ..])) |n|
                 slice[fi + 1 + n].kind == .lparen and !slice[fi + 1 + n].space_before
