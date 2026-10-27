@@ -30,7 +30,7 @@
 //! [] - blank line between top-level definitions? (`SeparateDefinitionBlocks`)
 //!
 //! bugs
-//! [] - a `do` on an aligned continuation line indents its body and `end` from
+//! [x] - a `do` on an aligned continuation line indents its body and `end` from
 //!      the aligned column: `fn(a,\n           b) do` puts `end` under `b`,
 //!      not under `let`
 //! [x] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
@@ -339,6 +339,19 @@ test "formatter" {
         \\fn f() do
         \\  loop g(x)
         \\       |> h
+        \\end
+        \\
+        },
+        .{ .name = "a do after an aligned line hangs off the opener", .src =
+        \\let g = fn(a,
+        \\           b) do
+        \\  return a + b
+        \\end
+        \\fn f() do
+        \\  run(fn(a,
+        \\         b) do
+        \\    return a
+        \\  end)
         \\end
         \\
         },
@@ -1138,13 +1151,17 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
         }
 
         var leading = true;
+        // where an opener hangs from: this line, or the line that opened the
+        // last thing closed on it (`fn(a,\n     b) do` hangs off the `fn(` line)
+        var hang = col;
         for (slice, 0..) |it, idx| {
             if (it.trivia) continue;
 
             if (isCloser(it.kind)) {
                 // the parser guarantees balance
                 const o = stack.pop() orelse continue;
-                if (leading) col = o.col - indent_cols;
+                hang = o.col - indent_cols;
+                if (leading) col = hang;
                 leading = false;
                 continue;
             }
@@ -1152,7 +1169,7 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
             if (isOpener(it.kind)) {
                 // a `do` that ends a wrapped condition hangs its body off the
                 // statement; any other `do` (`|> fn(c) do`) hangs off its own line
-                const from = if (continued and stack.items.len <= depth and has(cond_dos, it.start)) stmt_col else col;
+                const from = if (continued and stack.items.len <= depth and has(cond_dos, it.start)) stmt_col else hang;
                 const goes_on = it.kind != .kw_do and firstCodeIndex(slice[idx + 1 ..]) != null;
                 try stack.append(arena, .{
                     .col = from + indent_cols,
