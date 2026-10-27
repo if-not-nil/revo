@@ -667,21 +667,24 @@ test "formatter" {
     }
 }
 
-test "output with other tokens is refused" {
+test "output with other tokens or comments is refused" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const src = "let w = f (1)\nif (x) do\n  g()\nend\nif y 4\n";
+    const src = "# keep\nlet w = f (1)\nif (x) do\n  g()\nend\nif y 4\n";
     const lexed = try Lexer.lexAll(arena, src);
     var walk: Walk = .{ .alloc = arena, .source = src };
     walk.visit((try parse(arena, src)).ok);
 
-    try testing.expect(try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
+    try testing.expect(try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
     // `f (1)` isnt a call, `f(1)` is
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f(1)\nif x do\n  g()\nend\nif (y) 4\n"));
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\nend\nif (y) 4\n"));
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\n  g()\nend\nif y 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f(1)\nif x do\n  g()\nend\nif (y) 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif x do\nend\nif (y) 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif x do\n  g()\nend\nif y 4\n"));
+    // a lost or edited comment
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# kept\nlet w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
 }
 
 const std = @import("std");
@@ -848,10 +851,18 @@ fn parse(arena: std.mem.Allocator, source: []const u8) FormatError!Parser.ParseR
     };
 }
 
-/// `out` lexes to the source's tokens, minus the dropped parens and plus the
-/// synthetic ones, and keeps every gap that picks a call over a grouping
+/// `out` lexes to the source's tokens and comments, minus the dropped parens
+/// and plus the synthetic ones, and keeps every gap that picks a call over a
+/// grouping
 fn sameTokens(arena: std.mem.Allocator, lexed: Lexer.LexOutput, w: *const Walk, out: []const u8) FormatError!bool {
-    const got = (try Lexer.lexAll(arena, out)).tokens;
+    const relexed = try Lexer.lexAll(arena, out);
+    const got = relexed.tokens;
+
+    // a comment changes nothing at runtime, but losing one loses the user's text
+    if (relexed.trivia.len != lexed.trivia.len) return false;
+    for (relexed.trivia, lexed.trivia) |g, x| {
+        if (g.type != x.type or !sameText(g.type, g.text, x.text)) return false;
+    }
 
     const open: Lexer.Token = .{ .type = .lparen, .text = "(", .line = 0, .column = 0, .start = 0, .end = 0, .space_before = true };
     const close: Lexer.Token = .{ .type = .rparen, .text = ")", .line = 0, .column = 0, .start = 0, .end = 0 };
@@ -874,9 +885,9 @@ fn sameTokens(arena: std.mem.Allocator, lexed: Lexer.LexOutput, w: *const Walk, 
     return true;
 }
 
-/// a doc comment's later lines move with the code, see `appendShifted`
+/// a comment's later lines move with the code, see `appendShifted`
 fn sameText(kind: TokenType, a: []const u8, b: []const u8) bool {
-    if (kind != .doc_comment) return std.mem.eql(u8, a, b);
+    if (!oneOf(kind, &.{ .comment, .doc_comment, .module_doc })) return std.mem.eql(u8, a, b);
     var rows_a = std.mem.splitScalar(u8, a, '\n');
     var rows_b = std.mem.splitScalar(u8, b, '\n');
     while (rows_a.next()) |row| {
