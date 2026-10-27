@@ -27,20 +27,20 @@
 //!      alignment
 //!
 //! missing, next to clang-format
+//! [x] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
+//!      (`RemoveParentheses: MultipleParentheses`)
+//! [x] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
+//! [x] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
+//! [x] - strip trailing whitespace inside multi-line comments
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
 //! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
 //! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
 //!      minimal edits from `revo.diff` (`-cursor`, replacements)
 //! [] - align trailing comments on consecutive lines (`AlignTrailingComments`)
-//! [x] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
-//! [x] - strip trailing whitespace inside multi-line comments
 //! [] - brace padding is kept as typed: `{a = 1 }`, `{ }` (`Cpp11BracedListStyle`,
 //!      `SpaceInEmptyBlock`)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
-//! [x] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
-//!      (`RemoveParentheses: MultipleParentheses`)
-//! [x] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
 //! [] - blank line between top-level definitions? (`SeparateDefinitionBlocks`)
 //!
