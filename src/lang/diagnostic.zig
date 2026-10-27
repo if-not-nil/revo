@@ -1284,7 +1284,7 @@ fn charWidth(cp: u21) usize {
 
 /// display columns `text` occupies
 /// tabs snap to the next tab stop
-fn displayWidth(text: []const u8, start_col: usize) usize {
+pub fn displayWidth(text: []const u8, start_col: usize) usize {
     var col = start_col;
     var i: usize = 0;
 

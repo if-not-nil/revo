@@ -41,7 +41,7 @@
 //!      leaves `2` at column 0
 //! [x] - "doesnt change semantics" is only "output parses"; compare the token
 //!      streams of input and output, minus synth/dropped parens
-//! [] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
+//! [x] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
 //!      alignment
 //!
 //! optimizations
@@ -354,6 +354,18 @@ test "formatter" {
         \\  end)
         \\end
         \\
+        },
+        .{ .name = "alignment counts display columns", .src =
+        \\let t = {a = "é", c = 1,
+        \\                  b = 2}
+        \\let u = {a = "日", c = 1,
+        \\                   b = 2}
+        \\
+        },
+        .{
+            .name = "a tab-indented line keeps its alignment",
+            .src = "fn f() do\n\tlet t = {a = 1,\n           b = 2}\nend\n",
+            .want = "fn f() do\n  let t = {a = 1,\n           b = 2}\nend\n",
         },
 
         // boolean continuations
@@ -677,6 +689,7 @@ const std = @import("std");
 const cst = @import("cst.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
+const diagnostic = @import("diagnostic.zig");
 
 const TokenType = Lexer.TokenType;
 
@@ -726,7 +739,7 @@ const Item = struct {
     kind: TokenType,
     line: u32,
     start: usize,
-    /// column in the source, to infer alignment
+    /// display column in the source, to infer alignment
     src_col: u32 = 0,
     space_before: bool = false,
     trivia: bool = false,
@@ -1075,9 +1088,10 @@ fn lessItem(_: void, a: Item, b: Item) bool {
     return a.start < b.start or (a.start == b.start and a.synth and !b.synth);
 }
 
+/// display column, not bytes: `é` is 1 wide, `日` 2, a tab snaps to `diagnostic`'s stops
 fn srcCol(source: []const u8, at: usize) u32 {
     const nl = std.mem.lastIndexOfScalar(u8, source[0..at], '\n');
-    return @intCast(at - (if (nl) |n| n + 1 else 0));
+    return @intCast(diagnostic.displayWidth(source[if (nl) |n| n + 1 else 0..at], 0));
 }
 
 // -- [lines] -----------------------------------------------------------------
@@ -1266,7 +1280,7 @@ fn inferCol(anchor: Line, from: usize, src_col: u32) ?u32 {
         if (prev) |p| col += @intCast(separator(prev2, p, it, nextItem(anchor.items, i)).len);
         if (i >= from and !it.trivia and !it.synth and it.src_col == src_col) return col;
 
-        col += @intCast(it.text.len);
+        col += @intCast(diagnostic.displayWidth(it.text, col));
         prev2 = prev;
         prev = it;
     }
