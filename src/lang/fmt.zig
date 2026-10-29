@@ -32,6 +32,8 @@
 //! [x] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
 //! [x] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
 //! [x] - strip trailing whitespace inside multi-line comments
+//! [x] - a blank line around top-level fns, methods, tests and suites
+//!      (`SeparateDefinitionBlocks`)
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
 //! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
 //! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
@@ -42,7 +44,6 @@
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
-//! [] - blank line between top-level definitions? (`SeparateDefinitionBlocks`)
 //!
 //! optimizations
 //! [] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
@@ -103,8 +104,11 @@ test "formatter" {
         \\let xs = make<number>(1)
         \\let n = self.tl[ch]
         \\let c = count()
+        \\
         \\fn d(b) if (b == 0) {:err, 1} else {:ok, 2}
+        \\
         \\fn p(x) -> Point {x = x}
+        \\
         \\let a = { x = 1 }
         \\let b = {x = 2}
         \\type R = { token: string }
@@ -339,6 +343,7 @@ test "formatter" {
         \\    print(1)
         \\  end
         \\end
+        \\
         \\#* doc one
         \\ * doc two *#
         \\fn g() 1
@@ -347,7 +352,7 @@ test "formatter" {
         .{
             .name = "comments lose trailing whitespace",
             .src = "let x = 1 # c \t\n## a  \n  \t\n  b \n##\n#* d  \r\n *#\nfn g() 1\n",
-            .want = "let x = 1  # c\n## a\n\n  b\n##\n#* d\n *#\nfn g() 1\n",
+            .want = "let x = 1  # c\n\n## a\n\n  b\n##\n#* d\n *#\nfn g() 1\n",
         },
         .{ .name = "line comments get a space after the #", .src =
         \\#note
@@ -369,6 +374,7 @@ test "formatter" {
         .{ .name = "continuations keep their alignment", .src =
         \\let t = {a = 1,
         \\         b = 2}
+        \\
         \\fn f() do
         \\  loop g(x)
         \\       |> h
@@ -380,6 +386,7 @@ test "formatter" {
         \\           b) do
         \\  return a + b
         \\end
+        \\
         \\fn f() do
         \\  run(fn(a,
         \\         b) do
@@ -486,6 +493,63 @@ test "formatter" {
         \\let c = 1 and
         \\
         \\  2
+        \\
+        },
+        .{ .name = "a blank line around top-level definitions", .src =
+        \\let x = 1
+        \\fn f() 1
+        \\fn g() do
+        \\  2
+        \\end
+        \\f()
+        \\# about h
+        \\pub fn h() 3
+        \\#* doc *#
+        \\fn k() 4
+        \\let y = fn() 5
+        \\let z = 6
+        \\test "t" do
+        \\end
+        \\fn obj:m() 7
+        \\@native
+        \\fn n() 8
+        \\
+        , .want =
+        \\let x = 1
+        \\
+        \\fn f() 1
+        \\
+        \\fn g() do
+        \\  2
+        \\end
+        \\
+        \\f()
+        \\
+        \\# about h
+        \\pub fn h() 3
+        \\
+        \\#* doc *#
+        \\fn k() 4
+        \\
+        \\let y = fn() 5
+        \\let z = 6
+        \\
+        \\test "t" do
+        \\end
+        \\
+        \\fn obj:m() 7
+        \\
+        \\@native
+        \\fn n() 8
+        \\
+        },
+        .{ .name = "nested and `;`-joined definitions stay put", .src =
+        \\fn outer() do
+        \\  fn a() 1
+        \\  fn b() 2
+        \\end
+        \\
+        \\fn c() 3; c()
         \\
         },
 
@@ -674,8 +738,11 @@ test "formatter" {
         \\const bbb = 2
         \\let x = 3
         \\let yyyy = 4
+        \\
         \\fn f() 1
+        \\
         \\fn g() 2
+        \\
         \\const c = 3
         \\
         },
@@ -876,6 +943,7 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
     const items = try collectItems(arena, source, lexed, &walk);
     const lines = try splitLines(arena, items, walk.cuts.items);
     trimBlanks(lines);
+    separateDefs(lines, walk.seps.items);
     try assignLevels(arena, lines, walk.floors.items, walk.cond_dos.items);
     const out = try emit(allocator, lines);
     errdefer allocator.free(out);
@@ -973,6 +1041,8 @@ const Walk = struct {
     drops: std.ArrayList(usize) = .empty,
     /// offsets of the `do`s that end an `if`/`while`/`for` condition
     cond_dos: std.ArrayList(usize) = .empty,
+    /// offsets of the top-level statements that get a blank line before them
+    seps: std.ArrayList(usize) = .empty,
 
     /// append and flag oom so the walk stops
     fn push(self: *Walk, list: anytype, item: std.meta.Child(@TypeOf(list.items))) void {
@@ -1033,10 +1103,20 @@ const Walk = struct {
             .fn_method => |f| self.body(at, f.body),
             // arms line up with the `match` keyword itself
             .match => |m| for (m.bars) |bar| self.pin(at, bar.start),
+            .root => |r| self.separateDefs(r.stmts),
             else => {},
         }
 
         cst.walkCst(Walk, self, node);
+    }
+
+    /// a top-level fn, method, test or suite gets a blank line on each side
+    fn separateDefs(self: *Walk, stmts: []const *cst.CstNode) void {
+        var prev: ?*const cst.CstNode = null;
+        for (stmts) |s| {
+            if (prev) |p| if (isDef(p) or isDef(s)) self.push(&self.seps, firstOffset(s));
+            prev = s;
+        }
     }
 
     /// a body that isnt a `do` block indents one level
@@ -1089,6 +1169,27 @@ const Walk = struct {
         return span.line + @as(u32, @intCast(std.mem.count(u8, self.source[span.start..span.end], "\n")));
     }
 };
+
+/// a named `fn`, a method, a `test` or a `suite`; `let f = fn() 1` is a value
+fn isDef(node: *const cst.CstNode) bool {
+    return switch (node.kind) {
+        .decl => |d| isDef(d.inner),
+        .binding => |b| b.value.kind == .fn_def and b.value.kind.fn_def.head == .named,
+        .fn_method, .test_block, .test_suite => true,
+        else => false,
+    };
+}
+
+/// a doc comment, an attribute and `pub` come before the statement's span
+fn firstOffset(node: *const cst.CstNode) usize {
+    var at = node.span.start;
+    if (node.doc_tok) |t| at = @min(at, t.start);
+    if (node.attrs.len > 0) at = @min(at, node.attrs[0].start);
+    if (node.kind == .decl) if (node.kind.decl.pub_tok) |t| {
+        at = @min(at, t.start);
+    };
+    return at;
+}
 
 fn has(set: []const usize, x: usize) bool {
     return std.mem.indexOfScalar(usize, set, x) != null;
@@ -1223,6 +1324,18 @@ fn appendSourceLine(
         first = idx;
     };
     try lines.append(arena, .{ .items = group[first..], .blanks = if (first == 0) blank else 0 });
+}
+
+/// a blank line before each statement in `seps`, above the comments that
+/// lead into it
+fn separateDefs(lines: []Line, seps: []const usize) void {
+    var prev_lo: ?usize = null;
+    for (lines) |*line| {
+        if (prev_lo) |p| if (line.lo != p and has(seps, line.lo)) {
+            line.blanks = @max(line.blanks, 1);
+        };
+        prev_lo = line.lo;
+    }
 }
 
 /// no blank line right after an opener or right before a closer
