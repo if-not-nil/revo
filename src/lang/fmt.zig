@@ -36,11 +36,11 @@
 //!      (`SeparateDefinitionBlocks`)
 //! [x] - braces hug what they hold: `{ a = 1 }` -> `{a = 1}`, `{ }` -> `{}`
 //!      (`Cpp11BracedListStyle`, `SpaceInEmptyBlock`)
+//! [x] - align trailing comments on consecutive lines (`AlignTrailingComments`)
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
 //! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
 //! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
 //!      minimal edits from `revo.diff` (`-cursor`, replacements)
-//! [] - align trailing comments on consecutive lines (`AlignTrailingComments`)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
@@ -311,6 +311,41 @@ test "formatter" {
         \\let x = 1  # trailing
         \\# leading
         \\let y = 2
+        \\
+        },
+        .{ .name = "trailing comments on consecutive lines line up", .src =
+        \\let x = 1 # a
+        \\let longer = 2 # b
+        \\let y = "é" ## c ##
+        \\
+        \\let z = 4 # d
+        \\let s = """
+        \\  t
+        \\""" # e
+        \\let w = 5 # f
+        \\f() # g
+        \\# own line
+        \\let q = 6 # h
+        \\let r = 7 ## i
+        \\  ##
+        \\let tt = 88 # j
+        \\
+        , .want =
+        \\let x = 1       # a
+        \\let longer = 2  # b
+        \\let y = "é"     ## c ##
+        \\
+        \\let z = 4  # d
+        \\let s = """
+        \\  t
+        \\"""        # e
+        \\let w = 5  # f
+        \\f()        # g
+        \\# own line
+        \\let q = 6  # h
+        \\let r = 7  ## i
+        \\   ##
+        \\let tt = 88  # j
         \\
         },
         .{ .name = "mid-line comments get one space", .src =
@@ -1522,14 +1557,25 @@ fn lastCodeItem(items: []const Item) ?Item {
 fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Error![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
+    // trailing comments on consecutive lines, lined up once the run ends
+    var run: std.ArrayList(Trailing) = .empty;
+    defer run.deinit(allocator);
 
     for (lines) |line| {
+        const trailing = isTrailing(line.items);
+        if (!trailing or line.blanks > 0) try alignRun(allocator, &out, &run);
         if (out.items.len > 0) try out.appendNTimes(allocator, '\n', @intCast(line.blanks));
+        const start = out.items.len;
         try out.appendNTimes(allocator, ' ', @intCast(line.col));
 
         var prev: ?Item = null;
         var prev2: ?Item = null;
         for (line.items, 0..) |it, i| {
+            if (trailing and i == line.items.len - 1) {
+                // a line that wraps onto more rows starts a new run
+                if (std.mem.indexOfScalar(u8, out.items[start..], '\n') != null) try alignRun(allocator, &out, &run);
+                try run.append(allocator, .{ .at = out.items.len, .col = srcCol(out.items, out.items.len) });
+            }
             if (prev) |p| try out.appendSlice(allocator, separator(prev2, p, it, nextItem(line.items, i)));
             if (it.trivia or it.kind == .doc_comment) {
                 // a multi-line comment keeps its shape: later lines move as far as the first did
@@ -1544,8 +1590,37 @@ fn emit(allocator: std.mem.Allocator, lines: []const Line) std.mem.Allocator.Err
         }
         try out.append(allocator, '\n');
     }
+    try alignRun(allocator, &out, &run);
 
     return out.toOwnedSlice(allocator);
+}
+
+/// a trailing comment `emit` has written
+const Trailing = struct {
+    /// offset of the gap before it
+    at: usize,
+    /// display column its code ends at
+    col: u32,
+};
+
+/// a one-row comment that ends a line with code on it
+fn isTrailing(items: []const Item) bool {
+    const last = items[items.len - 1];
+    return last.trivia and firstCodeIndex(items) != null and std.mem.indexOfScalar(u8, last.text, '\n') == null;
+}
+
+/// pad the comments in `run` out to one column, then empty it
+fn alignRun(allocator: std.mem.Allocator, out: *std.ArrayList(u8), run: *std.ArrayList(Trailing)) std.mem.Allocator.Error!void {
+    defer run.clearRetainingCapacity();
+    var widest: u32 = 0;
+    for (run.items) |t| widest = @max(widest, t.col);
+    // back to front, so the offsets still to pad stay put
+    var i = run.items.len;
+    while (i > 0) {
+        i -= 1;
+        const t = run.items[i];
+        @memset(try out.addManyAt(allocator, t.at, widest - t.col), ' ');
+    }
 }
 
 /// `#note` -> `# note`; `##`, `#----` and a tab after the `#` stay as typed
