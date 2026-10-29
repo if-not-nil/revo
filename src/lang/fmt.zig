@@ -7,8 +7,9 @@
 //!
 //! one test per rule right here check it out pretty sick right
 //!
-//! !- THOSE ITEMS WERE FOUND USING AI CODING AGENTS -!
-//! !- BUT ALL THE CODE FOR THEM IS WRITTEN BY ME(w0x7y) -!
+//! - THOSE ITEMS WERE FOUND USING LLMs -
+//! - BUT ALL THE CODE FOR THEM IS WRITTEN BY ME(w0x7y) -
+//! - ONLY THE TESTS FOR THEM WERE WRITTEN BY LLMs -
 //! what is left todo:
 //!
 //! bugs - Finished
@@ -39,8 +40,8 @@
 //! [x] - align trailing comments on consecutive lines (`AlignTrailingComments`)
 //! [x] - lsp sends only the changed lines from `revo.diff`, so the cursor and
 //!      undo stay put (`-cursor`, replacements)
+//! [x] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
-//! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
@@ -829,6 +830,38 @@ test "formatter" {
     }
 }
 
+test "range formatting touches only the lines asked for" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const cases = [_]struct { src: []const u8, first: usize, last: usize, want: []const u8 }{
+        .{ .src = "let a=1\nlet b=2\nlet c=3\n", .first = 2, .last = 2, .want = "let a=1\nlet b = 2\nlet c=3\n" },
+        // a reindented line is its own edit, so its neighbors stay put
+        .{ .src = "fn f() do\nx=1\ny=2\nend\n", .first = 3, .last = 3, .want = "fn f() do\nx=1\n  y = 2\nend\n" },
+        // the blank line a definition gets comes with it
+        .{ .src = "let a = 1\nfn f() 1\n", .first = 2, .last = 2, .want = "let a = 1\n\nfn f() 1\n" },
+        // a wrapped condition's parens come as a pair, from either end
+        .{
+            .src = "let x=1\nif a and\nb and\nc print(1)\nlet y=2\n",
+            .first = 2,
+            .last = 2,
+            .want = "let x=1\nif (a and\n    b and\n    c) print(1)\nlet y=2\n",
+        },
+        .{
+            .src = "let x=1\nif (a and\nb and\nc) do\nprint(1)\nend\nlet y=2\n",
+            .first = 4,
+            .last = 4,
+            .want = "let x=1\nif a and\n  b and\n  c do\nprint(1)\nend\nlet y=2\n",
+        },
+        .{ .src = "let a=1\n", .first = 5, .last = 9, .want = "let a=1\n" },
+    };
+    for (cases) |c| {
+        const got = try diff.apply(arena, c.src, try formatLines(arena, c.src, c.first, c.last));
+        try testing.expectEqualStrings(c.want, got);
+    }
+}
+
 test "output with other tokens or comments is refused" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
@@ -855,6 +888,7 @@ const cst = @import("cst.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
 const diagnostic = @import("diagnostic.zig");
+const diff = @import("../diff.zig");
 
 const TokenType = Lexer.TokenType;
 
@@ -1008,6 +1042,47 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
     // parsing alone misses `f (1)` -> `f(1)`, which parses but now calls `f`
     if (!try sameTokens(arena, lexed, &walk, out)) return error.FormatterBug;
     return out;
+}
+
+/// the edits from `format` that touch lines `first` to `last` (1-based,
+/// inclusive), for range formatting; everything lives in `arena`
+pub fn formatLines(arena: std.mem.Allocator, source: []const u8, first: usize, last: usize) FormatError![]const diff.Edit {
+    const all = try diff.edits(arena, source, try format(arena, source));
+    const from = lineStart(source, first);
+    const to = lineStart(source, last + 1);
+
+    // an insertion right at `from` counts, one at `to` belongs to the next line
+    var lo: usize = 0;
+    while (lo < all.len and all[lo].start < from and all[lo].end <= from) lo += 1;
+    var hi = lo;
+    while (hi < all.len and all[hi].start < to) hi += 1;
+
+    // a paren the formatter adds or drops can sit on a line past the range, so
+    // grow the pick (ahead, behind, then both) until applying it parses
+    var grow: usize = 0;
+    while (true) : (grow += 1) {
+        const ahead = @min(hi + grow, all.len);
+        const behind = lo -| grow;
+        const picks = [_][]const diff.Edit{ all[lo..ahead], all[behind..hi], all[behind..ahead] };
+        for (picks[if (grow == 0) 2 else 0..]) |picked| {
+            if (try parses(arena, try diff.apply(arena, source, picked))) return picked;
+        }
+        // all of them is `format`'s output, which parsed
+        if (behind == 0 and ahead == all.len) return all;
+    }
+}
+
+/// offset where 1-based `line` starts, or the end of `text`
+fn lineStart(text: []const u8, line: usize) usize {
+    var at: usize = 0;
+    var n: usize = 1;
+    while (n < line) : (n += 1) at = (std.mem.indexOfScalarPos(u8, text, at, '\n') orelse return text.len) + 1;
+    return at;
+}
+
+fn parses(arena: std.mem.Allocator, text: []const u8) FormatError!bool {
+    const result = parse(arena, text) catch |err| return if (err == error.OutOfMemory) err else false;
+    return result == .ok;
 }
 
 fn parse(arena: std.mem.Allocator, source: []const u8) FormatError!Parser.ParseResult {

@@ -17,6 +17,8 @@ const max_cells: usize = 1 << 20;
 const Op = struct {
     kind: enum { equal, del, ins },
     text: []const u8,
+    /// the line of `new` an `equal` pairs with; only whitespace can differ
+    new: []const u8 = "",
 };
 
 /// write `old` -> `new` as a diff, `name` is the path
@@ -26,7 +28,7 @@ pub fn write(out: *std.Io.Writer, name: []const u8, old: []const u8, new: []cons
     const arena = arena_state.allocator();
 
     try out.print("--- {s}\n+++ {s}\n", .{ name, name });
-    try hunks(out, try script(arena, try split(arena, old, false), try split(arena, new, false)), 1);
+    try hunks(out, try script(arena, try split(arena, old, false), try split(arena, new, false), false), 1);
 }
 
 /// `old[start..end]` becomes `text`, a slice of `new`
@@ -36,19 +38,22 @@ pub const Edit = struct {
     text: []const u8,
 };
 
-/// the changed runs of lines that turn `old` into `new`, in order and
-/// apart, for an editor that should keep its cursor and undo history
+/// the changed lines that turn `old` into `new`, in order and never
+/// overlapping, for an editor that should keep its cursor and undo history
 pub fn edits(arena: std.mem.Allocator, old: []const u8, new: []const u8) ![]const Edit {
-    // lines keep their `\n`, so a missing last newline is a change too
-    const ops = try script(arena, try split(arena, old, true), try split(arena, new, true));
+    // lines keep their `\n`, so a missing last newline is a change too; they
+    // pair up past whitespace, so each reindented line is its own edit
+    const ops = try script(arena, try split(arena, old, true), try split(arena, new, true), true);
     var out: std.ArrayList(Edit) = .empty;
     var at: usize = 0;
     var new_at: usize = 0;
     var i: usize = 0;
     while (i < ops.len) {
-        if (ops[i].kind == .equal) {
-            at += ops[i].text.len;
-            new_at += ops[i].text.len;
+        const op = ops[i];
+        if (op.kind == .equal) {
+            if (!std.mem.eql(u8, op.text, op.new)) try out.append(arena, .{ .start = at, .end = at + op.text.len, .text = op.new });
+            at += op.text.len;
+            new_at += op.new.len;
             i += 1;
             continue;
         }
@@ -64,26 +69,55 @@ pub fn edits(arena: std.mem.Allocator, old: []const u8, new: []const u8) ![]cons
     return out.items;
 }
 
-/// every line of `a` and `b` as equal, deleted or inserted
-fn script(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8) ![]const Op {
+/// `old` with `changes` from `edits` made
+pub fn apply(arena: std.mem.Allocator, old: []const u8, changes: []const Edit) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var at: usize = 0;
+    for (changes) |c| {
+        try out.appendSlice(arena, old[at..c.start]);
+        try out.appendSlice(arena, c.text);
+        at = c.end;
+    }
+    try out.appendSlice(arena, old[at..]);
+    return out.items;
+}
+
+/// every line of `a` and `b` as equal, deleted or inserted; `loose` lets
+/// lines that differ only in whitespace pair up as equal
+fn script(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8, loose: bool) ![]const Op {
     var pre: usize = 0;
-    while (pre < a.len and pre < b.len and std.mem.eql(u8, a[pre], b[pre])) pre += 1;
+    while (pre < a.len and pre < b.len and same(loose, a[pre], b[pre])) pre += 1;
     var suf: usize = 0;
     while (suf < a.len - pre and suf < b.len - pre and
-        std.mem.eql(u8, a[a.len - 1 - suf], b[b.len - 1 - suf])) suf += 1;
+        same(loose, a[a.len - 1 - suf], b[b.len - 1 - suf])) suf += 1;
     const mid_a = a[pre .. a.len - suf];
     const mid_b = b[pre .. b.len - suf];
 
     var ops: std.ArrayList(Op) = .empty;
-    for (a[0..pre]) |line| try ops.append(arena, .{ .kind = .equal, .text = line });
+    for (a[0..pre], b[0..pre]) |x, y| try ops.append(arena, .{ .kind = .equal, .text = x, .new = y });
     // a full reformat:
     //   every line differs, no table needed
     if (mid_a.len * mid_b.len > max_cells) {
         for (mid_a) |line| try ops.append(arena, .{ .kind = .del, .text = line });
         for (mid_b) |line| try ops.append(arena, .{ .kind = .ins, .text = line });
-    } else try ops.appendSlice(arena, try lcs(arena, mid_a, mid_b));
-    for (a[a.len - suf ..]) |line| try ops.append(arena, .{ .kind = .equal, .text = line });
+    } else try ops.appendSlice(arena, try lcs(arena, mid_a, mid_b, loose));
+    for (a[a.len - suf ..], b[b.len - suf ..]) |x, y| try ops.append(arena, .{ .kind = .equal, .text = x, .new = y });
     return ops.items;
+}
+
+/// `loose` skips whitespace, so a reindented or respaced line still matches
+fn same(loose: bool, x: []const u8, y: []const u8) bool {
+    if (!loose) return std.mem.eql(u8, x, y);
+    var i: usize = 0;
+    var j: usize = 0;
+    while (true) {
+        while (i < x.len and std.ascii.isWhitespace(x[i])) i += 1;
+        while (j < y.len and std.ascii.isWhitespace(y[j])) j += 1;
+        if (i == x.len or j == y.len) return i == x.len and j == y.len;
+        if (x[i] != y[j]) return false;
+        i += 1;
+        j += 1;
+    }
 }
 
 /// hunks with `context` lines around each change, nearby changes merged
@@ -165,7 +199,7 @@ fn split(arena: std.mem.Allocator, text: []const u8, keep_newline: bool) ![]cons
 }
 
 /// lcs of lines, backtracked into edit script
-fn lcs(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8) ![]const Op {
+fn lcs(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8, loose: bool) ![]const Op {
     // i have no idea what this function does anymore
     const w = b.len + 1;
     const table = try arena.alloc(u32, (a.len + 1) * w);
@@ -173,7 +207,7 @@ fn lcs(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8) !
     @memset(table, 0);
     for (1..a.len + 1) |i| {
         for (1..b.len + 1) |j| {
-            table[i * w + j] = if (std.mem.eql(u8, a[i - 1], b[j - 1]))
+            table[i * w + j] = if (same(loose, a[i - 1], b[j - 1]))
                 table[(i - 1) * w + (j - 1)] + 1
             else
                 @max(table[(i - 1) * w + j], table[i * w + (j - 1)]);
@@ -185,8 +219,8 @@ fn lcs(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8) !
     var j = b.len;
 
     while (i > 0 or j > 0) {
-        if (i > 0 and j > 0 and std.mem.eql(u8, a[i - 1], b[j - 1])) {
-            try ops.append(arena, .{ .kind = .equal, .text = a[i - 1] });
+        if (i > 0 and j > 0 and same(loose, a[i - 1], b[j - 1])) {
+            try ops.append(arena, .{ .kind = .equal, .text = a[i - 1], .new = b[j - 1] });
             i -= 1;
             j -= 1;
         } else if (j > 0 and (i == 0 or table[i * w + (j - 1)] >= table[(i - 1) * w + j])) {
@@ -218,24 +252,20 @@ test "edits" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const old = "a\nb\nc\nd\ne";
-    const new = "a\nB\nc\nd\ne\nf\n";
-    const got = try edits(arena, old, new);
-    try testing.expectEqual(2, got.len);
-    try testing.expectEqual(.{ 2, 4 }, .{ got[0].start, got[0].end });
-    try testing.expectEqualStrings("B\n", got[0].text);
-    try testing.expectEqual(.{ 8, 9 }, .{ got[1].start, got[1].end });
-    try testing.expectEqualStrings("e\nf\n", got[1].text);
-
-    // applied back to front, they rebuild `new`
-    var buf: std.ArrayList(u8) = .empty;
-    try buf.appendSlice(arena, old);
-    var i = got.len;
-    while (i > 0) {
-        i -= 1;
-        try buf.replaceRange(arena, got[i].start, got[i].end - got[i].start, got[i].text);
+    const Want = struct { usize, usize, []const u8 };
+    const cases = [_]struct { old: []const u8, new: []const u8, want: []const Want }{
+        .{ .old = "a\nb\nc\nd\ne", .new = "a\nB\nc\nd\ne\nf\n", .want = &.{ .{ 2, 4, "B\n" }, .{ 8, 9, "e\n" }, .{ 9, 9, "f\n" } } },
+        // a reindented line pairs with its old self, so each is its own edit
+        .{ .old = "f do\nb\nc\nend\n", .new = "f do\n  b\n  c\nend\n", .want = &.{ .{ 5, 7, "  b\n" }, .{ 7, 9, "  c\n" } } },
+        .{ .old = "a\n", .new = "a\n", .want = &.{} },
+    };
+    for (cases) |c| {
+        const got = try edits(arena, c.old, c.new);
+        try testing.expectEqual(c.want.len, got.len);
+        for (c.want, got) |w, g| {
+            try testing.expectEqual(.{ w[0], w[1] }, .{ g.start, g.end });
+            try testing.expectEqualStrings(w[2], g.text);
+        }
+        try testing.expectEqualStrings(c.new, try apply(arena, c.old, got));
     }
-    try testing.expectEqualStrings(new, buf.items);
-
-    try testing.expectEqual(0, (try edits(arena, old, old)).len);
 }
