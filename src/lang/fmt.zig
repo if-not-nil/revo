@@ -37,10 +37,10 @@
 //! [x] - braces hug what they hold: `{ a = 1 }` -> `{a = 1}`, `{ }` -> `{}`
 //!      (`Cpp11BracedListStyle`, `SpaceInEmptyBlock`)
 //! [x] - align trailing comments on consecutive lines (`AlignTrailingComments`)
+//! [x] - lsp sends only the changed lines from `revo.diff`, so the cursor and
+//!      undo stay put (`-cursor`, replacements)
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
 //! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
-//! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
-//!      minimal edits from `revo.diff` (`-cursor`, replacements)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0

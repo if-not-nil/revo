@@ -17,6 +17,7 @@ from lsprotocol.types import (
     DidOpenTextDocumentParams,
     DocumentFormattingParams,
     DocumentSymbolParams,
+    FormattingOptions,
     HoverParams,
     InlayHintParams,
     InitializeParams,
@@ -981,6 +982,33 @@ async def test_rename(client: LanguageClient):
     assert result is not None, "rename returned None"
     # should have changes with at least the current file
     assert result.changes is not None, "expected changes in workspace edit"
+
+
+FMT_URI = "file:///test/fmt.rv"
+FMT_TEXT = "let x=1\nlet y = 2\nlet z = 3\nlet w=4\n"
+
+
+@pytest.mark.asyncio(loop_scope="module")
+async def test_formatting_edits_changed_lines(client: LanguageClient):
+    """formatting edits only the lines that change, so the cursor stays put"""
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(
+                uri=FMT_URI, language_id="revo", version=1, text=FMT_TEXT,
+            )
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+    edits = await client.text_document_formatting_async(
+        params=DocumentFormattingParams(
+            text_document=TextDocumentIdentifier(uri=FMT_URI),
+            options=FormattingOptions(tab_size=2, insert_spaces=True),
+        ),
+    )
+    got = [(e.range.start.line, e.range.start.character,
+            e.range.end.line, e.range.end.character, e.new_text) for e in edits]
+    assert got == [(0, 0, 1, 0, "let x = 1\n"), (3, 0, 4, 0, "let w = 4\n")]
 
 
 @pytest.mark.skip(reason="TODO")

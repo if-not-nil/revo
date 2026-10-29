@@ -1,8 +1,7 @@
-//! super small line diff for `revo fmt --diff`
+//! super small line diff for `revo fmt --diff` and the lsp's format edits
 //! , exact (lcs) for small edits, one coarse hunk when the whole file
 //!   changed, which is the common case for a reformat
 //!
-//! probably gonna reuse it somewhere question mark
 //! i have no idea what any of this does anymore
 
 const std = @import("std");
@@ -26,45 +25,65 @@ pub fn write(out: *std.Io.Writer, name: []const u8, old: []const u8, new: []cons
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const a = try split(arena, old);
-    const b = try split(arena, new);
+    try out.print("--- {s}\n+++ {s}\n", .{ name, name });
+    try hunks(out, try script(arena, try split(arena, old, false), try split(arena, new, false)), 1);
+}
 
+/// `old[start..end]` becomes `text`, a slice of `new`
+pub const Edit = struct {
+    start: usize,
+    end: usize,
+    text: []const u8,
+};
+
+/// the changed runs of lines that turn `old` into `new`, in order and
+/// apart, for an editor that should keep its cursor and undo history
+pub fn edits(arena: std.mem.Allocator, old: []const u8, new: []const u8) ![]const Edit {
+    // lines keep their `\n`, so a missing last newline is a change too
+    const ops = try script(arena, try split(arena, old, true), try split(arena, new, true));
+    var out: std.ArrayList(Edit) = .empty;
+    var at: usize = 0;
+    var new_at: usize = 0;
+    var i: usize = 0;
+    while (i < ops.len) {
+        if (ops[i].kind == .equal) {
+            at += ops[i].text.len;
+            new_at += ops[i].text.len;
+            i += 1;
+            continue;
+        }
+        const start = at;
+        const new_start = new_at;
+        while (i < ops.len and ops[i].kind != .equal) : (i += 1) switch (ops[i].kind) {
+            .del => at += ops[i].text.len,
+            .ins => new_at += ops[i].text.len,
+            .equal => unreachable,
+        };
+        try out.append(arena, .{ .start = start, .end = at, .text = new[new_start..new_at] });
+    }
+    return out.items;
+}
+
+/// every line of `a` and `b` as equal, deleted or inserted
+fn script(arena: std.mem.Allocator, a: []const []const u8, b: []const []const u8) ![]const Op {
     var pre: usize = 0;
     while (pre < a.len and pre < b.len and std.mem.eql(u8, a[pre], b[pre])) pre += 1;
     var suf: usize = 0;
     while (suf < a.len - pre and suf < b.len - pre and
         std.mem.eql(u8, a[a.len - 1 - suf], b[b.len - 1 - suf])) suf += 1;
-
-    try out.print("--- {s}\n+++ {s}\n", .{ name, name });
     const mid_a = a[pre .. a.len - suf];
     const mid_b = b[pre .. b.len - suf];
-    // context pulled back from the trimmed ends, so hunks read like diff -u
-    const head = @min(context, pre);
-    const tail = @min(context, suf);
-    const start = pre - head + 1;
 
+    var ops: std.ArrayList(Op) = .empty;
+    for (a[0..pre]) |line| try ops.append(arena, .{ .kind = .equal, .text = line });
     // a full reformat:
     //   every line differs, no table needed
     if (mid_a.len * mid_b.len > max_cells) {
-        try out.print("@@ -{d},{d} +{d},{d} @@\n", .{
-            start,
-            head + mid_a.len + tail,
-            start,
-            head + mid_b.len + tail,
-        });
-        for (a[pre - head .. pre]) |line| try out.print(" {s}\n", .{line});
-        for (mid_a) |line| try out.print("-{s}\n", .{line});
-        for (mid_b) |line| try out.print("+{s}\n", .{line});
-        for (a[a.len - suf .. a.len - suf + tail]) |line| try out.print(" {s}\n", .{line});
-        return;
-    }
-
-    var ops: std.ArrayList(Op) = .empty;
-    for (a[pre - head .. pre]) |line| try ops.append(arena, .{ .kind = .equal, .text = line });
-    try ops.appendSlice(arena, try lcs(arena, mid_a, mid_b));
-    for (a[a.len - suf .. a.len - suf + tail]) |line| try ops.append(arena, .{ .kind = .equal, .text = line });
-
-    try hunks(out, ops.items, start);
+        for (mid_a) |line| try ops.append(arena, .{ .kind = .del, .text = line });
+        for (mid_b) |line| try ops.append(arena, .{ .kind = .ins, .text = line });
+    } else try ops.appendSlice(arena, try lcs(arena, mid_a, mid_b));
+    for (a[a.len - suf ..]) |line| try ops.append(arena, .{ .kind = .equal, .text = line });
+    return ops.items;
 }
 
 /// hunks with `context` lines around each change, nearby changes merged
@@ -132,14 +151,14 @@ fn hunks(out: *std.Io.Writer, ops: []const Op, start_line: usize) !void {
     }
 }
 
-/// split into lines
+/// split into lines, with or without their `\n`
 /// a final newline does not make an empty last line
-fn split(arena: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+fn split(arena: std.mem.Allocator, text: []const u8, keep_newline: bool) ![]const []const u8 {
     var out: std.ArrayList([]const u8) = .empty;
     var start: usize = 0;
     while (start < text.len) {
         const nl = std.mem.indexOfScalarPos(u8, text, start, '\n') orelse text.len;
-        try out.append(arena, text[start..nl]);
+        try out.append(arena, text[start..if (keep_newline) @min(nl + 1, text.len) else nl]);
         start = nl + 1;
     }
     return out.toOwnedSlice(arena);
@@ -192,4 +211,31 @@ test "diff" {
         "--- f.rv\n+++ f.rv\n@@ -1,4 +1,4 @@\n a\n-b\n+B\n c\n d\n",
         buf.written(),
     );
+}
+
+test "edits" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const old = "a\nb\nc\nd\ne";
+    const new = "a\nB\nc\nd\ne\nf\n";
+    const got = try edits(arena, old, new);
+    try testing.expectEqual(2, got.len);
+    try testing.expectEqual(.{ 2, 4 }, .{ got[0].start, got[0].end });
+    try testing.expectEqualStrings("B\n", got[0].text);
+    try testing.expectEqual(.{ 8, 9 }, .{ got[1].start, got[1].end });
+    try testing.expectEqualStrings("e\nf\n", got[1].text);
+
+    // applied back to front, they rebuild `new`
+    var buf: std.ArrayList(u8) = .empty;
+    try buf.appendSlice(arena, old);
+    var i = got.len;
+    while (i > 0) {
+        i -= 1;
+        try buf.replaceRange(arena, got[i].start, got[i].end - got[i].start, got[i].text);
+    }
+    try testing.expectEqualStrings(new, buf.items);
+
+    try testing.expectEqual(0, (try edits(arena, old, old)).len);
 }

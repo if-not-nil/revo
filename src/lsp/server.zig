@@ -597,15 +597,15 @@ const Handler = struct {
         const snap = h.ws.snapshot(file_id) orelse return null;
         const formatted = lang.fmt.format(arena, snap.text) catch return null;
 
-        if (std.mem.eql(u8, formatted, snap.text)) return &.{};
-        const edits = try arena.alloc(T.TextEdit, 1);
-
-        edits[0] = .{
+        // only the changed lines, so the cursor and undo history stay put
+        const changes = try revo.diff.edits(arena, snap.text, formatted);
+        const edits = try arena.alloc(T.TextEdit, changes.len);
+        for (changes, edits) |c, *e| e.* = .{
             .range = .{
-                .start = .{ .line = 0, .character = 0 },
-                .end = offsetToLspPos(snap.text, snap.text.len, h.enc),
+                .start = offsetToLspPos(snap.text, c.start, h.enc),
+                .end = offsetToLspPos(snap.text, c.end, h.enc),
             },
-            .newText = formatted,
+            .newText = c.text,
         };
         return edits;
     }
