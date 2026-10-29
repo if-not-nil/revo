@@ -7,8 +7,8 @@
 //!
 //! one test per rule right here check it out pretty sick right
 //!
-//! !- THOSE ITEMS WHERE FOUND USING AI CODING AGENTS -!
-//! !- BUT ALL THE CODE FOR THEM IS WRITEN BY ME(w0x7y) -!
+//! !- THOSE ITEMS WERE FOUND USING AI CODING AGENTS -!
+//! !- BUT ALL THE CODE FOR THEM IS WRITTEN BY ME(w0x7y) -!
 //! what is left todo:
 //!
 //! bugs - Finished
