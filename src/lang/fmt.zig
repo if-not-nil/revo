@@ -34,13 +34,13 @@
 //! [x] - strip trailing whitespace inside multi-line comments
 //! [x] - a blank line around top-level fns, methods, tests and suites
 //!      (`SeparateDefinitionBlocks`)
+//! [x] - braces hug what they hold: `{ a = 1 }` -> `{a = 1}`, `{ }` -> `{}`
+//!      (`Cpp11BracedListStyle`, `SpaceInEmptyBlock`)
 //! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
 //! [] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
 //! [] - lsp sends one whole-document edit, so the cursor and undo jump; send
 //!      minimal edits from `revo.diff` (`-cursor`, replacements)
 //! [] - align trailing comments on consecutive lines (`AlignTrailingComments`)
-//! [] - brace padding is kept as typed: `{a = 1 }`, `{ }` (`Cpp11BracedListStyle`,
-//!      `SpaceInEmptyBlock`)
 //! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
 //!      (clang always spaces binary operators); needs type vs expr context from the walk
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
@@ -98,6 +98,23 @@ test "formatter" {
             .src = "let a = - -1\nlet b = --1\nlet c = 2 - -1\n",
             .want = "let a = - -1\nlet b = - -1\nlet c = 2 - -1\n",
         },
+        .{ .name = "braces hug what they hold", .src =
+        \\let a = { x = 1 }
+        \\let e = { }
+        \\let n = { {a = 1}, { 2 } }
+        \\let g = { (x) }
+        \\let u = { -1 }
+        \\type R = { token: string }
+        \\
+        , .want =
+        \\let a = {x = 1}
+        \\let e = {}
+        \\let n = {{a = 1}, {2}}
+        \\let g = {(x)}
+        \\let u = {-1}
+        \\type R = {token: string}
+        \\
+        },
         .{ .name = "spacing stays put", .src =
         \\let r = fs.open("x")?:read()
         \\pub declare f = fn(a: any) -> !any/:Fail
@@ -109,9 +126,8 @@ test "formatter" {
         \\
         \\fn p(x) -> Point {x = x}
         \\
-        \\let a = { x = 1 }
         \\let b = {x = 2}
-        \\type R = { token: string }
+        \\type R = {token: string}
         \\pub declare json = {
         \\  encode: fn(value: any, ?pretty: bool) -> !string,
         \\}
@@ -1575,16 +1591,17 @@ fn separator(prev2: ?Item, p: Item, c: Item, next: ?Item) []const u8 {
     // unary `-`/`+` hug their operand, but not another sign (`- -1`, not `--1`)
     if (oneOf(p.kind, &.{ .minus, .plus }) and !oneOf(c.kind, &.{ .minus, .plus }) and
         (prev2 == null or !endsExpr(prev2.?.kind))) return "";
+    // braces hug what they hold: `{a = 1}`, `{token: string}`, `{}`, `{(x)}`
+    if (p.kind == .lsquiggly or c.kind == .rsquiggly) return "";
     // `f(x)` is a call, `f (x)` is not (also `f<T>(x)`)
     if (c.kind == .lparen) return gap;
     // `?` hugs a postfix target (`x?:read()`) but spaces in prefix
     // positions (`, ?opts`, `a: ?number`)
-    if (c.kind == .huh) return if (oneOf(p.kind, &.{ .lparen, .lbracket, .lsquiggly }) or endsExpr(p.kind)) "" else " ";
-    // braces keep their padding (`{a = 1}`, `{ token: string }`), and
+    if (c.kind == .huh) return if (oneOf(p.kind, &.{ .lparen, .lbracket }) or endsExpr(p.kind)) "" else " ";
     // `/ < > |` keep their gaps: tight in types (`!any/:Fail`, `make<number>`,
     // `number|:nil`), spaced as operators
-    if (oneOf(p.kind, &.{ .lsquiggly, .slash, .lt, .gt, .bar }) or
-        oneOf(c.kind, &.{ .rsquiggly, .slash, .lt, .gt, .bar })) return gap;
+    if (oneOf(p.kind, &.{ .slash, .lt, .gt, .bar }) or
+        oneOf(c.kind, &.{ .slash, .lt, .gt, .bar })) return gap;
 
     if (oneOf(c.kind, &.{ .comma, .semicolon, .rparen, .rbracket, .dot, .dotdot, .colon })) return "";
     if (oneOf(p.kind, &.{ .lparen, .lbracket, .dot, .dotdot, .huh, .bang })) return "";
