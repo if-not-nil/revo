@@ -47,13 +47,13 @@
 //! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
 //!
 //! optimizations
+//! [x] - synth parens go in front and the whole item list gets sorted; insert
+//!      them in place during the token loop
 //! [] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
 //!      every floor for every line (twice), `has` scans `ends`/`drops`/`cuts`
 //!      per token; sort floors and sweep, binary search the sets
 //! [] - cli `fmt` parses, then `format` lexes + parses, then parses its output:
 //!      3 parses per file; let `format` hand back the parse failure instead
-//! [] - synth parens go in front and the whole item list gets sorted; insert
-//!      them in place during the token loop
 test "formatter" {
     const cases = [_]Case{
         // spacing
@@ -1329,25 +1329,32 @@ fn has(set: []const usize, x: usize) bool {
 fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOutput, w: *const Walk) ![]Item {
     var items: std.ArrayList(Item) = .empty;
 
-    // synthetic parens go in first and are sorted into place at the end
+    // synthetic parens, in source order, go in as the loop reaches them,
+    // before any item they share a start with
+    var synth: std.ArrayList(Item) = .empty;
     for (w.parens.items) |p| {
-        try items.append(arena, .{ .text = "(", .kind = .lparen, .line = p.open_line, .start = p.open_at, .space_before = true, .synth = true });
-        try items.append(arena, .{ .text = ")", .kind = .rparen, .line = p.close_line, .start = p.close_at, .synth = true });
+        try synth.append(arena, .{ .text = "(", .kind = .lparen, .line = p.open_line, .start = p.open_at, .space_before = true, .synth = true });
+        try synth.append(arena, .{ .text = ")", .kind = .rparen, .line = p.close_line, .start = p.close_at, .synth = true });
     }
+    std.mem.sort(Item, synth.items, {}, lessItem);
+    var next: usize = 0;
 
     var i: usize = 0;
     // a dropped paren hands its gap on, so `if ((x)) 4` keeps `if (`
     var dropped_gap = false;
     while (i < lexed.tokens.len) {
         const tok = lexed.tokens[i];
-        for (lexed.leadingTrivia(tok)) |c| try items.append(arena, .{
-            .text = source[c.start..c.end],
-            .kind = c.type,
-            .line = c.line,
-            .start = c.start,
-            .src_col = srcCol(source, c.start),
-            .trivia = true,
-        });
+        for (lexed.leadingTrivia(tok)) |c| {
+            while (next < synth.items.len and synth.items[next].start <= c.start) : (next += 1) try items.append(arena, synth.items[next]);
+            try items.append(arena, .{
+                .text = source[c.start..c.end],
+                .kind = c.type,
+                .line = c.line,
+                .start = c.start,
+                .src_col = srcCol(source, c.start),
+                .trivia = true,
+            });
+        }
         if (tok.type == .eof) break;
         i += 1;
         if (has(w.drops.items, tok.start)) {
@@ -1373,6 +1380,7 @@ fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOu
         // only the ones that close a `do` block stay closers
         if (kind == .kw_end and !has(w.ends.items, tok.start)) kind = .ident;
 
+        while (next < synth.items.len and synth.items[next].start <= tok.start) : (next += 1) try items.append(arena, synth.items[next]);
         try items.append(arena, .{
             .text = source[tok.start..end],
             .kind = kind,
@@ -1383,13 +1391,13 @@ fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOu
         });
         dropped_gap = false;
     }
-    // stable, so a synthetic paren lands before the token it sits on
-    std.mem.sort(Item, items.items, {}, lessItem);
+    try items.appendSlice(arena, synth.items[next..]);
     return items.items;
 }
 
+/// stable, so parens on the same spot keep the walk's order
 fn lessItem(_: void, a: Item, b: Item) bool {
-    return a.start < b.start or (a.start == b.start and a.synth and !b.synth);
+    return a.start < b.start;
 }
 
 /// display column, not bytes: `é` is 1 wide, `日` 2, a tab snaps to `diagnostic`'s stops
