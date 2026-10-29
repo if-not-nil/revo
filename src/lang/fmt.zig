@@ -447,6 +447,42 @@ test "formatter" {
         \\end
         \\
         },
+        .{ .name = "a do past a wrapped condition's bracket hangs off the statement", .src =
+        \\while (a and
+        \\b) do
+        \\print(1)
+        \\end
+        \\if a and
+        \\f(b,
+        \\c) do
+        \\print(1)
+        \\end
+        \\fn g() do
+        \\if (a ==
+        \\b) == c do
+        \\print(1)
+        \\end
+        \\end
+        \\
+        , .want =
+        \\while (a and
+        \\    b) do
+        \\  print(1)
+        \\end
+        \\if a and
+        \\  f(b,
+        \\    c) do
+        \\  print(1)
+        \\end
+        \\
+        \\fn g() do
+        \\  if (a ==
+        \\      b) == c do
+        \\    print(1)
+        \\  end
+        \\end
+        \\
+        },
         .{ .name = "alignment counts display columns", .src =
         \\let t = {a = "é", c = 1,
         \\                  b = 2}
@@ -646,6 +682,27 @@ test "formatter" {
         \\while (i < 10) i += 1
         \\while i < 10 do
         \\  i += 1
+        \\end
+        \\
+        },
+        .{ .name = "a while condition keeps the parens it cant parse without", .src =
+        \\while ((a and b)) do
+        \\end
+        \\while (a or b) do
+        \\end
+        \\while (x |> f(_)) do
+        \\end
+        \\while ((a == b)) do
+        \\end
+        \\
+        , .want =
+        \\while (a and b) do
+        \\end
+        \\while (a or b) do
+        \\end
+        \\while (x |> f(_)) do
+        \\end
+        \\while a == b do
         \\end
         \\
         },
@@ -1212,12 +1269,12 @@ const Walk = struct {
                     if (i.else_) |e| if (e.kind != .if_expr or e.span.line != t.line) self.body(t.start, e);
                     self.pin(at, t.start);
                 }
-                self.condParens(i.cond, i.then);
+                self.condParens(i.cond, i.then, false);
                 self.condDo(i.then);
             },
             .while_loop => |w| {
                 self.body(at, w.body);
-                self.condParens(w.pred, w.body);
+                self.condParens(w.pred, w.body, true);
                 self.condDo(w.body);
             },
             .for_loop => |f| {
@@ -1266,8 +1323,9 @@ const Walk = struct {
     }
 
     /// `if (cond) 4` wraps, `if cond do` unwraps: parens delimit an
-    /// inline body, a `do` block already does
-    fn condParens(self: *Walk, cond: *const cst.CstNode, body_node: *const cst.CstNode) void {
+    /// inline body, a `do` block already does; a bare `while` condition stops
+    /// at `and`/`or`/`orelse`/`|>`/`=`, so those keep a pair
+    fn condParens(self: *Walk, cond: *const cst.CstNode, body_node: *const cst.CstNode, is_while: bool) void {
         const do_body = body_node.kind == .do_block;
         if (!do_body and cond.kind != .paren) {
             self.push(&self.parens, .{
@@ -1283,7 +1341,11 @@ const Walk = struct {
         while (cur.kind == .paren) {
             const p = cur.kind.paren;
             const inner = p.expr orelse return;
-            if (!do_body and inner.kind != .paren) return;
+            const loose = switch (inner.kind) {
+                .logical, .pipe, .assign, .compound => true,
+                else => false,
+            };
+            if (inner.kind != .paren and (!do_body or (is_while and loose))) return;
             self.push(&self.drops, p.lparen_tok.start);
             self.push(&self.drops, p.rparen_tok.start);
             cur = inner;
@@ -1563,8 +1625,13 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
 
             if (isOpener(it.kind)) {
                 // a `do` that ends a wrapped condition hangs its body off the
-                // statement; any other `do` (`|> fn(c) do`) hangs off its own line
-                const from = if (continued and stack.items.len <= depth and has(cond_dos, it.start)) stmt_col else hang;
+                // statement, even past a `)` closed here (`while (a and\n  b) do`);
+                // any other `do` (`|> fn(c) do`) hangs off its own line
+                const closed = stack.items.len < depth;
+                const from = if ((continued or closed) and stack.items.len <= depth and has(cond_dos, it.start))
+                    headCol(heads.items, stack.items.len) orelse stmt_col
+                else
+                    hang;
                 const goes_on = it.kind != .kw_do and firstCodeIndex(slice[idx + 1 ..]) != null;
                 try stack.append(arena, .{
                     .col = from + indent_cols,
@@ -1607,6 +1674,17 @@ fn inferCol(anchor: Line, from: usize, src_col: u32) ?u32 {
         col += @intCast(diagnostic.displayWidth(it.text, col));
         prev2 = prev;
         prev = it;
+    }
+    return null;
+}
+
+/// col of the statement that started at bracket `depth`, if one did
+fn headCol(heads: []const Head, depth: usize) ?u32 {
+    var i = heads.len;
+    while (i > 0) {
+        i -= 1;
+        if (heads[i].depth == depth) return heads[i].col;
+        if (heads[i].depth < depth) return null;
     }
     return null;
 }
