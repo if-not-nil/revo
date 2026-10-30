@@ -135,7 +135,7 @@ fn parse_bool(s, i) do
     {:ok, {4, :true}}
   else if (s:sub(i, 5) == "false")
     {:ok, {5, :false}}
-    else {:err, "expected boolean"}
+  else {:err, "expected boolean"}
 end
 
 

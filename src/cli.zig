@@ -47,6 +47,7 @@ else
     \\       fmt script.rv dir/           format that in place
     \\       fmt --check .                list files whose formatting differs
     \\       fmt --diff .                 print a diff of the changes
+    \\       fmt --lines 10:20 script.rv  format only lines 10 to 20
     \\       fmt - < script.rv            format stdin to stdout
     \\
 ++ (if (lsp_enabled)
@@ -84,6 +85,8 @@ const Config = struct {
     force_splice: bool = false,
     check: bool = false,
     diff: bool = false,
+    /// `fmt --lines first:last`, 1-based and inclusive
+    lines: ?[2]usize = null,
     threads: usize = 1,
     argv: []const [:0]const u8 = &.{},
 };
@@ -181,7 +184,7 @@ fn runMain(init: std.process.Init) !void {
         return try docgen.Cli.run(init, init.gpa, arena, config.script_path, config.doc_format == .html, config.force_splice);
     }
     if (config.mode == .format) {
-        return try formatPaths(init, init.gpa, arena, config.argv, config.check, config.diff);
+        return try formatPaths(init, init.gpa, arena, config.argv, config.check, config.diff, config.lines);
     }
 
     // script path or stdin
@@ -420,6 +423,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         .{ .name = "splice", .kind = .boolean, .description = "splice output into markdown piped on stdin (doc)" },
         .{ .name = "check", .kind = .boolean, .description = "list files whose formatting differs, dont write (fmt)" },
         .{ .name = "diff", .kind = .boolean, .description = "print a unified diff, dont write (fmt)" },
+        .{ .name = "lines", .kind = .string, .description = "only format lines first:last, 1-based (fmt)" },
         .{ .name = "threads", .kind = .string, .description = "worker threads (default 1, single-threaded without async)" },
         .{ .name = "help", .short = 'h', .kind = .boolean, .description = "show this help message" },
         // terminal positional:
@@ -538,6 +542,13 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         if (config.threads == 0) config.threads = 1;
         if (config.threads > 1 and !revo.can_async)
             std.debug.print("warning: --threads={d} not supported on this platform, running single-threaded\n", .{config.threads});
+    }
+
+    if (ap.cliArg(&arg_list, "lines").value) |v| { // --lines
+        config.lines = parseLines(v) orelse {
+            printError(init, "--lines takes first:last, 1-based, got '{s}'", .{v});
+            return error.InvalidArgs;
+        };
     }
 
     // compile mode: steal the second positional as output path
@@ -827,6 +838,7 @@ fn formatPaths(
     paths: []const [:0]const u8,
     check: bool,
     diff: bool,
+    lines: ?[2]usize,
 ) !void {
     var files: std.ArrayList([]const u8) = .empty;
     defer files.deinit(arena);
@@ -843,6 +855,10 @@ fn formatPaths(
         }
     }
     std.mem.sort([]const u8, files.items, {}, lessStr);
+    if (lines != null and files.items.len != 1) {
+        printError(init, "--lines needs exactly one file", .{});
+        return error.InvalidArgs;
+    }
 
     var failed = false;
     var changed = false;
@@ -868,19 +884,17 @@ fn formatPaths(
             continue;
         };
 
-        // refuse to touch anything we cant parse; show the real diagnostic
-        switch (try revo.lang.parse(file_alloc, .{ .name = path, .text = source }, .{})) {
-            .ok => {},
-            .err => |failure| {
-                revo.printBuildError(gpa, .{ .name = path, .text = source }, .{ .parse = failure }, hostColor(init));
-                failed = true;
-                continue;
-            },
-        }
-
-        const formatted = revo.lang.fmt.format(file_alloc, source) catch |err| {
-            printError(init, "formatting {s} - {}", .{ path, err });
+        const formatted = formatSource(file_alloc, source, lines) catch |err| {
             failed = true;
+            // `format` refuses anything it cant parse; parse again only to show the real diagnostic
+            if (err == error.InvalidSource) switch (try revo.lang.parse(file_alloc, .{ .name = path, .text = source }, .{})) {
+                .ok => {},
+                .err => |failure| {
+                    revo.printBuildError(gpa, .{ .name = path, .text = source }, .{ .parse = failure }, hostColor(init));
+                    continue;
+                },
+            };
+            printError(init, "formatting {s} - {}", .{ path, err });
             continue;
         };
 
@@ -926,6 +940,20 @@ fn formatPaths(
 
     if (failed) return error.CompilationError;
     if (check and changed) return error.FormatNeeded;
+}
+
+/// all of `source` formatted, or only `lines` of it
+fn formatSource(arena: Allocator, source: []const u8, lines: ?[2]usize) ![]const u8 {
+    const l = lines orelse return revo.lang.fmt.format(arena, source);
+    return revo.diff.apply(arena, source, try revo.lang.fmt.formatLines(arena, source, l[0], l[1]));
+}
+
+/// `10:20` -> `{10, 20}`; null unless `1 <= first <= last`
+fn parseLines(v: []const u8) ?[2]usize {
+    const colon = std.mem.indexOfScalar(u8, v, ':') orelse return null;
+    const first = std.fmt.parseUnsigned(usize, v[0..colon], 10) catch return null;
+    const last = std.fmt.parseUnsigned(usize, v[colon + 1 ..], 10) catch return null;
+    return if (first >= 1 and first <= last) .{ first, last } else null;
 }
 
 pub fn printRuntimeFailure(init: std.process.Init, failure: revo.RunFailure, source: []const u8) void {

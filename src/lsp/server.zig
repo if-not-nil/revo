@@ -135,6 +135,7 @@ const Handler = struct {
             .renameProvider = .{ .rename_options = .{ .prepareProvider = true } },
             .codeActionProvider = .{ .bool = true },
             .documentFormattingProvider = .{ .bool = true },
+            .documentRangeFormattingProvider = .{ .bool = true },
             .inlayHintProvider = .{ .inlay_hint_options = .{} },
             .signatureHelpProvider = T.SignatureHelp.Options{
                 .triggerCharacters = &.{},
@@ -592,22 +593,27 @@ const Handler = struct {
         return h.formatDocument(arena, params.textDocument.uri);
     }
 
+    pub fn @"textDocument/rangeFormatting"(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        params: T.document_range_formatting.Params,
+    ) !?[]const T.TextEdit {
+        const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        const r = params.range;
+        // a selection that ends at the start of a line leaves that line out
+        const last = if (r.end.character == 0 and r.end.line > r.start.line) r.end.line else r.end.line + 1;
+        const changes = lang.fmt.formatLines(arena, snap.text, r.start.line + 1, last) catch return null;
+        return try textEdits(arena, snap.text, changes, h.enc);
+    }
+
     fn formatDocument(h: *Handler, arena: std.mem.Allocator, uri: []const u8) !?[]const T.TextEdit {
         const file_id = h.uri_to_file.get(uri) orelse return null;
         const snap = h.ws.snapshot(file_id) orelse return null;
         const formatted = lang.fmt.format(arena, snap.text) catch return null;
 
-        if (std.mem.eql(u8, formatted, snap.text)) return &.{};
-        const edits = try arena.alloc(T.TextEdit, 1);
-
-        edits[0] = .{
-            .range = .{
-                .start = .{ .line = 0, .character = 0 },
-                .end = offsetToLspPos(snap.text, snap.text.len, h.enc),
-            },
-            .newText = formatted,
-        };
-        return edits;
+        // only the changed lines, so the cursor and undo history stay put
+        return try textEdits(arena, snap.text, try revo.diff.edits(arena, snap.text, formatted), h.enc);
     }
 
     /// return type inlay hints for visible bindings
@@ -850,6 +856,19 @@ fn reportToDiags(arena: std.mem.Allocator, report: lang.diagnostic.Report, uri: 
         }
     }
     return out.toOwnedSlice(arena);
+}
+
+/// `changes` to `text` as lsp edits
+fn textEdits(arena: std.mem.Allocator, text: []const u8, changes: []const revo.diff.Edit, enc: lsp.offsets.Encoding) ![]const T.TextEdit {
+    const edits = try arena.alloc(T.TextEdit, changes.len);
+    for (changes, edits) |c, *e| e.* = .{
+        .range = .{
+            .start = offsetToLspPos(text, c.start, enc),
+            .end = offsetToLspPos(text, c.end, enc),
+        },
+        .newText = c.text,
+    };
+    return edits;
 }
 
 /// convert a byte offset to 9-based pos in the negotiated encoding
