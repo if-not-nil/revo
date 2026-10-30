@@ -407,6 +407,11 @@ test "formatter" {
             .src = "let x = 1 # c \t\n## a  \n  \t\n  b \n##\n#* d  \r\n *#\nfn g() 1\n",
             .want = "let x = 1  # c\n\n## a\n\n  b\n##\n#* d\n *#\nfn g() 1\n",
         },
+        .{
+            .name = "a doc opener line can end in whitespace",
+            .src = "#! \na\n!#\n#* \t\nd\n*#\nfn g() 1\n",
+            .want = "#!\na\n!#\n#*\nd\n*#\nfn g() 1\n",
+        },
         .{ .name = "line comments get a space after the #", .src =
         \\#note
         \\#é

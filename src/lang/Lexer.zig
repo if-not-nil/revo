@@ -582,7 +582,7 @@ fn lexTriviaComment(self: *Lexer) std.mem.Allocator.Error!void {
         var body_start = self.pos;
         while (!self.atEnd()) {
             if (self.peek() == '!' and self.peekN(1) == '#') {
-                if (body_start < self.pos and self.source[body_start] == '\n') body_start += 1;
+                body_start = pastBlankLine(self.source, body_start, self.pos);
                 const body_end = self.pos;
                 _ = self.advance();
                 _ = self.advance();
@@ -629,6 +629,14 @@ fn lexTriviaComment(self: *Lexer) std.mem.Allocator.Error!void {
     self.saw_space = true;
 }
 
+/// past the rest of an opener's line when it is blank, so `#* ` and `#*`
+/// read the same once a formatter strips the trailing space
+fn pastBlankLine(source: []const u8, start: usize, end: usize) usize {
+    var i = start;
+    while (i < end and (source[i] == ' ' or source[i] == '\t' or source[i] == '\r')) i += 1;
+    return if (i < end and source[i] == '\n') i + 1 else start;
+}
+
 /// `#` in significant position, only `#*...*#` arrives here
 fn lexHashSignificant(self: *Lexer, m: Mark) std.mem.Allocator.Error!Token {
     // m already consumed `#`; pos is after it
@@ -637,7 +645,7 @@ fn lexHashSignificant(self: *Lexer, m: Mark) std.mem.Allocator.Error!Token {
         var body_start = self.pos;
         while (!self.atEnd()) {
             if (self.peek() == '*' and self.peekN(1) == '#') {
-                if (body_start < self.pos and self.source[body_start] == '\n') body_start += 1;
+                body_start = pastBlankLine(self.source, body_start, self.pos);
                 const body_end = self.pos;
                 _ = self.advance();
                 _ = self.advance();
@@ -1311,6 +1319,13 @@ test "unterminated comment spans reach eof" {
     try std.testing.expectEqual(LexError.Kind.UnterminatedComment, e.kind);
     try std.testing.expectEqual(@as(usize, 0), e.span.start);
     try std.testing.expectEqual(@as(usize, 15), e.span.end);
+}
+
+test "a blank rest of the opener line is not doc text" {
+    const out = try lexAll(std.testing.allocator, "#! \t\na\n!#\n#* \r\nb\n*#\nlet x = 1");
+    defer freeLexOutput(std.testing.allocator, out);
+    try std.testing.expectEqualStrings("a\n", out.trivia[0].text);
+    try std.testing.expectEqualStrings("b\n", out.tokens[0].text);
 }
 
 test "span merge keeps earliest start regardless argument order" {
