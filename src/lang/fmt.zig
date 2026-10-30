@@ -49,9 +49,10 @@
 //! optimizations
 //! [x] - synth parens go in front and the whole item list gets sorted; insert
 //!      them in place during the token loop
-//! [] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
+//! [x] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
 //!      every floor for every line (twice), `has` scans `ends`/`drops`/`cuts`
-//!      per token; sort floors and sweep, binary search the sets
+//!      and `sameTokens` every added paren per token; sort floors and sweep,
+//!      binary search the sets
 //! [] - cli `fmt` parses, then `format` lexes + parses, then parses its output:
 //!      3 parses per file; let `format` hand back the parse failure instead
 test "formatter" {
@@ -1081,6 +1082,9 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
     var walk: Walk = .{ .alloc = arena, .source = source };
     walk.visit(root);
     if (walk.failed) return error.OutOfMemory;
+    // sorted, so `has` can binary search them
+    for ([_][]usize{ walk.drops.items, walk.ends.items, walk.cuts.items, walk.seps.items, walk.cond_dos.items }) |set|
+        std.mem.sort(usize, set, {}, std.sort.asc(usize));
 
     const items = try collectItems(arena, source, lexed, &walk);
     const lines = try splitLines(arena, items, walk.cuts.items);
@@ -1164,11 +1168,22 @@ fn sameTokens(arena: std.mem.Allocator, lexed: Lexer.LexOutput, w: *const Walk, 
 
     const open: Lexer.Token = .{ .type = .lparen, .text = "(", .line = 0, .column = 0, .start = 0, .end = 0, .space_before = true };
     const close: Lexer.Token = .{ .type = .rparen, .text = ")", .line = 0, .column = 0, .start = 0, .end = 0 };
+    // the added parens, sorted to sweep alongside the tokens
+    const opens = try arena.alloc(usize, w.parens.items.len);
+    const closes = try arena.alloc(usize, w.parens.items.len);
+    for (w.parens.items, opens, closes) |p, *o, *c| {
+        o.* = p.open_at;
+        c.* = p.close_at;
+    }
+    std.mem.sort(usize, opens, {}, std.sort.asc(usize));
+    std.mem.sort(usize, closes, {}, std.sort.asc(usize));
+    var o: usize = 0;
+    var c: usize = 0;
     var want: std.ArrayList(Lexer.Token) = .empty;
     for (lexed.tokens) |tok| {
-        for (w.parens.items) |p| if (p.open_at == tok.start) try want.append(arena, open);
+        while (o < opens.len and opens[o] <= tok.start) : (o += 1) if (opens[o] == tok.start) try want.append(arena, open);
         if (!has(w.drops.items, tok.start)) try want.append(arena, tok);
-        for (w.parens.items) |p| if (p.close_at == tok.end) try want.append(arena, close);
+        while (c < closes.len and closes[c] <= tok.end) : (c += 1) if (closes[c] == tok.end) try want.append(arena, close);
     }
     if (got.len != want.items.len) return false;
 
@@ -1379,8 +1394,13 @@ fn firstOffset(node: *const cst.CstNode) usize {
     return at;
 }
 
+/// `set` is sorted
 fn has(set: []const usize, x: usize) bool {
-    return std.mem.indexOfScalar(usize, set, x) != null;
+    return std.sort.binarySearch(usize, set, x, orderOffset) != null;
+}
+
+fn orderOffset(a: usize, b: usize) std.math.Order {
+    return std.math.order(a, b);
 }
 
 // -- [items] -----------------------------------------------------------------
@@ -1558,6 +1578,16 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
     var heads: std.ArrayList(Head) = .empty;
     var prev_kind: ?TokenType = null;
 
+    // `lo` and the line ends only grow, so sweep the floors: by anchor to
+    // place them, by start to keep the ones the current line sits in
+    std.mem.sort(Floor, floors, {}, anchorFirst);
+    const by_start = try arena.alloc(*Floor, floors.len);
+    for (by_start, floors) |*p, *f| p.* = f;
+    std.mem.sort(*Floor, by_start, {}, startFirst);
+    var next_anchor: usize = 0;
+    var next_start: usize = 0;
+    var inside: std.ArrayList(*Floor) = .empty;
+
     for (lines, 0..) |*line, li| {
         const slice = line.items;
         const depth = stack.items.len;
@@ -1584,10 +1614,16 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
             null;
 
         var col: u32 = if (depth > 0) stack.items[depth - 1].col else 0;
-        for (floors) |f| {
-            if (f.col) |fc| {
-                if (line.lo >= f.start and line.lo < f.end) col = @max(col, fc);
+        while (next_start < by_start.len and by_start[next_start].start <= line.lo) : (next_start += 1)
+            try inside.append(arena, by_start[next_start]);
+        var k: usize = 0;
+        while (k < inside.items.len) {
+            if (inside.items[k].end <= line.lo) {
+                _ = inside.swapRemove(k);
+                continue;
             }
+            if (inside.items[k].col) |fc| col = @max(col, fc);
+            k += 1;
         }
         const base_col = col;
         const stmt_col = if (head) |h| h.col else base_col;
@@ -1653,10 +1689,19 @@ fn assignLevels(arena: std.mem.Allocator, lines: []Line, floors: []Floor, cond_d
         // place the floors anchored on this line
         const last = slice[slice.len - 1];
         const hi = last.start + last.text.len;
-        for (floors) |*f| {
-            if (f.col == null and f.anchor >= line.lo and f.anchor < hi) f.col = col + f.indent;
+        while (next_anchor < floors.len and floors[next_anchor].anchor < hi) : (next_anchor += 1) {
+            const f = &floors[next_anchor];
+            if (f.anchor >= line.lo) f.col = col + f.indent;
         }
     }
+}
+
+fn anchorFirst(_: void, a: Floor, b: Floor) bool {
+    return a.anchor < b.anchor;
+}
+
+fn startFirst(_: void, a: *Floor, b: *Floor) bool {
+    return a.start < b.start;
 }
 
 /// where `anchor` prints the item from `from` on that sat at source column
