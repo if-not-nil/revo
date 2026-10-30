@@ -53,8 +53,8 @@
 //!      every floor for every line (twice), `has` scans `ends`/`drops`/`cuts`
 //!      and `sameTokens` every added paren per token; sort floors and sweep,
 //!      binary search the sets
-//! [] - cli `fmt` parses, then `format` lexes + parses, then parses its output:
-//!      3 parses per file; let `format` hand back the parse failure instead
+//! [x] - cli `fmt` parses, then `format` lexes + parses, then parses its output:
+//!      3 parses per file; the cli now parses again only when `format` refuses
 test "formatter" {
     const cases = [_]Case{
         // spacing

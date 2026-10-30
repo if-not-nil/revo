@@ -884,19 +884,17 @@ fn formatPaths(
             continue;
         };
 
-        // refuse to touch anything we cant parse; show the real diagnostic
-        switch (try revo.lang.parse(file_alloc, .{ .name = path, .text = source }, .{})) {
-            .ok => {},
-            .err => |failure| {
-                revo.printBuildError(gpa, .{ .name = path, .text = source }, .{ .parse = failure }, hostColor(init));
-                failed = true;
-                continue;
-            },
-        }
-
         const formatted = formatSource(file_alloc, source, lines) catch |err| {
-            printError(init, "formatting {s} - {}", .{ path, err });
             failed = true;
+            // `format` refuses anything it cant parse; parse again only to show the real diagnostic
+            if (err == error.InvalidSource) switch (try revo.lang.parse(file_alloc, .{ .name = path, .text = source }, .{})) {
+                .ok => {},
+                .err => |failure| {
+                    revo.printBuildError(gpa, .{ .name = path, .text = source }, .{ .parse = failure }, hostColor(init));
+                    continue;
+                },
+            };
+            printError(init, "formatting {s} - {}", .{ path, err });
             continue;
         };
 
