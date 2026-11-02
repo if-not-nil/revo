@@ -241,5 +241,3 @@ pub fn getKnownGlobals(ws: *Workspace, alloc: std.mem.Allocator) ![]const []cons
 
     return pipeline.knownGlobalsFromVm(vm, alloc);
 }
-
-

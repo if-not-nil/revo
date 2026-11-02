@@ -441,7 +441,11 @@ pub fn next(self: *Lexer) std.mem.Allocator.Error!Token {
             const top = self.modes.items[self.modes.items.len - 1];
             if (top.kind == .interp) {
                 const span: Span = .{ .start = top.start, .end = self.pos, .line = top.line, .column = top.column };
-                try self.recordLexError(.UnterminatedString, span, "unterminated string");
+                try self.recordLexErrorSuggestion(.UnterminatedString, span, "unterminated string", .{
+                    .span = .{ .start = self.pos, .end = self.pos, .line = self.line, .column = self.column },
+                    .message = "close the interpolation",
+                    .replacement = "}",
+                });
                 _ = self.modes.pop();
                 return try self.invalidToken(span);
             }
@@ -617,18 +621,19 @@ fn lexTriviaComment(self: *Lexer) std.mem.Allocator.Error!void {
         else
             "unterminated multiline comment";
 
-        try self.recordLexError(.UnterminatedComment, unterminated, message);
         if (looks_like_shebang) {
             const replacement = try std.fmt.allocPrint(
                 self.alloc,
                 "{s}\n  this module is runnable, it does this and that\n  (you will later be able to use this as a help message in argparse)\n!#",
                 .{self.source[start..first_line_end]},
             );
-            self.errors.items[self.errors.items.len - 1].suggestion = .{
+            try self.recordLexErrorSuggestion(.UnterminatedComment, unterminated, message, .{
                 .span = .{ .start = start, .end = first_line_end, .line = line, .column = column },
                 .message = "make it a helpful doc",
                 .replacement = replacement,
-            };
+            });
+        } else {
+            try self.recordLexError(.UnterminatedComment, unterminated, message);
         }
         try self.trivia.append(self.alloc, self.triviaToken(.comment, start, self.pos, line, column));
         self.saw_space = true;
@@ -649,7 +654,11 @@ fn lexTriviaComment(self: *Lexer) std.mem.Allocator.Error!void {
             _ = self.advance();
         }
         const unterminated: Span = .{ .start = start, .end = self.pos, .line = line, .column = column };
-        try self.recordLexError(.UnterminatedComment, unterminated, "unterminated multiline comment");
+        try self.recordLexErrorSuggestion(.UnterminatedComment, unterminated, "unterminated multiline comment", .{
+            .span = .{ .start = self.pos, .end = self.pos, .line = self.line, .column = self.column },
+            .message = "close the block comment",
+            .replacement = "##",
+        });
         try self.trivia.append(self.alloc, self.triviaToken(.comment, start, self.pos, line, column));
         self.saw_space = true;
         return;
@@ -680,7 +689,11 @@ fn lexHashSignificant(self: *Lexer, m: Mark) std.mem.Allocator.Error!Token {
             _ = self.advance();
         }
         const unterminated: Span = .{ .start = m.start, .end = self.pos, .line = m.line, .column = m.column };
-        try self.recordLexError(.UnterminatedComment, unterminated, "unterminated multiline comment");
+        try self.recordLexErrorSuggestion(.UnterminatedComment, unterminated, "unterminated multiline comment", .{
+            .span = .{ .start = self.pos, .end = self.pos, .line = self.line, .column = self.column },
+            .message = "close the doc comment",
+            .replacement = "*#",
+        });
         return try self.invalidToken(unterminated);
     }
     const span = self.spanFromMark(m);
@@ -690,6 +703,17 @@ fn lexHashSignificant(self: *Lexer, m: Mark) std.mem.Allocator.Error!Token {
 
 fn recordLexError(self: *Lexer, kind: LexError.Kind, span: Span, message: []const u8) std.mem.Allocator.Error!void {
     try self.errors.append(self.alloc, .{ .kind = kind, .span = span, .message = message });
+}
+
+fn recordLexErrorSuggestion(
+    self: *Lexer,
+    kind: LexError.Kind,
+    span: Span,
+    message: []const u8,
+    suggestion: Suggestion,
+) std.mem.Allocator.Error!void {
+    try self.recordLexError(kind, span, message);
+    self.errors.items[self.errors.items.len - 1].suggestion = suggestion;
 }
 
 fn invalidToken(self: *Lexer, span: Span) std.mem.Allocator.Error!Token {
@@ -985,7 +1009,11 @@ fn lexStringInterior(self: *Lexer) std.mem.Allocator.Error!Token {
     // empty literal: boundary token or unterminated error
     if (self.atEnd()) {
         const span: Span = .{ .start = top.start, .end = self.pos, .line = top.line, .column = top.column };
-        try self.recordLexError(.UnterminatedString, span, "unterminated string");
+        try self.recordLexErrorSuggestion(.UnterminatedString, span, "unterminated string", .{
+            .span = .{ .start = self.pos, .end = self.pos, .line = self.line, .column = self.column },
+            .message = "close the string",
+            .replacement = if (multiline) "\"\"\"" else "\"",
+        });
         _ = self.modes.pop();
         return try self.invalidToken(span);
     }
@@ -1065,7 +1093,11 @@ fn lexSingleLineString(self: *Lexer, start: usize, line: u32, column: u32) std.m
         try buf.append(self.alloc, c);
     }
     const span: Span = .{ .start = start, .end = self.pos, .line = line, .column = column };
-    try self.recordLexError(.UnterminatedString, span, "unterminated string");
+    try self.recordLexErrorSuggestion(.UnterminatedString, span, "unterminated string", .{
+        .span = .{ .start = self.pos, .end = self.pos, .line = self.line, .column = self.column },
+        .message = "close the string",
+        .replacement = "'",
+    });
     return try self.invalidToken(span);
 }
 
