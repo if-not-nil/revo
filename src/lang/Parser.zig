@@ -376,6 +376,7 @@ pub fn tokenAt(self: *Parser, i: usize) Token {
             const e = lx.errors.items[self.lex_recorded];
             self.lex_recorded += 1;
             self.recordError(lexKindToParseKind(e.kind), e.message, e.span) catch {};
+            if (e.suggestion) |sug| self.recordSuggestion(sug) catch {};
         }
         if (t.type == .eof) self.done = true;
     }
@@ -475,13 +476,26 @@ fn finishFailure(self: *Parser) anyerror!ParseFailure {
     };
 }
 
-fn recordError(self: *Parser, kind: Kind, message: []const u8, span: Lexer.Span) !void {
+fn recordError(
+    self: *Parser,
+    kind: Kind,
+    message: []const u8,
+    span: Lexer.Span,
+) !void {
     self.had_errors = true;
     const owned = try self.alloc.dupe(u8, message);
     if (self.first_error_kind == null) self.first_error_kind = kind;
     try self.errors.append(self.alloc, .{ .@"error" = owned });
     try self.errors.append(self.alloc, .{ .span = .{ .span = span, .role = .primary } });
     try self.error_depths.append(self.alloc, self.depth);
+}
+
+fn recordSuggestion(self: *Parser, sug: Lexer.Suggestion) !void {
+    try self.errors.append(self.alloc, .{ .suggestion = .{
+        .span = sug.span,
+        .message = sug.message,
+        .replacement = sug.replacement,
+    } });
 }
 
 fn recordSyntaxError(self: *Parser, err: anyerror, token: Token) !void {
