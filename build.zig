@@ -48,7 +48,6 @@ const Features = packed struct {
     mimalloc: bool = false,
     /// ~ dynamic c calls need dlopen; posix only
     ffi: bool = false,
-    zig_backend: bool = false,
     // ~ async: requires posix threads, not available on windows/wasi/freestanding
 };
 
@@ -304,7 +303,7 @@ pub fn build(b: *Build) !void {
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
-    const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, ffi, zig_backend") orelse
+    const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, ffi") orelse
         // async is disabled on windows/wasi/freestanding (handled in src/root.zig)
         if (is_freestanding) "" else if (is_wasm) "regex" else "lsp,isocline,regex,mimalloc,ffi";
 
@@ -427,14 +426,6 @@ pub fn build(b: *Build) !void {
     } else {
         const e = b.addExecutable(.{ .name = "revo", .root_module = exe_mod });
         const lib = b.addLibrary(.{ .name = "erevo", .root_module = erevo_mod.? });
-
-        if (features.zig_backend) {
-            // no llvm backend (experimental); both artifacts opt out together
-            for ([_]*Build.Step.Compile{ lib, e }) |artifact| {
-                artifact.use_llvm = false;
-                artifact.use_lld = false;
-            }
-        }
 
         if (optimize == .debug) e.lto = .none;
         e.rdynamic = true;
