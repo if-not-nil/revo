@@ -661,10 +661,16 @@ pub fn input(args: []const Value, vm: *VM) !host.HostResult {
     // drain leftover from previous call first
     if (rt.input_buf_len > 0 and !read_eof) {
         if (std.mem.findScalar(u8, rt.input_buf[0..rt.input_buf_len], delim)) |di| {
-            try result.appendSlice(vm.runtime.alloc, rt.input_buf[0..di]);
+            // !!!! it will strip \r when the delimiter is \n (windows leaves those in)
+            // an edge-case to keep in mind
+            const line_end = if (delim == '\n' and di > 0 and rt.input_buf[di - 1] == '\r') di - 1 else di;
+
+            try result.appendSlice(vm.runtime.alloc, rt.input_buf[0..line_end]);
             const rest = rt.input_buf[di + 1 .. rt.input_buf_len];
+
             std.mem.copyForwards(u8, rt.input_buf[0..rest.len], rest);
             rt.input_buf_len = rest.len;
+
             return host.HostResult.Ok(vm, try vm.adoptValueString(try result.toOwnedSlice(vm.runtime.alloc)));
         }
 
@@ -682,15 +688,20 @@ pub fn input(args: []const Value, vm: *VM) !host.HostResult {
             else => |e| return e,
         };
         const total = rt.input_buf_len + n;
+
         if (!read_eof) {
             if (std.mem.findScalar(u8, rt.input_buf[0..total], delim)) |di| {
-                try result.appendSlice(vm.runtime.alloc, rt.input_buf[0..di]);
+                const line_end = if (delim == '\n' and di > 0 and rt.input_buf[di - 1] == '\r') di - 1 else di;
+                try result.appendSlice(vm.runtime.alloc, rt.input_buf[0..line_end]);
+
                 const rest = rt.input_buf[di + 1 .. total];
                 std.mem.copyForwards(u8, rt.input_buf[0..rest.len], rest);
+
                 rt.input_buf_len = rest.len;
                 return host.HostResult.Ok(vm, try vm.adoptValueString(try result.toOwnedSlice(vm.runtime.alloc)));
             }
         }
+
         try result.appendSlice(vm.runtime.alloc, rt.input_buf[0..total]);
         rt.input_buf_len = 0;
     }
