@@ -3,6 +3,7 @@ const std = @import("std");
 const revo = @import("revo");
 const diagnostic = revo.lang.diagnostic;
 pub const TraceFrame = diagnostic.TraceFrame;
+const Value = revo.Value;
 
 pub const RunError = error{
     StackUnderflow,
@@ -139,6 +140,6 @@ pub const RunFailure = struct {
 };
 
 pub const RunResult = union(enum) {
-    ok,
+    ok: Value,
     err: RunFailure,
 };
