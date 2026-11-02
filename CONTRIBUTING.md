@@ -50,7 +50,7 @@ there's a step which includes all tests, autofix, and formatting.\
 it passing means "yes your code didnt break anything"
 
 ```zig
-zig build routine
+zig build chore
 ```
 
 #### debugger/profiler

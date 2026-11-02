@@ -295,7 +295,6 @@ pub const Impl = struct {
             // Otherwise, push the row values on the result table, and add the hash to the seen hashmap
         // Return the result dataframe
 // zig fmt: on
-
 };
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val;

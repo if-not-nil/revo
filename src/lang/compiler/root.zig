@@ -34,11 +34,6 @@ pub const CompileErrorKind = enum {
     IntegerOutOfRange,
 };
 
-pub const CompileResult = union(enum) {
-    ok: []Instruction,
-    err: CompileFailure,
-};
-
 pub const Bytecode = struct {
     instructions: []Instruction,
     spans: []Lexer.Span,
