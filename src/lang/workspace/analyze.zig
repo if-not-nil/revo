@@ -221,6 +221,14 @@ pub fn diagnosticsWithWarnings(
 
     if (full.diagnostics) |full_diag| {
         if (sem_diag) |sem_d| {
+            if (sem_d == .parse and full_diag == .parse) {
+                sem_diag = null;
+                pipeline.deinitError(sem_d);
+                full.diagnostics = null;
+                const warnings = full.warnings;
+                full.warnings = null;
+                return .{ .err = full_diag, .warnings = warnings };
+            }
             const merged_report = try common.mergeReports(alloc, sem_d, full_diag);
             // errorKind hardly matters for display
             full.diagnostics = null;

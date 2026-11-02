@@ -535,28 +535,62 @@ const Handler = struct {
             if (bundle.err) |e| lang.deinitError(e);
             if (bundle.warnings) |*w| w.deinit();
         }
-        const w = bundle.warnings orelse return null;
         var out = try std.ArrayList(T.CodeAction.Result).initCapacity(arena, 2);
+        if (bundle.err) |err| {
+            try appendSuggestionActions(
+                arena,
+                &out,
+                lang.pipeline.errorReport(err),
+                snap.text,
+                params.textDocument.uri,
+                params.range,
+                h.enc,
+            );
+        }
+        if (bundle.warnings) |warnings| {
+            try appendSuggestionActions(
+                arena,
+                &out,
+                warnings,
+                snap.text,
+                params.textDocument.uri,
+                params.range,
+                h.enc,
+            );
+        }
+        if (out.items.len == 0) return null;
+        return try out.toOwnedSlice(arena);
+    }
+
+    fn appendSuggestionActions(
+        arena: std.mem.Allocator,
+        out: *std.ArrayList(T.CodeAction.Result),
+        report: lang.diagnostic.Report,
+        source: []const u8,
+        uri: []const u8,
+        requested_range: T.Range,
+        enc: lsp.offsets.Encoding,
+    ) !void {
         // trigger on the diagnostic span, not the empty insertion point,
         // so the fix shows wherever the cursor sits inside the match
         var diag_range: ?T.Range = null;
-        for (w.parts) |part| {
+        for (report.parts) |part| {
             switch (part) {
                 .span => |sp| {
                     if (sp.role != .primary) continue;
                     diag_range = .{
-                        .start = offsetToLspPos(snap.text, sp.span.start, h.enc),
-                        .end = offsetToLspPos(snap.text, sp.span.end, h.enc),
+                        .start = offsetToLspPos(source, sp.span.start, enc),
+                        .end = offsetToLspPos(source, sp.span.end, enc),
                     };
                 },
                 .suggestion => |sug| {
                     const edit_range = T.Range{
-                        .start = offsetToLspPos(snap.text, sug.span.start, h.enc),
-                        .end = offsetToLspPos(snap.text, sug.span.end, h.enc),
+                        .start = offsetToLspPos(source, sug.span.start, enc),
+                        .end = offsetToLspPos(source, sug.span.end, enc),
                     };
-                    if (!rangesOverlap(params.range, diag_range orelse edit_range)) continue;
+                    if (!rangesOverlap(requested_range, diag_range orelse edit_range)) continue;
                     var changes = std.json.ArrayHashMap([]const T.TextEdit){ .map = .empty };
-                    try changes.map.put(arena, try arena.dupe(u8, params.textDocument.uri), try arena.dupe(T.TextEdit, &.{.{
+                    try changes.map.put(arena, try arena.dupe(u8, uri), try arena.dupe(T.TextEdit, &.{.{
                         .range = edit_range,
                         .newText = try arena.dupe(u8, sug.replacement),
                     }}));
@@ -570,8 +604,6 @@ const Handler = struct {
                 else => {},
             }
         }
-        if (out.items.len == 0) return null;
-        return try out.toOwnedSlice(arena);
     }
 
     pub fn @"textDocument/formatting"(
