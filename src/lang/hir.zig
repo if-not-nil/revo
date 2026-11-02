@@ -8,7 +8,6 @@ const std = @import("std");
 const cst = @import("cst.zig");
 const Lexer = @import("Lexer.zig");
 const Node = cst.CstNode;
-const Span = Lexer.Span;
 
 /// desugar once: parens stripped, pipes desugared, all else rebuilt
 /// span-preserving; stripped parens take the inner span

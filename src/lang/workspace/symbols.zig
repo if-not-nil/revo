@@ -4,9 +4,9 @@ const std = @import("std");
 
 const revo = @import("revo");
 
+const common = @import("common.zig");
 const cst = @import("../cst.zig");
 const Lexer = @import("../Lexer.zig");
-const common = @import("common.zig");
 const pipeline = @import("../pipeline.zig");
 const txt = @import("text.zig");
 const type_syntax = @import("../type_syntax.zig");

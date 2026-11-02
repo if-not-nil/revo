@@ -5,8 +5,8 @@ const std = @import("std");
 const revo = @import("revo");
 const VM = revo.VM;
 
-const cst = @import("../cst.zig");
 const common = @import("common.zig");
+const cst = @import("../cst.zig");
 const diagnostic = @import("../diagnostic.zig");
 const hir = @import("../hir.zig");
 const Lexer = @import("../Lexer.zig");

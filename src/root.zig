@@ -385,9 +385,9 @@ pub const RunFailure = vm.RunFailure;
 pub const RunResult = vm.RunResult;
 
 pub const argparse = @import("./argparse.zig");
-pub const diff = @import("./diff.zig");
 pub const baselib = @import("./baselib/root.zig");
 pub const baselib_net = @import("./baselib/net.zig");
+pub const diff = @import("./diff.zig");
 pub const extension = @import("./extension.zig");
 pub const lang = @import("./lang/root.zig");
 pub const term = @import("./term.zig");

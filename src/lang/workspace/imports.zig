@@ -2,8 +2,8 @@
 
 const std = @import("std");
 
-const cst = @import("../cst.zig");
 const common = @import("common.zig");
+const cst = @import("../cst.zig");
 const Parser = @import("../Parser.zig");
 const pipeline = @import("../pipeline.zig");
 const txt = @import("text.zig");
