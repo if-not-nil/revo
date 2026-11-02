@@ -4,7 +4,6 @@ const io = std.testing.io;
 
 const diagnostic = @import("diagnostic.zig");
 const Lexer = @import("Lexer.zig");
-const Parser = @import("Parser.zig");
 const pipeline = @import("pipeline.zig");
 const revo = @import("revo");
 

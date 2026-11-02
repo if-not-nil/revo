@@ -4,8 +4,8 @@ const std = @import("std");
 
 const revo = @import("revo");
 
-const cst = @import("../cst.zig");
 const common = @import("common.zig");
+const cst = @import("../cst.zig");
 const diagnostic = @import("../diagnostic.zig");
 const hir = @import("../hir.zig");
 const pipeline = @import("../pipeline.zig");

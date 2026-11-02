@@ -4,10 +4,10 @@ const std = @import("std");
 const cst = @import("./cst.zig");
 const diagnostic = @import("diagnostic.zig");
 const import_types = @import("import_types.zig");
-const Parser = @import("Parser.zig");
 const Lexer = @import("Lexer.zig");
-const revo = @import("revo");
+const Parser = @import("Parser.zig");
 const resmap = @import("resmap.zig");
+const revo = @import("revo");
 const type_syntax = @import("type_syntax.zig");
 const types_mod = @import("compiler/types.zig");
 
@@ -682,16 +682,6 @@ const SemanticChecker = struct {
         }
     }
 
-    /// params up to the first soft one: `?name:`, `name: T?`
-    ///   tail, all of which the host fills in
-    fn fixedPrefix(params: []const cst.CstParam) usize {
-        var n: usize = 0;
-        for (params) |p| {
-            if (p.qmark_tok != null or isNilableParam(p.type)) break;
-            n += 1;
-        }
-        return n;
-    }
 
     /// type-level variant (spec function types): `?` and `...` tails
     fn fixedTypePrefix(params: []const cst.CstTypeParam) usize {

@@ -2,7 +2,6 @@ const std = @import("std");
 const alloc = std.testing.allocator;
 
 const revo = @import("revo");
-const lang = revo.lang;
 
 const t = revo.lang.test_helpers;
 

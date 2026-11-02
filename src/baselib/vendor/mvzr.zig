@@ -1967,7 +1967,6 @@ fn logError(comptime fmt: []const u8, args: anytype) void {
 
 //| TESTS
 
-const testing = std.testing;
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;

@@ -4,9 +4,9 @@
 
 const std = @import("std");
 
+const builtin = @import("builtin");
 const cst = @import("../lang/cst.zig");
 const Lexer = @import("../lang/Lexer.zig");
-const builtin = @import("builtin");
 const revo = @import("../root.zig");
 const Value = revo.Value;
 const root = @import("root.zig");

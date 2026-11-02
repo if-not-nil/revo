@@ -13,9 +13,9 @@ const ProgramCounter = revo.ProgramCounter;
 
 const cst = @import("../cst.zig");
 const Node = cst.CstNode;
-const Lexer = @import("../Lexer.zig");
 const control = @import("control.zig");
 const ir = @import("../ir/root.zig");
+const Lexer = @import("../Lexer.zig");
 const opt = @import("../ir/opt.zig");
 const state_mod = @import("locals.zig");
 
@@ -32,11 +32,6 @@ pub const CompileErrorKind = enum {
     UnsupportedSyntax,
     InvalidAssignmentTarget,
     IntegerOutOfRange,
-};
-
-pub const CompileResult = union(enum) {
-    ok: []Instruction,
-    err: CompileFailure,
 };
 
 pub const Bytecode = struct {

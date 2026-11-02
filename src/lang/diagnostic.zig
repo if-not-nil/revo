@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const revo = @import("revo");
 const Lexer = @import("Lexer.zig");
+const revo = @import("revo");
 
 const term = @import("../term.zig");
 

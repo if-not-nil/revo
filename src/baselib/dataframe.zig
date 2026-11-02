@@ -1,7 +1,7 @@
-const std = @import("std");
 const revo = @import("revo");
 const root = @import("root.zig");
 const specs = @import("specs.zig");
+const std = @import("std");
 const table_std = @import("table.zig");
 // const alloc_pool = @import("alloc_pool.zig");
 const Args = root.host.ArgTypes;
@@ -13,7 +13,6 @@ const HostResult = root.host.HostResult;
 const Table = revo.table.Table;
 const testing = revo.lang.test_helpers;
 const table_methods = table_std.Impl;
-const root_methods = root.Impl;
 
 // type Dataframe = table<string, table<any>>
 fn len_internal(vm: *VM, frame_table: Table) !usize {
@@ -196,7 +195,7 @@ pub const Impl = struct {
 
                     // Append it to the result dataframe's column
                     try result_col_table.array.append(vm.runtime.alloc, result_col_ele);
-                } 
+                }
             }
         }
 
@@ -211,7 +210,7 @@ pub const Impl = struct {
         var df_cols_itr = frame_table.hash.orderedIterator();
 
         // Apply the function to each row in the DF as a new list of (idx, res)
-        const RowResult = struct {idx: u64, f_result: Value};
+        const RowResult = struct { idx: u64, f_result: Value };
         var row_results_list: std.ArrayList(RowResult) = .empty;
         defer row_results_list.deinit(vm.runtime.alloc);
 
@@ -221,7 +220,7 @@ pub const Impl = struct {
             // Apply the function to the row
             const map_res = try vm.callFunctionParts(Value.new.function(@backingInt(f)), null, &[_]Value{row_table}, null);
             // Add the f result to the new column table
-            try row_results_list.append(vm.runtime.alloc, .{.idx = row_idx, .f_result = map_res});
+            try row_results_list.append(vm.runtime.alloc, .{ .idx = row_idx, .f_result = map_res });
             row_idx += 1;
         }
 
@@ -260,41 +259,40 @@ pub const Impl = struct {
     }
 
     // dataframe.stack(table<Dataframe>) -> Dataframe
-        // Ensure each Dataframe in the input table has matching column names and types
-        // Create a result dataframe with the same columns
-        // For each Dataframe in the input table
-            // Append that Dataframe's columns to the current result columns
-        // Return the result dataframe
+    // Ensure each Dataframe in the input table has matching column names and types
+    // Create a result dataframe with the same columns
+    // For each Dataframe in the input table
+    // Append that Dataframe's columns to the current result columns
+    // Return the result dataframe
 
     // dataframe.rename(Dataframe, string, string) -> Dataframe
-        // Create a result dataframe with every column copied except the renamed one
-        // Copy the source column with the new name
-        // Return the result dataframe
+    // Create a result dataframe with every column copied except the renamed one
+    // Copy the source column with the new name
+    // Return the result dataframe
 
     // dataframe.inner_join(table<Dataframe>, string) -> Dataframe
-        // Ensure the input dataframes all have a join column named the input string of matching type
-        // Pull out the first Dataframe's join column as a list
-        // Create a result Dataframe and add the join column as an array table
-        // For each input Dataframe in the input table
-            // For each column in the current Dataframe not in the result Dataframe
-                // For each value in the join column
-                    // For each index in the new column to be added
-                        // If the value in the join column matches the value at the input Dataframe's join column index
-                            // Append the value in the new column at that index
-                            // continue
-        // Return the result dataframe
+    // Ensure the input dataframes all have a join column named the input string of matching type
+    // Pull out the first Dataframe's join column as a list
+    // Create a result Dataframe and add the join column as an array table
+    // For each input Dataframe in the input table
+    // For each column in the current Dataframe not in the result Dataframe
+    // For each value in the join column
+    // For each index in the new column to be added
+    // If the value in the join column matches the value at the input Dataframe's join column index
+    // Append the value in the new column at that index
+    // continue
+    // Return the result dataframe
 
     // dataframe.unique(Dataframe, table<string>) -> Dataframe
-        // Initiate a AutoHashMap of <f64, bool> to track seen row values
-        // Initiate a result Dataframe
-        // For each row in the input Dataframe
-            // Set an accumulator to the root.hash() of the first column in the string table
-            // For each other column in the string table
-                // Mod the accumulator with the root.hash() of that value
-            // If the resulting hash is in the seen hashmap, continue
-            // Otherwise, push the row values on the result table, and add the hash to the seen hashmap
-        // Return the result dataframe
-
+    // Initiate a AutoHashMap of <f64, bool> to track seen row values
+    // Initiate a result Dataframe
+    // For each row in the input Dataframe
+    // Set an accumulator to the root.hash() of the first column in the string table
+    // For each other column in the string table
+    // Mod the accumulator with the root.hash() of that value
+    // If the resulting hash is in the seen hashmap, continue
+    // Otherwise, push the row values on the result table, and add the hash to the seen hashmap
+    // Return the result dataframe
 
 };
 

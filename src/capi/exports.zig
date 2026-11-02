@@ -424,34 +424,8 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
     return try registered.toOwnedSlice(vm_ptr.runtime.alloc);
 }
 
-const WinDynLib = struct {
-    const windows = std.os.windows;
-    dll: windows.HMODULE,
 
-    pub fn open(path: []const u8) !WinDynLib {
-        // maybe windows.PATH_MAX_WIDE here
-        var buf: [1024:0]u16 = undefined;
-        const path_w = try std.unicode.utf8ToUtf16LeArrayPtr(&buf, path);
-        const handle = try windows.LoadLibraryW(path_w);
-        return .{ .dll = handle };
-    }
-
-    pub fn lookup(self: *WinDynLib, comptime T: type, name: [:0]const u8) ?T {
-        const addr = windows.kernel32.GetProcAddress(self.dll, name.ptr) orelse return null;
-        return @as(T, @ptrCast(@alignCast(addr)));
-    }
-
-    pub fn close(self: *WinDynLib) void {
-        windows.FreeLibrary(self.dll);
-        self.* = undefined;
-    }
-};
-
-const DynLib = if (builtin.target.os.tag == .windows) WinDynLib else std.DynLib;
-
-///
 /// load a shared lib's `revo_bindings` as host functions
-///
 pub fn loadHost(vm_ptr: *VM, lib_path: []const u8) ![]HostFunc {
     if (builtin.target.os.tag == .wasi or builtin.target.os.tag == .freestanding) {
         return error.OsNotSupported;
