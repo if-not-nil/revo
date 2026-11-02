@@ -682,7 +682,6 @@ const SemanticChecker = struct {
         }
     }
 
-
     /// type-level variant (spec function types): `?` and `...` tails
     fn fixedTypePrefix(params: []const cst.CstTypeParam) usize {
         var n: usize = 0;

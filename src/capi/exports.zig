@@ -424,7 +424,6 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
     return try registered.toOwnedSlice(vm_ptr.runtime.alloc);
 }
 
-
 /// load a shared lib's `revo_bindings` as host functions
 pub fn loadHost(vm_ptr: *VM, lib_path: []const u8) ![]HostFunc {
     if (builtin.target.os.tag == .wasi or builtin.target.os.tag == .freestanding) {

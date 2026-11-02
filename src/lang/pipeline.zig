@@ -54,7 +54,7 @@ pub fn buildWithWarnings(vm: *VM, source: Source, opts: BuildOptions, warnings: 
         },
     };
 
-    return buildParsedWithArena(vm, arena.allocator(), parsed.root, source, opts, parse_warn, warnings);
+    return buildParsedWithAllocator(vm, arena.allocator(), parsed.root, source, opts, parse_warn, warnings);
 }
 
 /// build a tree that already came out of `parse`/`parseWithWarnings`
@@ -72,12 +72,12 @@ pub fn buildParsedWithWarnings(
     var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);
     defer arena.deinit();
 
-    return buildParsedWithArena(vm, arena.allocator(), root, source, opts, parse_warnings, warnings);
+    return buildParsedWithAllocator(vm, arena.allocator(), root, source, opts, parse_warnings, warnings);
 }
 
-fn buildParsedWithArena(
+fn buildParsedWithAllocator(
     vm: *VM,
-    arena: std.mem.Allocator,
+    alloc: std.mem.Allocator,
     root_in: *Node,
     source: Source,
     opts: BuildOptions,
@@ -98,21 +98,21 @@ fn buildParsedWithArena(
 
     // module scope? wrap cst to build exports table from pub decls
     if (opts.module_scope)
-        parsed_root = try scope_wiring.wrapModule(arena, parsed_root);
+        parsed_root = try scope_wiring.wrapModule(alloc, parsed_root);
 
     // closures with pub decls should return their @exports table
-    parsed_root = try scope_wiring.wrapPubFunctions(arena, parsed_root);
+    parsed_root = try scope_wiring.wrapPubFunctions(alloc, parsed_root);
 
     // desugar once
     //   parens stripped, pipes desugared; downstream gets canonical shapes (see hir)
-    const root = try hir.lower(arena, parsed_root);
+    const root = try hir.lower(alloc, parsed_root);
 
     // pointer-keyed and per-build only: the arena dies with this function,
     // so these addresses never outlive the tree
     var type_annotations = std.AutoHashMap(*const Node, compiler.types.TypeId).init(vm.runtime.alloc);
     defer type_annotations.deinit();
 
-    var type_table = compiler.types.TypeTable.init(arena);
+    var type_table = compiler.types.TypeTable.init(alloc);
     const annotations = compiler.types.Annotations{
         .map = &type_annotations,
         .table = &type_table,

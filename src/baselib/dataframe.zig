@@ -258,42 +258,45 @@ pub const Impl = struct {
         return HostResult.data(Value.new.table(result_table_id));
     }
 
+    // zig fmt: off
+
     // dataframe.stack(table<Dataframe>) -> Dataframe
-    // Ensure each Dataframe in the input table has matching column names and types
-    // Create a result dataframe with the same columns
-    // For each Dataframe in the input table
-    // Append that Dataframe's columns to the current result columns
-    // Return the result dataframe
+        // Ensure each Dataframe in the input table has matching column names and types
+        // Create a result dataframe with the same columns
+        // For each Dataframe in the input table
+            // Append that Dataframe's columns to the current result columns
+        // Return the result dataframe
 
     // dataframe.rename(Dataframe, string, string) -> Dataframe
-    // Create a result dataframe with every column copied except the renamed one
-    // Copy the source column with the new name
-    // Return the result dataframe
+        // Create a result dataframe with every column copied except the renamed one
+        // Copy the source column with the new name
+        // Return the result dataframe
 
     // dataframe.inner_join(table<Dataframe>, string) -> Dataframe
-    // Ensure the input dataframes all have a join column named the input string of matching type
-    // Pull out the first Dataframe's join column as a list
-    // Create a result Dataframe and add the join column as an array table
-    // For each input Dataframe in the input table
-    // For each column in the current Dataframe not in the result Dataframe
-    // For each value in the join column
-    // For each index in the new column to be added
-    // If the value in the join column matches the value at the input Dataframe's join column index
-    // Append the value in the new column at that index
-    // continue
-    // Return the result dataframe
+        // Ensure the input dataframes all have a join column named the input string of matching type
+        // Pull out the first Dataframe's join column as a list
+        // Create a result Dataframe and add the join column as an array table
+        // For each input Dataframe in the input table
+            // For each column in the current Dataframe not in the result Dataframe
+                // For each value in the join column
+                    // For each index in the new column to be added
+                        // If the value in the join column matches the value at the input Dataframe's join column index
+                            // Append the value in the new column at that index
+                            // continue
+        // Return the result dataframe
 
     // dataframe.unique(Dataframe, table<string>) -> Dataframe
-    // Initiate a AutoHashMap of <f64, bool> to track seen row values
-    // Initiate a result Dataframe
-    // For each row in the input Dataframe
-    // Set an accumulator to the root.hash() of the first column in the string table
-    // For each other column in the string table
-    // Mod the accumulator with the root.hash() of that value
-    // If the resulting hash is in the seen hashmap, continue
-    // Otherwise, push the row values on the result table, and add the hash to the seen hashmap
-    // Return the result dataframe
+        // Initiate a AutoHashMap of <f64, bool> to track seen row values
+        // Initiate a result Dataframe
+        // For each row in the input Dataframe
+            // Set an accumulator to the root.hash() of the first column in the string table
+            // For each other column in the string table
+                // Mod the accumulator with the root.hash() of that value
+            // If the resulting hash is in the seen hashmap, continue
+            // Otherwise, push the row values on the result table, and add the hash to the seen hashmap
+        // Return the result dataframe
 
+    // zig fmt: on
 };
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val;
