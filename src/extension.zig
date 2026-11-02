@@ -48,6 +48,25 @@ pub const impls = baselib.host.impls;
 /// checked float-to-int conversion, null when not a finite integral value
 pub const numToInt = baselib.host.numToInt;
 
+fn abiSafe(comptime f: HostFn) HostFn {
+    return struct {
+        fn call(args: []const Value, vm: *VM) anyerror!HostResult {
+            return f(args, vm) catch |err| {
+                if (err == error.OutOfMemory) {
+                    return .{ .err = .{ .host_error = error.OutOfMemory } };
+                }
+
+                const atom = vm.internAtom(@errorName(err)) catch {
+                    return HostResult.other("extension error name could not be interned");
+                };
+                return HostResult.errValue(vm, Value.new.atom(atom)) catch {
+                    return HostResult.other("extension error value could not be created");
+                };
+            };
+        }
+    }.call;
+}
+
 /// max typed params per binding;
 /// vm has a small-arg fast path (16)
 /// so every checked arg stays out of the heap allocator
@@ -77,7 +96,7 @@ pub fn binding(comptime name: [:0]const u8, comptime f: HostFunc) revo.callable.
     }
     return .{
         .name = name,
-        .fn_ptr = @ptrCast(@alignCast(f.func)),
+        .fn_ptr = @ptrCast(@alignCast(abiSafe(f.func))),
         .param_types = tags,
         .total_arity = if (f.variadic) HB.unbounded else @intCast(f.param_types.len),
     };
