@@ -104,14 +104,12 @@ pub const Runtime = struct {
     ) lang.BuildResult {
         const vm_ptr = self.vm orelse return .{ .err = .{ .parse = .{
             .kind = .LexUnknown,
-            .span = null,
-            .message = "vm not initialized",
+            .report = .{ .message = "vm not initialized" },
         } } };
         return lang.build(vm_ptr, .{ .name = name, .text = source }, .{}) catch |err| {
             return .{ .err = .{ .parse = .{
                 .kind = .LexUnknown,
-                .span = null,
-                .message = @errorName(err),
+                .report = .{ .message = @errorName(err) },
             } } };
         };
     }
