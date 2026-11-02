@@ -111,10 +111,17 @@ fn resolveViaMetatable(self: *VM, object: Value, key: Value, mt_id: mem.TableID,
 }
 
 const MAX_TAG_LOOP = 200;
+// fn-valued lookup runs thru nested native dispatch calls
+//   so keep this lower than the table-chain limit before the host stakc is exhausetd
+const MAX_FUNCTION_INDEX_DEPTH = 8;
 
 fn resolveIndexDepth(self: *VM, object: Value, key: Value, indexer: Value, depth: usize, result_reg: ?@import("opcode.zig").Register) VM.RunError!?FieldLookup {
     switch (indexer.tag()) {
         .function => {
+            if (self.index_call_depth >= MAX_FUNCTION_INDEX_DEPTH) return error.StackOverflow;
+            self.index_call_depth += 1;
+            defer self.index_call_depth -= 1;
+
             const fn_id = indexer.asFunction().?;
             const func = try self.callable.get(fn_id);
             const value = switch (func.*) {
