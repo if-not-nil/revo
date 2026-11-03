@@ -42,7 +42,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).RunResult {
             self.sched.shutdown.store(false, .release);
             spawnWorkers(self) catch {
                 if (try runLoop(self)) |failure| return .{ .err = failure };
-                return .ok;
+                return .{ .ok = self.currentResult() };
             };
             const r = runLoop(self);
             self.sched.requestShutdown();
@@ -52,14 +52,14 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).RunResult {
             if (self.mt_failure) |f| return .{ .err = f };
             if (self.mt_failed.load(.acquire)) return error.OutOfMemory;
             if (schedHasLive(self)) continue;
-            return .ok;
+            return .{ .ok = self.currentResult() };
         }
     }
 
     if (try runLoop(self)) |failure| return .{ .err = failure };
     if (self.mt_failure) |f| return .{ .err = f };
     if (self.mt_failed.load(.acquire)) return error.OutOfMemory;
-    return .ok;
+    return .{ .ok = self.currentResult() };
 }
 
 /// run every ready fiber a quantum, then idle till something is runnable
