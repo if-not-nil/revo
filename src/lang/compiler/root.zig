@@ -746,10 +746,6 @@ pub const Compiler = struct {
     }
 
     /// atom text without a leading colon (`:nil` and `nil` both give `nil`)
-    fn atomText(text: []const u8) []const u8 {
-        return if (text.len > 0 and text[0] == ':') text[1..] else text;
-    }
-
     pub fn compileValue(self: *Compiler, expr: *const Node) InternalCompileError!void {
         switch (expr.kind) {
             .binding => unreachable, // all bindings arrive wrapped in .decl
@@ -773,7 +769,7 @@ pub const Compiler = struct {
                 expr,
                 "interpolated string must be lowered before compilation",
             ),
-            .atom => |a| try self.@"const"(Value.new.atom(try self.vm.internAtom(atomText(a.tok.text)))),
+            .atom => |a| try self.@"const"(Value.new.atom(try self.vm.internAtom(cst.atomName(a.tok.text)))),
             .err => try self.@"const"(Value.new.atom(revo.CoreAtoms.nil.atomId())),
             .ident => |n| {
                 const name = n.tok.text;
@@ -897,7 +893,7 @@ pub const Compiler = struct {
                         },
                         .method_call => |m| {
                             try self.compile(m.object, true);
-                            const mname = atomText(m.atom_tok.text);
+                            const mname = cst.atomName(m.atom_tok.text);
                             try self.@"const"(Value.new.atom(try self.vm.internAtom(mname)));
                             for (m.args) |arg| {
                                 if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
@@ -1038,7 +1034,7 @@ pub const Compiler = struct {
                     try self.emit(.slice, 0);
                 } else if (ku != null and ku.?.kind == .atom) try self.emit(
                     .table_get_atom,
-                    try self.vm.internAtom(atomText(ku.?.kind.atom.tok.text)),
+                    try self.vm.internAtom(cst.atomName(ku.?.kind.atom.tok.text)),
                 ) else {
                     try self.compile(index.key, true);
                     try self.emit(.table_get, 0);
@@ -1174,7 +1170,7 @@ pub const Compiler = struct {
                 const tps = try cst.tokenTexts(self.alloc, f.type_params);
                 try self.compileFn(f.params, f.return_type, f.body, fname, null, tps);
             },
-            .fn_method => |f| try self.compileFnMethod(f),
+            .fn_method => unreachable, // desugared by hir.lower
             .match => |v| {
                 const subject = if (v.subject) |st| st else try self.trueNode();
                 // the synthesized `:true` subject has no semantic annotation
@@ -1303,41 +1299,6 @@ pub const Compiler = struct {
         try self.emit(.bind_local, slot);
     }
 
-    /// `fn obj:m() ...` / `fn obj.m() ...`: compile fn, store into index
-    fn compileFnMethod(self: *Compiler, f: @FieldType(cst.CstKind, "fn_method")) InternalCompileError!void {
-        const span = self.active_span;
-        const obj_text: []const u8 = switch (f.head) {
-            .method_colon => |m| m.obj_tok.text,
-            .method_dot => |m| m.obj_tok.text,
-            else => return self.fail(.UnsupportedSyntax, f.body, "bad method head"),
-        };
-        const key_text: []const u8 = switch (f.head) {
-            .method_colon => |m| atomText(m.atom_tok.text),
-            .method_dot => |m| m.name_tok.text,
-            else => return self.fail(.UnsupportedSyntax, f.body, "bad method head"),
-        };
-        // colon methods get an explicit `self` first param
-        var params: []const cst.CstParam = f.params;
-        var owned: []cst.CstParam = &.{};
-        if (f.head == .method_colon) {
-            owned = try self.alloc.alloc(cst.CstParam, f.params.len + 1);
-            owned[0] = .{ .name_tok = cst.syntheticToken("self", span) };
-            @memcpy(owned[1..], f.params);
-            params = owned;
-        }
-        defer if (owned.len > 0) self.alloc.free(owned);
-        const tps = try cst.tokenTexts(self.alloc, f.type_params);
-        // compile the fn value onto the stack
-        try self.compileFn(params, f.return_type, f.body, key_text, null, tps);
-        // store into obj[key], keep value on top like assignment
-        const obj_node = try cst.allocIdent(self.alloc, span, obj_text);
-        try self.compile(obj_node, true);
-        try self.regDupe();
-        const key_atom = try self.vm.internAtom(key_text);
-        try self.emit(.table_set_atom, key_atom);
-        try self.emit(.table_get_atom, key_atom);
-    }
-
     /// wrap a test body in a zero-param closure and compile it
     fn compileTestBody(self: *Compiler, body: *const Node) !void {
         try self.compileFn(&.{}, null, body, "<test>", null, &.{});
@@ -1453,7 +1414,7 @@ pub const Compiler = struct {
         self: *Compiler,
         m: @FieldType(cst.CstKind, "method_call"),
     ) InternalCompileError!void {
-        const mname = atomText(m.atom_tok.text);
+        const mname = cst.atomName(m.atom_tok.text);
         if (try self.tryCompileBoundMethodCall(m.object, mname, m.args, true)) return;
         try self.compile(m.object, true);
         try self.@"const"(Value.new.atom(try self.vm.internAtom(mname)));
@@ -1742,7 +1703,7 @@ pub const Compiler = struct {
                 // always atom literals, no scope needed to type them
                 const actual_type = blk: {
                     const fu = cst.unwrapParen(full_args[idx]);
-                    if (fu != null and fu.?.kind == .atom) break :blk types.TypeInfo{ .tag = .{ .atom = atomText(fu.?.kind.atom.tok.text) } };
+                    if (fu != null and fu.?.kind == .atom) break :blk types.TypeInfo{ .tag = .{ .atom = cst.atomName(fu.?.kind.atom.tok.text) } };
                     break :blk self.annotatedType(full_args[idx]);
                 };
                 types.ensureCoercible(expected_type, actual_type) catch |err| switch (err) {

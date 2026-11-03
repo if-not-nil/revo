@@ -268,3 +268,43 @@ test "channel receives from multiple producers preserve ordering" {
         \\ join(a) + join(b) + v1 + v2
     , 303);
 }
+
+test "fn obj:m() binds self" {
+    try t.topNumber(
+        \\ const T = { n = 41 }
+        \\ fn T:inc(d) self.n + d
+        \\ T:inc(1)
+    , 42);
+}
+
+test "fn obj.m() registers field" {
+    try t.topNumber(
+        \\ const T = { class = :T }
+        \\ fn T.new() do
+        \\   const obj = { n = 1 }
+        \\   set_meta(obj, { __index = T })
+        \\ end
+        \\ fn T:get() self.n
+        \\ T.new():get()
+    , 1);
+}
+
+test "fn obj:m() body can call its own method" {
+    try t.topNumber(
+        \\ const T = {}
+        \\ fn T:count(n) if (n == 0) 0 else 1 + self:count(n - 1)
+        \\ T:count(3)
+    , 3);
+}
+
+test "colon call on unknown name reports once" {
+    try t.expectErrorCount("zz:append(1)", 1);
+}
+
+test "obj.f = fn body can call obj.f" {
+    try t.topNumber(
+        \\ const T = {}
+        \\ T.f = fn(n) if (n == 0) 0 else 1 + T.f(n - 1)
+        \\ T.f(3)
+    , 3);
+}

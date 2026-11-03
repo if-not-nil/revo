@@ -9,7 +9,7 @@ const cst = @import("cst.zig");
 const Lexer = @import("Lexer.zig");
 const Node = cst.CstNode;
 
-/// desugar once: parens stripped, pipes desugared, all else rebuilt
+/// desugar once: parens stripped, pipes and methods desugared, all else rebuilt
 /// span-preserving; stripped parens take the inner span
 pub fn lower(alloc: std.mem.Allocator, root: *const cst.CstNode) std.mem.Allocator.Error!*Node {
     return Lower.walk(.{}, alloc, @constCast(root), .{});
@@ -29,6 +29,7 @@ const Lower = struct {
                 const desugared = try cst.desugarPipe(allocator, p.left, p.right, node.span);
                 return walk(.{}, allocator, desugared, .{});
             },
+            .fn_method => return walk(.{}, allocator, try cst.desugarMethod(allocator, node), .{}),
             else => return cst.walkCstExpr(allocator, node, Lower, .{}),
         }
     }

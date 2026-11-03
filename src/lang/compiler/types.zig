@@ -1024,7 +1024,7 @@ pub fn inferExprType(ctx: CheckCtx, node: *const cst.CstNode) TypeInfo {
             for (f.type_params, 0..) |tok, i| tp_buf[i] = tok.text;
             break :blk ctx.inferFnType(f.params, f.return_type, tp_buf[0..f.type_params.len], null);
         },
-        // `fn obj:m() ...` lowers to an index assign; the def itself is a statement
+        // hir lowers `fn obj:m()` to `obj.m = fn`, raw cst only stays here
         .fn_method => .{ .tag = .any },
         .binding => |b| inferExprType(ctx, b.value),
         .decl => |d| inferExprType(ctx, d.inner),

@@ -871,7 +871,7 @@ const SemanticChecker = struct {
             .decl => |d| try self.analyzeDeclCst(d, node.span, node),
             .type_alias => |alias| try self.analyzeTypeAliasCst(alias, null, node.span),
             .fn_def => |f| try self.analyzeFnDef(f.params, f.return_type, f.type_params, f.body, nodeDoc(node)),
-            .fn_method => |f| try self.analyzeFnMethod(f, node.span),
+            .fn_method => unreachable, // desugared by hir.lower
             .block => |b| try self.analyzeBlock(b.stmts, node.span),
             .root => |r| blk: {
                 // the file body is its own scope (init holds the module
@@ -904,7 +904,7 @@ const SemanticChecker = struct {
                 defer self.alloc.free(targs);
                 break :blk try self.analyzeCallCst(g.receiver, g.args, targs, false, node.span);
             },
-            .method_call => |m| try self.analyzeMethodCall(m, node.span),
+            .method_call => |m| try self.analyzeMethodCall(m),
             .if_expr => |c| try self.analyzeBranch(c.cond, c.then, c.else_),
             .ident => |n| try self.analyzeIdent(n.tok.text, node.span),
             .unary => |u| blk: {
@@ -1401,27 +1401,6 @@ const SemanticChecker = struct {
         return .{ .tag = .any };
     }
 
-    /// `fn obj:m() ...` / `fn obj.m() ...` method definition: check the fn
-    /// , and track the store into the object like an index assignment
-    fn analyzeFnMethod(self: *SemanticChecker, f: @FieldType(cst.CstKind, "fn_method"), span: Lexer.Span) !types_mod.TypeInfo {
-        _ = span;
-        const tps = try cst.tokenTexts(self.alloc, f.type_params);
-        const combined = try types_mod.combinedTypeParams(self.alloc, tps, f.params);
-        const saved = self.current_type_params;
-        self.current_type_params = combined;
-        defer self.current_type_params = saved;
-        const sig = try self.makeFnSig(f.params, f.return_type, tps, null);
-        _ = try self.analyzeFnBody(f.params, f.body, sig);
-        // mirror the old index-assign checking: analyze the object
-        const obj_tok = switch (f.head) {
-            .method_colon => |m| m.obj_tok,
-            .method_dot => |m| m.obj_tok,
-            else => return .{ .tag = .any },
-        };
-        _ = try self.analyzeIdent(obj_tok.text, obj_tok.span());
-        return .{ .tag = .any };
-    }
-
     fn analyzeBindingCst(
         self: *SemanticChecker,
         binding: @FieldType(cst.CstKind, "binding"),
@@ -1827,6 +1806,15 @@ const SemanticChecker = struct {
         span: Lexer.Span,
     ) !types_mod.TypeInfo {
         _ = span;
+
+        // a fn body runs later, so it already sees the field it's stored into
+        if (target.kind == .field and value.kind == .fn_def) {
+            const fld = target.kind.field;
+            if (cst.identText(fld.object)) |obj| {
+                if (self.table_field_map.getPtr(obj)) |fields| try fields.put(fld.name_tok.text, .{ .tag = .any });
+            }
+        }
+
         const value_type = try self.analyzeNode(value);
         try self.trackAssignTarget(target, value_type, value.span);
         try self.annotatePatternTargets(target, value_type);
@@ -2068,33 +2056,24 @@ const SemanticChecker = struct {
         return t.tag == .any or t.tag == .type_var;
     }
 
-    /// `obj:method(args)`, object is arg 0 at runtime
-    fn analyzeMethodCall(
-        self: *SemanticChecker,
-        m: @FieldType(cst.CstKind, "method_call"),
-        span: Lexer.Span,
-    ) !types_mod.TypeInfo {
-        _ = span;
-        _ = try self.analyzeNode(m.object);
-        const atom_text = m.atom_tok.text;
-        const mname = if (atom_text.len > 0 and atom_text[0] == ':') atom_text[1..] else atom_text;
-        // bang methods hit the compiler backstop; analyzing them would only
-        // produce a worse error first
-        if (std.mem.endsWith(u8, mname, "!")) return .{ .tag = .any };
-        // build a transient field callee so the shared call path sees it
-        const field_node = try cst.allocNode(self.alloc, m.atom_tok.span(), .{ .field = .{
+    /// `obj:m(args)`, `obj` is arg 0 at runtime
+    fn analyzeMethodCall(self: *SemanticChecker, m: @FieldType(cst.CstKind, "method_call")) !types_mod.TypeInfo {
+        const name = cst.atomName(m.atom_tok.text);
+        // `m!()` errors in the compiler, with a better message
+        if (std.mem.endsWith(u8, name, "!")) {
+            _ = try self.analyzeNode(m.object);
+            return .{ .tag = .any };
+        }
+
+        // `obj:m(args)` checks as `obj.m(args)`
+        const span = m.atom_tok.span();
+        const callee = try cst.allocNode(self.alloc, span, .{ .field = .{
             .object = m.object,
             .dot_tok = m.atom_tok,
-            .name_tok = .{
-                .type = .ident,
-                .text = mname,
-                .line = m.atom_tok.line,
-                .column = m.atom_tok.column,
-                .start = m.atom_tok.start,
-                .end = m.atom_tok.end,
-            },
+            .name_tok = cst.syntheticToken(name, span),
         } });
-        return try self.analyzeCallCst(field_node, m.args, &.{}, true, m.atom_tok.span());
+
+        return try self.analyzeCallCst(callee, m.args, &.{}, true, span);
     }
 
     fn analyzeCallCst(
@@ -2158,10 +2137,7 @@ const SemanticChecker = struct {
             const name: []const u8 = switch (callee_u.kind) {
                 .ident => |n| n.tok.text,
                 .field => |f| f.name_tok.text,
-                .method_call => |m| blk: {
-                    const t = m.atom_tok.text;
-                    break :blk if (t.len > 0 and t[0] == ':') t[1..] else t;
-                },
+                .method_call => |m| cst.atomName(m.atom_tok.text),
                 else => "call",
             };
             const callee_obj: *const cst.CstNode = if (callee_u.kind == .field) callee_u.kind.field.object else callee;

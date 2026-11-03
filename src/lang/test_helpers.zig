@@ -364,6 +364,23 @@ pub fn expectErrorCode(source: []const u8, code: []const u8) !void {
     try std.testing.expectEqualStrings(code, got);
 }
 
+pub fn expectErrorCount(source: []const u8, expected: usize) !void {
+    var vm = try revo.VM.init(runtime());
+    defer vm.deinit();
+
+    const err = try buildExpectingFailure(source, &vm);
+    defer pipeline.deinitError(err);
+    defer vm.runtime.resetDiagArena();
+    const report = switch (err) {
+        inline else => |f| f.report,
+    };
+    var n: usize = 0;
+    for (report.parts) |part| {
+        if (part == .@"error") n += 1;
+    }
+    try std.testing.expectEqual(expected, n);
+}
+
 pub fn expectCompileError(source: []const u8, expected: pipeline.CompileErrorKind) !void {
     var vm = try revo.VM.init(runtime());
     defer vm.deinit();

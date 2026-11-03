@@ -239,8 +239,8 @@ pub const CstKind = union(enum) {
         return_type: ?*CstType,
         body: *CstNode,
     },
-    /// `fn obj:m() body` / `fn obj.m() body`; single node keeps source order
-    /// , lowers to index assign with implicit self like before
+    /// `fn obj:m() body` / `fn obj.m() body`
+    /// , hir lowers it to `obj.m = fn(self) body`
     fn_method: struct {
         fn_tok: Token,
         head: FnHead,
@@ -1109,6 +1109,50 @@ pub fn syntheticToken(text: []const u8, span: Span) Token {
         .start = span.start,
         .end = span.end,
     };
+}
+
+/// `fn obj:m(a) body` -> `obj.m = fn(self, a) body`
+/// i saw lua do this so it must be fine
+pub fn desugarMethod(alloc: std.mem.Allocator, node: *CstNode) std.mem.Allocator.Error!*CstNode {
+    const f = node.kind.fn_method;
+    const obj_tok, const key_tok = switch (f.head) {
+        .method_colon => |m| .{ m.obj_tok, syntheticToken(atomName(m.atom_tok.text), m.atom_tok.span()) },
+        .method_dot => |m| .{ m.obj_tok, m.name_tok },
+        .anon, .named => unreachable,
+    };
+
+    var params = f.params;
+    if (f.head == .method_colon) {
+        params = try alloc.alloc(CstParam, f.params.len + 1);
+        params[0] = .{ .name_tok = syntheticToken("self", node.span) };
+        @memcpy(params[1..], f.params);
+    }
+
+    const value = try allocNode(alloc, node.span, .{ .fn_def = .{
+        .fn_tok = f.fn_tok,
+        .head = .{ .named = .{ .name = key_tok.text, .name_span = key_tok.span() } },
+        .kind = .@"const",
+        .lt_tok = f.lt_tok,
+        .type_params = f.type_params,
+        .tp_commas = f.tp_commas,
+        .gt_tok = f.gt_tok,
+        .lparen_tok = f.lparen_tok,
+        .params = params,
+        .commas = f.commas,
+        .rparen_tok = f.rparen_tok,
+        .arrow_tok = f.arrow_tok,
+        .return_type = f.return_type,
+        .body = f.body,
+    } });
+    if (node.doc_tok) |dt| attachDoc(value, dt);
+    value.attrs = node.attrs;
+
+    const target = try allocNode(alloc, obj_tok.span(), .{ .field = .{
+        .object = try allocIdent(alloc, obj_tok.span(), obj_tok.text),
+        .dot_tok = key_tok,
+        .name_tok = key_tok,
+    } });
+    return allocNode(alloc, node.span, .{ .assign = .{ .target = target, .eq_tok = null, .value = value } });
 }
 
 /// freshly built, unpublished nodes only
