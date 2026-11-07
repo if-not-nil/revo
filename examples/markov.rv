@@ -1,16 +1,16 @@
 #!/usr/bin/env revo
- \  
+ \
  \  markov chains!
- \  
+ \
  \  a markov chain is the simplest ai you can make
- \  
+ \
  \  you need to get any large piece of text off the internet
  \    and put a path to it in this variable
  \    vvvvvvvvvvv
 !#
 
 const CORPUS_PATH = "_ign-data-smaller.txt"
-type Rng = { state: number, next: function }
+type Rng = {state: number, next: function}
 
 
 fn rng_next(self: Rng, n: number) do
@@ -21,14 +21,15 @@ end
 
 
 test "rng doesnt output 0" do
-  const rng: Rng = { state = time.monotonic_ns(), next = rng_next }
+  const rng: Rng = {state = time.monotonic_ns(), next = rng_next}
+
   for i in 0..100 do
     if (not rng:next(1000) != 0)
       print("got 0 on ", i) and return {:err, :UhOh}
   end
 end
 
-const rng: Rng = { state = time.monotonic_ns(), next = rng_next }
+const rng: Rng = {state = time.monotonic_ns(), next = rng_next}
 
 
 fn pref(a: any, b: any) fmt("%v %v", a, b)
@@ -44,7 +45,7 @@ end
 const NOWORD = string.of_ascii(10)
 
 #* markov chain *#
-type Chain = { state: table<string, table>, starts: table, sent_starts: table, add: function, train: function, take: function }
+type Chain = {state: table<string, table>, starts: table, sent_starts: table, add: function, train: function, take: function}
 
 
 fn chain_add(self: Chain, idx: number, val: string) do
@@ -159,6 +160,7 @@ fn chain_take(self: Chain, params: table) -> string do
         w2 = nextword
       end
     end
+    | _ => panic "unreachable"
   end
 
   # tighten the text after generation so punctuation hugs the word before it
@@ -173,7 +175,7 @@ fn chain_take(self: Chain, params: table) -> string do
 end
 
 
-let c: Chain = { state = {}, starts = {}, sent_starts = {}, add = chain_add, train = chain_train, take = chain_take }
+let c: Chain = {state = {}, starts = {}, sent_starts = {}, add = chain_add, train = chain_train, take = chain_take}
 c:train(CORPUS_PATH)?
 
 print(c:take({count = 500}))

@@ -1,9 +1,9 @@
 #!/usr/bin/env revo
 |
 |> revo's pipes
-| 
+|
 |> put the left-hand value in as the first argument to the function on the right
-| 
+|
 |> this is how you make monadic patterns work!
 |
 !#

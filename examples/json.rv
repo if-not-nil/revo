@@ -148,9 +148,9 @@ end
 
 
 parse_json('{ "a": 1 }')?
-  |> expect_eq({10, { "a" = 1 }})
+  |> expect_eq({10, {"a" = 1}})
 parse_json('[ 1, 2 ]')?
-  |> expect_eq({7, { 1, 2 }})
+  |> expect_eq({7, {1, 2}})
 
 loop parse_json(input()?)
      |> print("#{_:p}")

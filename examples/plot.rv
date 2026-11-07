@@ -3,12 +3,12 @@
 
   plots an SVG graph from an expression into stdout
   try with:
-   
+
   ```bash
   python3 -c "import math; [print(str(math.sin(x / 100)) + ',' + str(max(min(math.tan(x / 100), 2), -2))) for x in range(1000)]" | revo plot.rv > out.svg
   ```
 
-  ╎ℸ ̣ ᓭリ𝙹∴ᒷ↸, ∷ᔑ╎リᒷ↸, ᔑリ↸ ⍑ᔑ╎ꖎᒷ↸ ℸ ̣⍑ᒷ ᓭᔑᒲᒷ ᒲ𝙹∷リ╎リ ⊣.  
+  ╎ℸ ̣ ᓭリ𝙹∴ᒷ↸, ∷ᔑ╎リᒷ↸, ᔑリ↸ ⍑ᔑ╎ꖎᒷ↸ ℸ ̣⍑ᒷ ᓭᔑᒲᒷ ᒲ𝙹∷リ╎リ ⊣.
 
   @author artemis
 !#

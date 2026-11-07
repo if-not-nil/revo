@@ -122,7 +122,7 @@ end
 pub fn start<T>(data: T) -> History<T>
     set_meta(
       {
-        tl = { {data = data, parent_id = :root, child_ids = {}} },
+        tl = {{data = data, parent_id = :root, child_ids = {}}},
         cur = 0,
         idc = 0
       },

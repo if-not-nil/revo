@@ -1,9 +1,9 @@
 #!/usr/bin/env revo
-   
+
  $ small, async, redis-like network database
-   
+
  $ network is still not implemented on windows because none of us have windows
-   
+
 !#
 let srv = net.listen(1337)?
 

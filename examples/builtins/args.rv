@@ -42,10 +42,10 @@ Report bugs to <https://github.com/if-not-nil/revo/issues>
 !#
 
 const result = argparse.parse(fn(p) do
-  p:flag(:verbose, { short = "v", description = "enable verbose output" })
-  p:option(:output, { short = "o", description = "output file" })
-  p:command(:compile, { description = "compile a file" })
-  p:positional(:script, { description = "input script" })
+  p:flag(:verbose, {short = "v", description = "enable verbose output"})
+  p:option(:output, {short = "o", description = "output file"})
+  p:command(:compile, {description = "compile a file"})
+  p:positional(:script, {description = "input script"})
 end, argv)
 
 if result.err do

@@ -12,7 +12,7 @@ let libc = ffi.load("")
 let strlen = ffi.func(libc, "strlen", :u64, {:string})
 print(strlen("hello"))  # 5
 
-#* 
+#*
  * variadic call
  * : fixed prefix types + total count
  *

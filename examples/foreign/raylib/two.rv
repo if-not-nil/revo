@@ -24,8 +24,8 @@ let dx = 150.0
 let y = 0
 let dy = 160.0
 let cube_size = 30
-let cube_color = { r = 0, g = 0, b = 0, a = 255 }
-let background_color = { r = 255, g = 255, b = 255, a = 255 }
+let cube_color = {r = 0, g = 0, b = 0, a = 255}
+let background_color = {r = 255, g = 255, b = 255, a = 255}
 let frame_time = 0
 
 while not rl.window_should_close() do

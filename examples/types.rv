@@ -1,26 +1,26 @@
 #!
   revo's type system!
   (not intended to be ran)
- 
+
   | annotations are optional:
       when present, the compiler enforces them at compile time
       they also help the compiler optimize your program
- 
+
   | untyped code defaults to dynamic (any) and works just fine
- 
+
   | error gallery:
     uncomment the snippets below one at a time to see the helpful messages
 !#
 
 # scalar binds & coercion
 
-type Someone = { name: string, age: number, get_age: function }
+type Someone = {name: string, age: number, get_age: function}
 
 
 fn get_age(self: Asdf) self.age
 
 
-let x: Someone = { name = "me", age = 21, get_age = get_age }
+let x: Someone = {name = "me", age = 21, get_age = get_age}
 
 let acc = 0
 
@@ -42,8 +42,8 @@ let nothing: number? = :nil
 const num_or_str: number | string = 42
 const other: number | string = "hi"
 
-let nums: table<number> = { 1, 2, 3 }
-let pairs: table<string, number> = { a = 1, b = 2 }
+let nums: table<number> = {1, 2, 3}
+let pairs: table<string, number> = {a = 1, b = 2}
 
 if (:true) 1 else "asdf"
 type A = {:ok, any} | {:err, atom}
@@ -197,20 +197,20 @@ let z = zero<number>()  # T=number, returns number 0
 # tables & field validation
 # > table fields use `number` at runtime
 
-type Point = { x: number, y: number }
+type Point = {x: number, y: number}
 
 # create typed table & modify fields
-let p: Point = { x = 10, y = 20 }
+let p: Point = {x = 10, y = 20}
 
 let px = p.x
 p.x = 100
 # p.x = "not a number" # field `x` wants number, got string
 # let bad_point = { x = 10, y = "oops" }
 
-type Person = { name: string, age: number }
+type Person = {name: string, age: number}
 
 # create typed table & modify fields
-let person: Person = { name = "alice", age = 30 }
+let person: Person = {name = "alice", age = 30}
 
 let pname = person.name
 # person.name = 42 # field `name` wants string, got number

@@ -38,7 +38,6 @@ iter.range(1, 6) |> iter.fold(fn(a, b) a * b)
 #
 # custom object with an __iter metamethod
 #
-# 
 let Counter = set_meta({
   {:zero, "none"},
   {:one, "singular"},
@@ -76,7 +75,7 @@ fn data_fn(self) do
 end
 
 
-let data = set_meta({10, 20, 30, 40}, { __iter = data_fn })
+let data = set_meta({10, 20, 30, 40}, {__iter = data_fn})
 
 for x in data do print(x) end
 # 20 40 60 80

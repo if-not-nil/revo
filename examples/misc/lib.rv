@@ -1,4 +1,4 @@
-type Version = { major: number, minor: number }
+type Version = {major: number, minor: number}
 
 
 fn version_of_string(str) -> {:ok, Version} do

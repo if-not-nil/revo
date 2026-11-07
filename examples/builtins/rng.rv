@@ -7,7 +7,7 @@ print("rng.rand_float() = #{rng.rand_float()}")
 # `rng.range` returns a random integer in the range [lower_bound, upper_bound]
 print("rng.range(4, 12) = #{rng.range(4, 12)}")
 
-# `rng.choice` returns a random element from the given table. 
+# `rng.choice` returns a random element from the given table
 # Excluding named fields, so something like `rng.choice({"hi" = 1, "bye" = 2})` will always return `:nil`.
 print("rng.choice({1, 2, 3, 'hi', :false}) = #{rng.choice({1, 2, 3, 'hi', :false})}")
 

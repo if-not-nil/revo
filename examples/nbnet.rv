@@ -1,6 +1,6 @@
 #!/usr/bin/env revo
  ~  non-blocking TCP server
- ~ 
+ ~
  ~  accepts infinite connections and gives them a shell with two commands:
  ~    x for exit
  ~    ping for "pong {number of pings}"
@@ -16,7 +16,7 @@ fn serve(peer, counter) do
     peer:send("$ ")?
 
     # wait for one full line; read_line keeps appending chunks until it sees "\n".
-    match peer:recv({ mode = :read_line })
+    match peer:recv({mode = :read_line})
     | {:ok, "x"} => do
       # send a final message, then close the socket so future IO becomes
       # SocketClosed instead of reusing a dead fd.
@@ -58,7 +58,7 @@ fn srv(port) do
     # accept the next connection; if none is ready, this fiber parks until the
     # runtime sees a connection on the listening socket.
     let conn = server:accept()?
-    # the only thing you have to do to make it async is to add `spawn` here! 
+    # the only thing you have to do to make it async is to add `spawn` here!
     spawn serve(conn, port - 1)
   end
 end
