@@ -289,9 +289,9 @@ test {
     // lang suite runs split under test-lang instead, one binary per area
     _ = @import("./extension.zig");
     _ = @import("./import_path.zig");
-    _ = @import("./baselib/ffi.zig");
-    _ = @import("./baselib/host.zig");
-    _ = @import("./baselib/specs.zig");
+    _ = @import("./base/ffi.zig");
+    _ = @import("./base/host.zig");
+    _ = @import("./base/specs.zig");
 }
 
 const builtin = @import("builtin");
@@ -327,8 +327,8 @@ pub const RunFailure = vm.RunFailure;
 pub const RunResult = vm.RunResult;
 
 pub const argparse = @import("./argparse.zig");
-pub const baselib = @import("./baselib/root.zig");
-pub const baselib_net = @import("./baselib/net.zig");
+pub const base = @import("./base/root.zig");
+pub const base_net = @import("./base/net.zig");
 pub const diff = @import("./diff.zig");
 pub const extension = @import("./extension.zig");
 pub const lang = @import("./lang/root.zig");

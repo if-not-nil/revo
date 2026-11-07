@@ -4,7 +4,7 @@ const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
 const revo = @import("revo");
 const std = @import("std");
-const specs_mod = revo.baselib.specs;
+const specs_mod = revo.base.specs;
 const Writer = std.Io.Writer;
 const term = revo.term;
 

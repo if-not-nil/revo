@@ -179,7 +179,7 @@ run_depth: usize = 0,
 constants: std.ArrayList(Value),
 builtin_globals: UserGlobals,
 /// iface specs loaded at init; released by `deinit` through `specs.freeLoadedSpecs`
-loaded_specs: []const []const revo.baselib.specs.FnSpec = &.{},
+loaded_specs: []const []const revo.base.specs.FnSpec = &.{},
 tables: TablePool,
 callable: FunctionPool,
 resources: ResourcePool,
@@ -347,7 +347,7 @@ pub fn init(runtime: revo.Runtime) !VM {
     // after core atoms are initialized
     vm.sched.fibers.items[0].result = revo.Value.new.core(.no_result);
 
-    try revo.baselib.register_baselib(&vm);
+    try revo.base.register_base(&vm);
 
     return vm;
 }
@@ -437,7 +437,7 @@ pub fn deinit(self: *VM) void {
     self.user_globals.deinit();
     self.frozen_globals.deinit();
     self.builtin_globals.deinit();
-    revo.baselib.specs.freeLoadedSpecs(self.runtime.alloc, self.loaded_specs);
+    revo.base.specs.freeLoadedSpecs(self.runtime.alloc, self.loaded_specs);
 
     // run pending gc finalizers while scheduler + pools are alive
     {
@@ -818,7 +818,7 @@ pub fn setGlobal(self: *VM, name: []const u8, val: Value) !void {
 
 /// install a Host fn on the heap. name fills the function's name
 /// field (stack traces, mt keys)
-pub fn installHost(self: *VM, name: []const u8, func: revo.baselib.host.HostFunc) !mem.FunctionID {
+pub fn installHost(self: *VM, name: []const u8, func: revo.base.host.HostFunc) !mem.FunctionID {
     var f = func;
     f.name = name;
     return self.callable.create(.{ .host = f });
@@ -1582,7 +1582,7 @@ fn callNonClosureFunction(
                         .{
                             i,
                             @tagName(spec),
-                            revo.baselib.typeof(args[i], self),
+                            revo.base.typeof(args[i], self),
                         },
                     );
                     return error.TypeError;

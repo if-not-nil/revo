@@ -1,0 +1,11 @@
+#* dynamic c calls, posix only *#
+pub declare ffi = {
+  #* open a shared library, returns a handle *#
+  load: fn(path: string) -> any,
+  #* declare a c function, call the handle: return type + arg types as atoms *#
+  func: fn(lib: any, name: string, ret: atom, args: table) -> any,
+  #* declare a variadic c function: fixed prefix types + total count *#
+  varfunc: fn(lib: any, name: string, ret: atom, fixed: table, total: number) -> any,
+  #* errno from the last ffi call on this vm *#
+  errno: fn() -> number,
+}

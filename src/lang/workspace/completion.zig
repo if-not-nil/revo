@@ -214,7 +214,7 @@ fn addFieldCompletions(
             // : aliases and any fn missing at runtime
             // . `__` keys stay out
             // , they are not field accesses
-            for (revo.baselib.specs.full_specs) |group| {
+            for (revo.base.specs.full_specs) |group| {
                 for (group) |*spec| {
                     if (spec.head.kind != .namespaced) continue;
                     if (!std.mem.eql(u8, spec.head.module.?, target)) continue;

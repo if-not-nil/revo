@@ -1,0 +1,31 @@
+#* http *#
+
+pub declare http = {
+  #*
+  fetch an http request
+  the default Content-Type is json
+  
+  fetch options are `headers` (key-value table), `body`, and `max_redirects`
+  any fetch option can be `:nil`
+  
+  setting `max_redirects` to a number will follow redirects for the specified count. `:nil` leaves redirection up to the caller.
+  
+  examples:
+  ```revo
+  http.fetch(:get, "https://example.com")
+  http.fetch(:post, "https://example.com", {
+    body = "{\"foo\":\"bar\"}",
+    max_redirects = 3
+  })
+  ```
+  *#
+  fetch: fn(method: :get | :post | :put | :delete | :head | :options | :patch | :trace, url: any, ?opts: http.FetchOpts) -> !string,
+  #* fetch options *#
+  FetchOpts: {
+    ?headers: table<string, http.HeaderValue>,
+    ?body: string,
+    ?max_redirects: number,
+  }
+}
+
+type http.HeaderValue = string | number | :nil

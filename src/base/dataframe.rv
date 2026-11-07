@@ -1,0 +1,28 @@
+#* dataframe functions *#
+pub declare dataframe = {
+  #type Dataframe = table<string, table<any>>
+  #*
+  returns the length of the dataframe, ensuring column lengths are equal
+  *#
+  len: fn(input: table<string, table<any>>) -> number,
+  #*
+  returns the dataframe row at the given index
+  *#
+  row: fn(input: table<string, table<any>>, idx: number) -> table<string, any>,
+  #*
+  selects only the given columns for a new dataframe, in the input order
+  *#
+  select: fn(input: table<string, table<any>>, columns: table<string>) -> table<string, table<any>>,
+  #*
+  maps a predicate function over the rows of the dataframe to a new column with the given column name
+  *#
+  map: fn(input: table<string, table<any>>, new_col: string, fn: function) -> table<string, table<any>>,
+  #*
+  filters a dataframe by mapping a predicate function over the rows of the dataframe and keeping only the rows which return :true
+  *#
+  filter: fn(input: table<string, table<any>>, fn: function) -> table<string, table<any>>,
+  #*
+  sorts a dataframe using the result of a given function mapped over the dataframe's rows
+  *#
+  sort: fn(input: table<string, table<any>>, fn: function) -> table<string, table<any>>,
+}

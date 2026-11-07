@@ -350,7 +350,7 @@ pub const Session = struct {
                 return true;
             }
         }
-        if (revo.baselib.specs.findQualified(name)) |spec| {
+        if (revo.base.specs.findQualified(name)) |spec| {
             try revo.lang.docgen.renderFn(self.gpa, out, spec, .{ .leading_newline = false, .qualified_type = true });
             return true;
         }
@@ -364,13 +364,13 @@ pub const Session = struct {
     /// , group doc plus one signature per member
     fn helpModule(self: *Session, out: *std.Io.Writer, name: []const u8) !bool {
         var found = false;
-        for (revo.baselib.specs.full_specs) |group| for (group) |*spec| {
+        for (revo.base.specs.full_specs) |group| for (group) |*spec| {
             const is_mod = spec.head.kind == .namespaced and spec.head.module != null and
                 std.mem.eql(u8, spec.head.module.?, name);
             if (!is_mod) continue;
             if (!found) {
                 found = true;
-                const doc = revo.baselib.specs.moduleDoc(name);
+                const doc = revo.base.specs.moduleDoc(name);
                 if (doc.len > 0) {
                     try revo.term.style(out, "\x1b[2m", self.vm.runtime.supports_color);
                     try out.writeAll(doc);

@@ -263,7 +263,7 @@ const SemanticChecker = struct {
     /// caller-owned out-map: declared name -> doc text, last declare wins
     docs: ?*std.StringHashMap([]const u8),
     /// one sig per baselib spec, keyed by the spec's const-storage address
-    sig_cache: std.AutoHashMap(*const revo.baselib.specs.FnSpec, *const FnSig),
+    sig_cache: std.AutoHashMap(*const revo.base.specs.FnSpec, *const FnSig),
     return_types: std.ArrayList(types_mod.TypeInfo),
     type_map: ?*std.StringHashMap(types_mod.TypeInfo),
     annotations: ?types_mod.Annotations,
@@ -343,7 +343,7 @@ const SemanticChecker = struct {
         // registers baselib function types
         for (known_globals) |name| {
             const spec = find_global: {
-                for (revo.baselib.specs.full_specs) |group| for (group) |*s| {
+                for (revo.base.specs.full_specs) |group| for (group) |*s| {
                     if (s.is_type) continue;
                     if (!std.mem.eql(u8, s.name, name)) continue;
                     if (s.head.kind == .global) break :find_global s;
@@ -355,7 +355,7 @@ const SemanticChecker = struct {
             }
         }
 
-        for (revo.baselib.specs.full_specs) |group| {
+        for (revo.base.specs.full_specs) |group| {
             for (group) |*s| {
                 if (!s.is_type) continue;
                 const t = checker.evalCheckedTypeExpr(s.type) catch types_mod.TypeInfo{ .tag = .any };
@@ -685,7 +685,7 @@ const SemanticChecker = struct {
         // method lookup runs through the type's module table: the module
         // fn doubles as the method, e.g. `t:unwrap_err()` resolves
         // `table.unwrap_err` at runtime
-        const target: ?revo.baselib.host.ParamType = switch (object_type.tag) {
+        const target: ?revo.base.host.ParamType = switch (object_type.tag) {
             .number => .number,
             .string => .string,
             .table => .table,
@@ -703,7 +703,7 @@ const SemanticChecker = struct {
         if (cst.identText(object)) |oname| {
             if (self.known_globals.contains(oname) and !self.shadowed_globals.contains(oname)) {
                 const module_name = oname;
-                for (revo.baselib.specs.full_specs) |group| for (group) |*spec| {
+                for (revo.base.specs.full_specs) |group| for (group) |*spec| {
                     if (spec.is_type) continue;
                     if (!std.mem.eql(u8, spec.name, name)) continue;
                     const head = spec.head;
@@ -743,7 +743,7 @@ const SemanticChecker = struct {
         return n;
     }
 
-    fn makeStdlibSig(self: *SemanticChecker, spec: *const revo.baselib.specs.FnSpec) !?*const FnSig {
+    fn makeStdlibSig(self: *SemanticChecker, spec: *const revo.base.specs.FnSpec) !?*const FnSig {
         if (spec.is_type) return null;
         if (self.sig_cache.get(spec)) |sig| return sig;
         const saved = self.current_type_params;
@@ -1477,7 +1477,7 @@ const SemanticChecker = struct {
         // vm globals (repl); without them, fall back to the spec registry so
         // bare calls like `print(x)` don't read as unknown
         if (self.lookup(name) == null and !cst.isDiscardName(name) and
-            !(self.fn_nesting > 0 and self.predeclared.contains(name)) and revo.baselib.specs.findFn(name) == null)
+            !(self.fn_nesting > 0 and self.predeclared.contains(name)) and revo.base.specs.findFn(name) == null)
         {
             const msg = try self.alloc.print("name `{s}` is not defined", .{name});
             if (self.first_code == null) self.first_code = "unknown-name";
@@ -2268,7 +2268,7 @@ const SemanticChecker = struct {
                 // a dot-call matching a member of the object's module table
                 // dispatches at runtime (`t.at(0)` finds `table.at`), so only
                 // flag names that resolve to neither field nor module member
-                const target: ?revo.baselib.host.ParamType = switch (obj_type.tag) {
+                const target: ?revo.base.host.ParamType = switch (obj_type.tag) {
                     .number => .number,
                     .string => .string,
                     .table => .table,
@@ -2307,16 +2307,16 @@ const SemanticChecker = struct {
                     // same name can exist as both a global and a module
                     // member; match the call kind (`t:m()` prepends self,
                     // so only namespaced members pair with colon calls)
-                    for (revo.baselib.specs.full_specs) |group| for (group) |*s| {
+                    for (revo.base.specs.full_specs) |group| for (group) |*s| {
                         if (s.is_type) continue;
                         if (!std.mem.eql(u8, s.name, name)) continue;
                         const head = s.head;
                         if (implicit_self and head.kind == .namespaced) break :find_spec s;
                         if (!implicit_self and head.kind == .global) break :find_spec s;
                     };
-                    break :find_spec revo.baselib.specs.findFn(name);
+                    break :find_spec revo.base.specs.findFn(name);
                 };
-                const is_variadic = if (baselib_spec) |sp| revo.baselib.specs.isVariadic(sp) else false;
+                const is_variadic = if (baselib_spec) |sp| revo.base.specs.isVariadic(sp) else false;
                 if (is_variadic and total_args >= sig.params.len -| 1) {
                     // variadic fns are fine with >= min
                 } else if (total_args < sig.required_count) {
@@ -2508,9 +2508,9 @@ const SemanticChecker = struct {
         return types_mod.substCallReturn(self.check(), sig, callee, eff, type_args, false);
     }
 
-    fn findModuleByNameAndTarget(name: []const u8, target: revo.baselib.host.ParamType) ?*const revo.baselib.specs.FnSpec {
+    fn findModuleByNameAndTarget(name: []const u8, target: revo.base.host.ParamType) ?*const revo.base.specs.FnSpec {
         const module_name = target.moduleName() orelse return null;
-        for (revo.baselib.specs.full_specs) |group| {
+        for (revo.base.specs.full_specs) |group| {
             for (group) |*spec| {
                 if (spec.is_type) continue;
                 if (!std.mem.eql(u8, spec.name, name)) continue;

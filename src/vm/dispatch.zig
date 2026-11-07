@@ -155,7 +155,7 @@ fn workerMain(vm: *VM) void {
                 .revents = 0,
             }};
             _ = std.posix.poll(&pfd, 20) catch {};
-            revo.baselib_net.drainWakeup(vm);
+            revo.base_net.drainWakeup(vm);
         } else {
             std.Thread.yield() catch std.atomic.spinLoopHint();
         }
@@ -199,7 +199,7 @@ fn waitForActivity(self: *VM) VM.RunError!bool {
         const timeout_ms = pollTimeoutMs(self, has_io_waiters);
 
         if (comptime self.runtime.caps.io) {
-            _ = revo.baselib_net.pollIoWaiters(self, timeout_ms) catch
+            _ = revo.base_net.pollIoWaiters(self, timeout_ms) catch
                 return error.Panic;
         }
 
@@ -226,7 +226,7 @@ fn waitForActivity(self: *VM) VM.RunError!bool {
                         std.math.maxInt(i32),
                     ));
                     _ = std.posix.poll(&pfd, timeout_ms) catch {};
-                    revo.baselib_net.drainWakeup(self);
+                    revo.base_net.drainWakeup(self);
                 } else {
                     std.Io.sleep(
                         self.runtime.io,
@@ -481,7 +481,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot add {s} and {s}",
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
         },
         .concat => {
@@ -505,7 +505,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot subtract {s} from {s}",
-                .{ revo.baselib.typeof(rhs, self), revo.baselib.typeof(lhs, self) },
+                .{ revo.base.typeof(rhs, self), revo.base.typeof(lhs, self) },
             );
         },
         .mul => {
@@ -536,7 +536,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot divide {s} by {s}",
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
         },
         .mod => {
@@ -567,7 +567,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot mod {s} by {s}",
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
         },
         inline .band, .bor, .bxor => |op| {
@@ -594,7 +594,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 msg,
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
         },
         inline .shl, .shr => |op| {
@@ -621,7 +621,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot shift {s} by {s}",
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
         },
         .int_div => {
@@ -643,7 +643,7 @@ inline fn execFiberDispatch(
             return self.fail(
                 error.IncompatibleTypes,
                 "cannot divide {s} by {s}",
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
         },
         .negate => {
@@ -654,7 +654,7 @@ inline fn execFiberDispatch(
                 fetchNext(self, fiber, &instr);
                 continue :dispatch instr.op;
             }
-            return self.fail(error.IncompatibleTypes, "cannot negate {s}", .{revo.baselib.typeof(v, self)});
+            return self.fail(error.IncompatibleTypes, "cannot negate {s}", .{revo.base.typeof(v, self)});
         },
         .pow => {
             if (try execPow(self, regs, base, instr)) |failure| return failure;
@@ -1102,7 +1102,7 @@ inline fn execFiberDispatch(
             const lhs_val = regRead(regs, base, instr.b);
             if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs_val.bits))) orelse
-                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.baselib.typeof(lhs_val, self)});
+                return self.fail(error.TypeError, "expected integer, got {s}", .{revo.base.typeof(lhs_val, self)});
             const ri: i64 = @intCast(instr.bx);
             regWrite(regs, base, instr.a, Value.new.num(@as(f64, @floatFromInt(li & ri))));
 
@@ -1323,7 +1323,7 @@ noinline fn execConcat(
         return self.fail(
             error.IncompatibleTypes,
             "cannot concatenate {s} and {s}",
-            .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+            .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
         );
     defer alloc.free(l_src);
 
@@ -1331,7 +1331,7 @@ noinline fn execConcat(
         return self.fail(
             error.IncompatibleTypes,
             "cannot concatenate {s} and {s}",
-            .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+            .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
         );
     defer alloc.free(r_src);
 
@@ -1352,7 +1352,7 @@ noinline fn toStringOperand(
     operand: Value,
 ) VM.RunError!?[]u8 {
     if (try self.getMetamethodByAtom(operand, revo.CoreAtoms.__tostring.atomId())) |mm| {
-        const call_result = revo.baselib.callUnaryMetamethod(mm, operand, self);
+        const call_result = revo.base.callUnaryMetamethod(mm, operand, self);
         fiber.* = self.currentFiber();
         base.* = fiber.*.top_base;
         regs.* = fiber.*.registers[0..fiber.*.registers_len];
@@ -1457,8 +1457,8 @@ noinline fn execCallField(self: *VM, regs: []Value, base: usize, instr: Instruct
     const key = regRead(regs, base, instr.a + 1);
 
     const lookup_result = try self.resolveField(object, key, instr.a) orelse {
-        const key_name = if (key.asAtom()) |atom| self.stringValue(atom) else revo.baselib.typeof(key, self);
-        try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{ key_name, revo.baselib.typeof(object, self) });
+        const key_name = if (key.asAtom()) |atom| self.stringValue(atom) else revo.base.typeof(key, self);
+        try self.setRuntimeMessageFmt("field `{s}` does not exist on {s}", .{ key_name, revo.base.typeof(object, self) });
         return error.NotAFunction;
     };
 
@@ -1540,7 +1540,7 @@ noinline fn execPow(self: *VM, regs: []Value, base: usize, instr: Instruction) V
             if (std.math.isNan(result)) return self.fail(
                 error.IncompatibleTypes,
                 "cannot exponentiate {s} by {s}",
-                .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+                .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
             );
 
             regWrite(regs, base, instr.a, Value.new.num(result));
@@ -1550,7 +1550,7 @@ noinline fn execPow(self: *VM, regs: []Value, base: usize, instr: Instruction) V
     return self.fail(
         error.IncompatibleTypes,
         "cannot exponentiate {s} by {s}",
-        .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+        .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
     );
 }
 
@@ -1591,7 +1591,7 @@ noinline fn execStringRepeat(
     return self.fail(
         error.IncompatibleTypes,
         "cannot multiply {s} and {s}",
-        .{ revo.baselib.typeof(lhs, self), revo.baselib.typeof(rhs, self) },
+        .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
     );
 }
 

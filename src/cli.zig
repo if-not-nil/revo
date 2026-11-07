@@ -40,8 +40,8 @@ else
     "") ++
     \\  revo dis script.rv                show bytecode disassembly
     \\       doc script.rv                print extracted docs as markdown
-    \\       doc --html src/baselib/iface     render the baselib reference as html
-    \\       doc --html --splice src/baselib/iface < std.md > std.new   splice into a doc page
+    \\       doc --html src/base          render the baselib reference as html
+    \\       doc --html --splice src/base < std.md > std.new   splice into a doc page
     \\
     \\  revo fmt                          format every .rv under the pwd
     \\       fmt script.rv dir/           format that in place
@@ -152,13 +152,13 @@ fn runMain(init: std.process.Init) !void {
         if (source) |s| {
             var vm = try initVM(init, init.gpa, &.{args[0]}, 1);
             defer vm.deinit();
-            try revo.baselib.populateArgv(&vm);
+            try revo.base.populateArgv(&vm);
             try runSource(init, init.gpa, "<stdin>", s, .{});
             return;
         }
         var vm = try initVM(init, init.gpa, &.{args[0]}, 1);
         defer vm.deinit();
-        try revo.baselib.populateArgv(&vm);
+        try revo.base.populateArgv(&vm);
         try repl.run(&vm, init.gpa, init);
         return;
     }
@@ -169,7 +169,7 @@ fn runMain(init: std.process.Init) !void {
     if (config.mode == .repl) {
         var vm = try initVM(init, init.gpa, config.argv, config.threads);
         defer vm.deinit();
-        try revo.baselib.populateArgv(&vm);
+        try revo.base.populateArgv(&vm);
         return try repl.run(&vm, init.gpa, init);
     }
     if (config.mode == .lsp) {
@@ -241,7 +241,7 @@ fn runMain(init: std.process.Init) !void {
 
     var vm = try initVM(init, init.gpa, config.argv, config.threads);
     defer vm.deinit();
-    try revo.baselib.populateArgv(&vm);
+    try revo.base.populateArgv(&vm);
     try repl.run(&vm, init.gpa, init);
 }
 
@@ -594,7 +594,7 @@ fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, confi
     defer gpa.free(bytecode.instructions);
     defer gpa.free(bytecode.spans);
 
-    try revo.baselib.populateArgv(&vm);
+    try revo.base.populateArgv(&vm);
     try runBytecode(init, gpa, &vm, "<inline>", bytecode, code, config.echo_last, config.perf);
 }
 
@@ -614,7 +614,7 @@ fn runSource(
 
     try vm.setProgramDebugInfo(bytecode.spans, source, path);
 
-    try revo.baselib.populateArgv(&vm);
+    try revo.base.populateArgv(&vm);
     try runBytecode(init, gpa, &vm, path, bytecode, source, config.echo_last, config.perf);
 }
 
@@ -638,7 +638,7 @@ fn runBytecodeFile(
         std.debug.print("debug info error - {}\n", .{err});
     };
 
-    try revo.baselib.populateArgv(&vm);
+    try revo.base.populateArgv(&vm);
     try runBytecode(
         init,
         gpa,
@@ -720,7 +720,7 @@ fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source:
         std.debug.print("debug info error - {}\n", .{err});
     };
 
-    try revo.baselib.populateArgv(&vm);
+    try revo.base.populateArgv(&vm);
     try benchBytecode(init, gpa, &vm, path, bytecode, source, config.bench_iters, config.echo_last, config.perf);
 }
 
@@ -744,7 +744,7 @@ fn benchBytecodeFile(
         std.debug.print("debug info error - {}\n", .{err});
     };
 
-    try revo.baselib.populateArgv(&vm);
+    try revo.base.populateArgv(&vm);
     try benchBytecode(
         init,
         gpa,

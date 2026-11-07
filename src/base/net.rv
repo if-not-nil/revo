@@ -1,0 +1,25 @@
+#* tcp sockets: connect, listen, accept, send and receive *#
+pub declare net = {
+  #* connects to a remote host and port, returns a socket handle *#
+  connect: fn(host: string, port: number) -> !table,
+  #* listens for incoming connections on the given port, returns server socket *#
+  listen: fn(port: number, ?backlog: number...) -> !table,
+}
+
+#* tcp sockets: connect, listen, accept, send and receive *#
+pub declare socket = {
+  #* accepts an incoming client connection on a server socket *#
+  accept: fn(self: table) -> !table,
+  #* sends data over the socket, returns number of bytes sent *#
+  send: fn(self: table, data: string) -> !number,
+  #* receives data according to opts *#
+  recv: fn(self: table, opts: socket.RecvOpts) -> !string,
+  #* closes the socket *#
+  close: fn(self: table) -> !atom,
+  #* recv options *#
+  RecvOpts: {
+    ?mode: :read_some | :read_all | :read_line,
+    ?max_bytes: number,
+    ?delimiter: string,
+  }
+}

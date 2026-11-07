@@ -34,11 +34,11 @@ pub fn hover(
         // module first so duplicated names don't fall through to whichever
         // module comes first (e.g. `number.floor`)
         if (txt.moduleMemberAt(snap.text, pos)) |mod_name| {
-            if (revo.baselib.specs.isModule(mod_name)) {
+            if (revo.base.specs.isModule(mod_name)) {
                 var qbuf: [256]u8 = undefined;
                 const qualified = std.mem.print(&qbuf, "{s}.{s}", .{ mod_name, name }) catch null;
                 if (qualified) |q| {
-                    if (revo.baselib.specs.findQualified(q)) |spec| {
+                    if (revo.base.specs.findQualified(q)) |spec| {
                         return try renderSpecHover(alloc, spec, snap.text, pos, name);
                     }
                 }
@@ -79,22 +79,22 @@ pub fn hover(
             }
         }
         // baselib module name (`math` in `math.floor`)
-        if (revo.baselib.specs.isModule(name)) {
+        if (revo.base.specs.isModule(name)) {
             var buf = std.Io.Writer.Allocating.init(alloc);
             defer buf.deinit();
             try buf.writer.print("module `{s}`", .{name});
 
-            const mod_doc = revo.baselib.specs.moduleDoc(name);
+            const mod_doc = revo.base.specs.moduleDoc(name);
             if (mod_doc.len > 0) try buf.writer.print("\n\n{s}", .{mod_doc});
             try buf.writer.writeAll("\n\n```revo\n");
 
-            for (revo.baselib.specs.full_specs) |group| {
+            for (revo.base.specs.full_specs) |group| {
                 for (group) |*spec| {
                     if (spec.is_type) continue;
                     const ours = spec.head.kind == .namespaced and spec.head.module != null and
                         std.mem.eql(u8, spec.head.module.?, name);
                     if (!ours) continue;
-                    try revo.baselib.specs.renderSignature(&buf.writer, spec.*);
+                    try revo.base.specs.renderSignature(&buf.writer, spec.*);
                     try buf.writer.writeByte('\n');
                 }
             }
@@ -301,7 +301,7 @@ pub fn renderDefinition(
 /// hover card for one baselib spec: qualified sig plus doc, call-site range
 fn renderSpecHover(
     alloc: std.mem.Allocator,
-    spec: *const revo.baselib.specs.FnSpec,
+    spec: *const revo.base.specs.FnSpec,
     text: []const u8,
     pos: Position,
     name: []const u8,
@@ -309,7 +309,7 @@ fn renderSpecHover(
     var buf = std.Io.Writer.Allocating.init(alloc);
     defer buf.deinit();
     try buf.writer.writeAll("```revo\n");
-    try revo.baselib.specs.renderSignature(&buf.writer, spec.*);
+    try revo.base.specs.renderSignature(&buf.writer, spec.*);
     try buf.writer.writeAll("\n```");
     if (spec.doc.len > 0) {
         try buf.writer.print("\n\n{s}", .{spec.doc});

@@ -1,0 +1,10 @@
+#* encode values as json and decode json back into revo values *#
+pub declare json = {
+  #*
+  encodes value as json string;
+  enabling `pretty` will emit indented json
+  *#
+  encode: fn(value: any, ?pretty: bool) -> !string,
+  #* decodes json string into revo value *#
+  decode: fn(source: string) -> !any,
+}

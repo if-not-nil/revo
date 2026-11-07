@@ -108,7 +108,7 @@ pub const os_impls: []const specs.Impl = &.{
     .{ .name = "setenv", .f = gated(revo.default_caps.setenv, &[_]host.ParamType{ .string, .string }, setenv_) },
 };
 
-pub fn register_baselib(vm: *revo.VM) !void {
+pub fn register_base(vm: *revo.VM) !void {
     vm.loaded_specs = try specs.loadAllSpecs(vm.runtime.alloc);
 
     const argv_atom = try vm.internAtom("argv");

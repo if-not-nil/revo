@@ -1,0 +1,53 @@
+#* numeric math *#
+pub declare math = {
+  #* absolute value *#
+  abs: fn(x: number) -> number,
+  #* floor of x *#
+  floor: fn(x: number) -> number,
+  #* ceiling of x *#
+  ceil: fn(x: number) -> number,
+  #* square root, errors if x is negative *#
+  sqrt: fn(x: number) -> number,
+  #* base raised to exponent *#
+  pow: fn(base: number, exponent: number) -> number,
+  #* min of all arguments, at least one required *#
+  min: fn(first: number, args: number...) -> number,
+  #* max of all arguments, at least one required *#
+  max: fn(first: number, args: number...) -> number,
+  #* sine of x (x in radians) *#
+  sin: fn(x: number) -> number,
+  #* arc-sine of x (x in radians) *#
+  asin: fn(x: number) -> number,
+  #* hyperbolic sine of x (x in radians) *#
+  sinh: fn(x: number) -> number,
+  #* hyperbolic arc-sine of x (x in radians) *#
+  asinh: fn(x: number) -> number,
+  #* cosine of x (x in radians) *#
+  cos: fn(x: number) -> number,
+  #* arc-cosine of x (x in radians) *#
+  acos: fn(x: number) -> number,
+  #* hyperbolic cosine of x (x in radians) *#
+  cosh: fn(x: number) -> number,
+  #* hyperbolic arc-cosine of x (x in radians) *#
+  acosh: fn(x: number) -> number,
+  #* tangent of x (x in radians) *#
+  tan: fn(x: number) -> number,
+  #* arc-tangent of x (x in radians) *#
+  atan: fn(x: number) -> number,
+  #* hyperbolic tangent of x (x in radians) *#
+  tanh: fn(x: number) -> number,
+  #* hyperbolic arc-tangent of x (x in radians) *#
+  atanh: fn(x: number) -> number,
+  #* arc-tangent of y and x (y and x in radians) *#
+  atan2: fn(y: number, x: number) -> number,
+  #* hypotenuse of sides x and y *#
+  hypot: fn(x: number, y: number) -> number,
+  #* natural logarithm, panics if x <= 0 *#
+  log: fn(x: number) -> number,
+  #* e raised to x *#
+  exp: fn(x: number) -> number,
+  #* sign of value (-1, 0, 1) *#
+  sign: fn(value: number) -> number,
+  #* test whether two values are close within the given number of decimal places *#
+  close?: fn(x: number, y: number, places: number) -> bool,
+}

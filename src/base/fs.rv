@@ -1,0 +1,65 @@
+#* filesystem access & ops *#
+pub declare fs = {
+  #*
+  wraps a path in a file handle table
+  mode is optional, defaults to "r": "r" opens an existing path, "w" creates or truncates a file, "a" creates or keeps a file
+  use `file.close()` when you're done with the handle
+  *#
+  open: fn(path: string, mode: string?) -> !table,
+  #* returns table of directory entries *#
+  readdir: fn(path: string) -> !table<{name: string, kind: atom}>,
+  #* does path exist? answers :false when missing, raises on unexpected io errors *#
+  exists?: fn(path: string) -> bool,
+  #*
+  removes a file or directory at path
+  recursive is optional, defaults to :false: removes a file or empty directory only, :true deletes the whole tree
+  *#
+  remove: fn(path: string, recursive: bool?) -> !atom,
+  #* creates a directory; parents optional, defaults to :false: :true creates missing parents like `mkdir -p`. permissions optional, platform default when omitted *#
+  mkdir: fn(path: string, parents: bool?, permissions: number?) -> !atom,
+  #* ensures a file exists, creating it empty when missing and leaving existing entries alone *#
+  touch: fn(path: string) -> !atom,
+  #* copies a file to a new path, overwriting the destination *#
+  copy: fn(src: string, dst: string) -> !atom,
+  #* renames a file or directory *#
+  rename: fn(old_path: string, new_path: string) -> !atom,
+  #* get file metadata as a table from a path; follow optional, defaults to :true *#
+  stat: fn(path: string, follow: bool?) -> !fs.Stat,
+  #* file metadata as returned by file.stat and fs.stat *#
+  Stat: {
+    size: number,
+    kind: atom,
+    permissions: number,
+    mtime: number,
+    atime: number,
+    ctime: number,
+  },
+  #* changes cwd to the given path *#
+  chdir: fn(path: string) -> !atom,
+  #* 
+  returns a list of files using pattern matching rules similar to the UNIX shell, if no matches are found then the table will be empty.
+  recursive optional, defaults to :false: :true causes "**" to match all directories and subdirectories until it reaches an endpoint, this can be quite cpu heavy on large directories
+  depth_limit optional, defaults to 100: this is used to set an endpoint where glob must stop matching files after a certain recursion depth.  
+  *#
+  glob: fn(pattern: string, recursive: bool?, depth_limit: number?) -> !table,
+}
+
+#* filesystem access & ops *#
+pub declare file = {
+  #* returns table of directory entries for the dir handle's path *#
+  readdir: fn(self: table) -> !table<{name: string, kind: atom}>,
+  #* reads the full file contents as a string *#
+  read: fn(self: table) -> !string,
+  #*
+  overwrites the file with the provided string, or appends when append is :true
+  optional permissions default to the platform file default
+  *#
+  write: fn(self: table, data: string, append: bool?, permissions: number?) -> !number,
+  #* get file metadata as a table; follow optional, defaults to :true: :false leaves symlinks alone *#
+  stat: fn(self: table, follow: bool?) -> !fs.Stat,
+  #*
+  closes a file handle table
+  this is currently a logical close for wrapper handles
+  *#
+  close: fn(self: table) -> !atom,
+}

@@ -4,7 +4,7 @@
 		"zig-out",
 		"src/capi",
 		"zig-pkg",
-		"src/baselib",
+		"src/base",
 		"src/main_wasm.zig",
 		"examples",
 		"notes"

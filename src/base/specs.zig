@@ -37,34 +37,32 @@ pub const Group = struct {
     }
 };
 
-/// the whole surface in one file; `re`/`ffi` specs are filtered at load when
-/// regex/ffi are off so the mvzr/io chain never reaches targets like
-/// freestanding wasm
+/// one group per `.rv` next to its zig, in surface order
+/// , `find` is first match wins, so the globals stay first
+/// , `re`/`ffi`/`http` specs are dropped at load when they're off, so the
+///   mvzr/io chain never reaches targets like freestanding wasm
 pub const groups: []const Group = &.{
-    Group.init("std", @embedFile("base.rv"), &.{
-        @import("root.zig").root_impls,
-        @import("root.zig").os_impls,
-        if (regex_on) @import("regex.zig").impls else &.{},
-        if (ffi_on) @import("ffi_lib.zig").impls else &.{},
-        @import("number.zig").impls,
-        @import("string.zig").impls,
-        @import("table.zig").impls,
-        @import("dataframe.zig").impls,
-        @import("iter.zig").impls,
-        @import("math.zig").impls,
-        @import("stats.zig").impls,
-        @import("json.zig").impls,
-        @import("csv.zig").impls,
-        @import("time.zig").impls,
-        @import("datetime.zig").impls,
-        @import("net.zig").impls,
-        if (http_on) @import("http.zig").impls else &.{},
-        @import("fs.zig").impls,
-        @import("revo.zig").impls,
-        @import("compress.zig").impls,
-        @import("rng.zig").impls,
-        @import("argparse.zig").impls,
-    }),
+    Group.init("top", @embedFile("top.rv"), &.{ @import("root.zig").root_impls, @import("root.zig").os_impls }),
+    Group.init("re", @embedFile("re.rv"), &.{if (regex_on) @import("regex.zig").impls else &.{}}),
+    Group.init("ffi", @embedFile("ffi.rv"), &.{if (ffi_on) @import("ffi_lib.zig").impls else &.{}}),
+    Group.init("number", @embedFile("number.rv"), &.{@import("number.zig").impls}),
+    Group.init("string", @embedFile("string.rv"), &.{@import("string.zig").impls}),
+    Group.init("table", @embedFile("table.rv"), &.{@import("table.zig").impls}),
+    Group.init("dataframe", @embedFile("dataframe.rv"), &.{@import("dataframe.zig").impls}),
+    Group.init("iter", @embedFile("iter.rv"), &.{@import("iter.zig").impls}),
+    Group.init("math", @embedFile("math.rv"), &.{@import("math.zig").impls}),
+    Group.init("stats", @embedFile("stats.rv"), &.{@import("stats.zig").impls}),
+    Group.init("json", @embedFile("json.rv"), &.{@import("json.zig").impls}),
+    Group.init("csv", @embedFile("csv.rv"), &.{@import("csv.zig").impls}),
+    Group.init("time", @embedFile("time.rv"), &.{@import("time.zig").impls}),
+    Group.init("datetime", @embedFile("datetime.rv"), &.{@import("datetime.zig").impls}),
+    Group.init("net", @embedFile("net.rv"), &.{@import("net.zig").impls}),
+    Group.init("http", @embedFile("http.rv"), &.{if (http_on) @import("http.zig").impls else &.{}}),
+    Group.init("fs", @embedFile("fs.rv"), &.{@import("fs.zig").impls}),
+    Group.init("revo", @embedFile("revo.rv"), &.{@import("revo.zig").impls}),
+    Group.init("compress", @embedFile("compress.rv"), &.{@import("compress.zig").impls}),
+    Group.init("rng", @embedFile("rng.rv"), &.{@import("rng.zig").impls}),
+    Group.init("argparse", @embedFile("argparse.rv"), &.{@import("argparse.zig").impls}),
 };
 
 /// merged, runtime view of the baselib surface; built by `loadAllSpecs`
@@ -405,7 +403,7 @@ pub const Head = struct {
     module: ?[]const u8 = null,
 };
 
-/// one declaration from the sig surface (`base.rv`)
+/// one declaration from the sig surface (the `.rv` files in `src/base`)
 pub const FnSpec = struct {
     name: []const u8,
     head: Head,

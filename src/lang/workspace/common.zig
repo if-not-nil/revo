@@ -241,8 +241,8 @@ pub fn formatSig(alloc: std.mem.Allocator, name: []const u8, sig: FnSig) ![]cons
 
 /// one baselib lookup so providers share a call site
 ///   replaces four `specs.findFn` spellings
-pub fn baselibSig(name: []const u8) ?*const revo.baselib.specs.FnSpec {
-    return revo.baselib.specs.findFn(name);
+pub fn baselibSig(name: []const u8) ?*const revo.base.specs.FnSpec {
+    return revo.base.specs.findFn(name);
 }
 
 /// get known global names from the vm

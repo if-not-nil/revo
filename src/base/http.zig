@@ -119,7 +119,7 @@ fn urlToString(url: Value, vm: *VM) !HostErrOr([]const u8) {
     return if (url.asStr()) |s|
         .{ .value = vm.stringValue(s) }
     else
-        .{ .err = HostResult.errType(0, "string or table", revo.baselib.typeof(url, vm)).err };
+        .{ .err = HostResult.errType(0, "string or table", revo.base.typeof(url, vm)).err };
 }
 
 fn buildMaxRedirects(options: Value, vm: *VM) !HostErrOr(?u16) {
@@ -213,7 +213,7 @@ const Body = struct {
 fn HostErrOr(comptime T: type) type {
     return union(enum) {
         value: T,
-        err: revo.baselib.host.HostErrPayload,
+        err: revo.base.host.HostErrPayload,
     };
 }
 

@@ -1,0 +1,60 @@
+#* command-line arguments parsing *#
+pub declare argparse = {
+  #*
+  Usage: argparse.parse BUILDER ARGS
+  	Parse CLI args with flags, options, commands, and positionals.
+  
+  
+  Subcommands:
+  	p:flag(name: atom, opts: table)
+  	p:option(name: atom, opts: table)
+  	p:command(name: atom, opts: table)
+  	p:positional(name: atom, opts: table)
+  
+  
+  All arguments to opts are optional:
+  	short        string
+  		the shorthand for the argument, like -v
+  	description  string
+  	  description to be displayed in the usage
+  	terminal     bool
+  	  stop parsing after this arg is filled
+  	passthrough  bool
+  	  pass remaining args to child
+  	prefix       bool
+  		treat the option as a prefix
+  
+  
+  Examples:
+  	./args.rv
+  	./args.rv -v -o out.txt main.rv
+  	./args.rv compile -v
+  	./args.rv --unknown
+  
+  
+  Output status:
+  	result.err: nil | { token = string, message = string }
+  	result.flags: table of flag names to values
+  	result.commands: table of command names to booleans
+  	result.positionals: table of positional names to values
+  	result.leftover: table of unconsumed args
+  
+  
+  Report bugs to <https://github.com/if-not-nil/revo/issues>
+  *#
+  parse: fn(callback: function, argv: table) -> argparse.Opts,
+  #*
+  format a usage string from a parse result
+  *#
+  usage: fn(result: argparse.Opts) -> string,
+  #* a parse error, token plus its message *#
+  ResultMsg: { token: string, message: string },
+
+  Opts: {
+    err: argparse.ResultMsg?,
+    flags: table<string, string | bool> | :nil,
+    commands: table<string, bool> | :nil,
+    positionals: table<string, string> | :nil,
+    leftover: table<string> | :nil,
+  }
+}

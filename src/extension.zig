@@ -25,28 +25,28 @@
 
 const std = @import("std");
 
-const baselib = @import("baselib/root.zig");
+const base = @import("base/root.zig");
 const revo = @import("root.zig");
-const specs = @import("baselib/specs.zig");
+const specs = @import("base/specs.zig");
 
-pub const ArgTypes = baselib.host.ArgTypes;
-pub const ParamType = baselib.host.ParamType;
-pub const HostFunc = baselib.host.HostFunc;
-pub const HostFn = baselib.host.HostFn;
-pub const HostResult = baselib.host.HostResult;
+pub const ArgTypes = base.host.ArgTypes;
+pub const ParamType = base.host.ParamType;
+pub const HostFunc = base.host.HostFunc;
+pub const HostFn = base.host.HostFn;
+pub const HostResult = base.host.HostResult;
 pub const VM = revo.VM;
 pub const Value = revo.Value;
 
 /// derive arity/param_types/unwrapping from a `fn (vm: *VM, typed args...) !HostResult` signature
 /// , `ArgTypes.Optional` params become optional with defaults
-pub const def = baselib.host.def;
+pub const def = base.host.def;
 /// explicit prefix types; this is where you do variadic tails
-pub const define = baselib.host.define;
-pub const defineVariadic = baselib.host.defineVariadic;
+pub const define = base.host.define;
+pub const defineVariadic = base.host.defineVariadic;
 /// collect `pub fn`s of a struct into `[]specs.Impl`, names are decl names
-pub const impls = baselib.host.impls;
+pub const impls = base.host.impls;
 /// checked float-to-int conversion, null when not a finite integral value
-pub const numToInt = baselib.host.numToInt;
+pub const numToInt = base.host.numToInt;
 
 fn abiSafe(comptime f: HostFn) HostFn {
     return struct {

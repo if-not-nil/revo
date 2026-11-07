@@ -1,6 +1,6 @@
 // debug flags
 pub fn set_debug(args: []const Value, vm: *VM) !HostResult {
-    const table_id = args[0].asTable() orelse return .errType(0, "table", baselib.typeof(args[0], vm));
+    const table_id = args[0].asTable() orelse return .errType(0, "table", base.typeof(args[0], vm));
     const table = try vm.tables.get(table_id);
     vm.debug.dump = try checkField("dump", table, vm);
     vm.debug.each_instr = try checkField("instr", table, vm);
@@ -26,7 +26,7 @@ pub fn set_meta(args: []const Value, vm: *VM) !HostResult {
     else if (args[1].asTable()) |id|
         id
     else
-        return .errType(1, "undef atom or table", baselib.typeof(args[1], vm));
+        return .errType(1, "undef atom or table", base.typeof(args[1], vm));
     try vm.setMetatable(args[0], mt);
     return .data(args[0]);
 }
@@ -44,5 +44,5 @@ const revo = @import("../root.zig");
 const testing = revo.lang.test_helpers;
 const Value = revo.Value;
 const VM = revo.VM;
-const baselib = @import("root.zig");
-const HostResult = baselib.host.HostResult;
+const base = @import("root.zig");
+const HostResult = base.host.HostResult;

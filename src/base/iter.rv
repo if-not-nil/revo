@@ -1,0 +1,117 @@
+#* lazy iterators: range, mapping, filtering, folding and chaining *#
+pub declare iter = {
+  #*
+  generates a lazy arithmetic sequence
+     range(3)           # 0, 1, 2
+     range(1, 4)        # 1, 2, 3
+     range(0, 10, 2)    # 0, 2, 4, 6, 8
+     range(5, 0, -1)    # 5, 4, 3, 2, 1
+  *#
+  range: fn(end: number, rest: number...) -> function,
+  #*
+  returns a lazy iterator that transforms each element
+  an arity-2 fn receives (value, index/key); materialize with iter.collect()
+     iter.collect(iter.map({1, 2, 3}, fn(x) x * 2))
+  *#
+  map: fn(collection: any, fn: function) -> function,
+  #*
+  returns a lazy iterator that only yields values where fn is truthy
+  an arity-2 fn receives (value, index/key)
+     iter.collect(iter.filter({1, 2, 3, 4}, fn(x) x > 2))
+  *#
+  filter: fn(collection: any, fn: function) -> function,
+  #*
+  returns a lazy iterator of the first n elements
+     iter.collect(iter.take({1, 2, 3, 4}, 2))
+  *#
+  take: fn(collection: any, n: number) -> function,
+  #*
+  returns a lazy iterator without the first n elements
+     iter.collect(iter.drop({1, 2, 3, 4}, 2))
+  *#
+  drop: fn(collection: any, n: number) -> function,
+  #*
+  returns a lazy iterator of pairs, one element from each iterable
+  takes two or more, stops at the shortest
+     iter.collect(iter.zip({1, 2}, {3, 4}))   # {{1, 3}, {2, 4}}
+  *#
+  zip: fn(first: any, second: any, rest: any...) -> function,
+  #*
+  returns a lazy iterator of (index, value) pairs
+     iter.collect(iter.enumerate({5, 7}))   # {{0, 5}, {1, 7}}
+  *#
+  enumerate: fn(collection: any) -> function,
+  #*
+  returns a lazy iterator of n-element table chunks
+     iter.collect(iter.chunk({1, 2, 3, 4, 5}, 2))   # {{1, 2}, {3, 4}, {5}}
+  *#
+  chunk: fn(collection: any, n: number) -> function,
+  #*
+  maps each element to an iterable and yields its elements lazily
+     iter.collect(iter.flat_map({1, 2}, fn(x) {x, x * 10}))   # {1, 10, 2, 20}
+  *#
+  flat_map: fn(collection: any, fn: function) -> function,
+  #*
+  collects all values from an iterable into a table
+     iter.collect(iterable)
+  *#
+  collect: fn(iterable: any) -> table,
+  #*
+  collects string/number elements from an iterable into a string
+  numbers are clamped to byte values
+     iter.collect_string(iter.filter("hello", fn(c) c != "l"))
+  *#
+  collect_string: fn(iterable: any) -> string,
+  #*
+  folds/accumulates elements using function and initial value
+     iter.reduce({1, 2, 3, 4}, fn(acc, x) acc + x, 0)
+     iter.reduce(iter.map({1, 2}, fn(x) x * 2), fn(acc, x) acc + x, 0)
+  *#
+  reduce: fn(collection: any, fn: function, init: any) -> any,
+  #*
+  like reduce but without an initial value; first element seeds the fold
+  returns nil for empty collections
+     iter.fold({1, 2, 3, 4}, fn(acc, x) acc + x)
+  *#
+  fold: fn(collection: any, fn: function) -> any | :nil,
+  #*
+  iterates over elements, calling function for side effects, returns :ok
+  an arity-2 fn receives (value, index/key)
+     iter.each({a = 1}, fn(v, k) print(k, v))
+  *#
+  each: fn(collection: any, fn: function) -> :ok,
+  #*
+  returns first element where function returns true, or nil
+     iter.find({1, 2, 3, 4}, fn(x) x > 2)
+  *#
+  find: fn(collection: any, fn: function) -> any | :nil,
+  #*
+  returns true if function returns true for all elements
+     iter.all?({1, 2, 3}, fn(x) x > 0)
+  *#
+  all?: fn(collection: any, pred: function) -> bool,
+  #*
+  returns true if function returns true for any element
+     iter.any?({1, 2, 3}, fn(x) x > 2)
+  *#
+  any?: fn(collection: any, pred: function) -> bool,
+  #*
+  returns the number of elements, or of those where pred is truthy
+     iter.count({1, 2, 3, 4})
+     iter.count({1, 2, 3, 4}, fn(x) x > 2)
+  *#
+  count: fn(collection: any, ?pred: function) -> number,
+  #*
+  sums numeric elements, skipping non-numbers
+     iter.sum({1, 2, "x", 3})
+  *#
+  sum: fn(collection: any) -> number,
+}
+
+#*
+wraps any iterable in a zero-arg callable
+built-in types (string, table) get a position-based iterator
+functions return as-is (already callable)
+tables with __iter metamethod call __iter(obj)
+*#
+pub declare to_iter = fn(obj: any) -> function

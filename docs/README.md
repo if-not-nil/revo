@@ -7,6 +7,6 @@ auto-synced
 
 ```bash
 set STDOCPATH ./_ign-web/content/std.html
-revo doc --html --splice ../src/baselib/sigs < "$STDOCPATH" > ./std-finished.html
+revo doc --html --splice ../src/base < "$STDOCPATH" > ./std-finished.html
 mv ./std-finished.html $STDOCPATH
 ```

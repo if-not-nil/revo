@@ -1,0 +1,51 @@
+#* statistics functions *#
+pub declare stats = {
+  #*
+  counts frequencies of elements in an array table and returns a mapping of elements to their counts
+  *#
+  frequencies: fn(input: table<any>) -> table<any, number>,
+  #*
+  middle value of input data
+  *#
+  median: fn(input: table<number>) -> number,
+  #*
+  most frequent occuring value of input data
+  *#
+  mode: fn(input: table<any>) -> any,
+  #*
+  table of all statistics of the input data
+  *#
+  statistics: fn(input: table<number>) -> {
+    n: number,
+    frequencies: table,
+    mean: number,
+    median: number,
+    mode: number,
+    geomean: number,
+    minimum: number,
+    maximum: number,
+    sum: number,
+    sum_of_squares: number,
+    product: number,
+    stdev: number,
+    sample_stdev: number,
+    variance: number,
+    sample_variance: number,
+    skewness: number,
+    sample_skewness: number,
+    kurtosis: number,
+    sample_kurtosis: number,
+  },
+  #*
+  table of regression statistics of the input data
+  *#
+  regression: fn(input1: table<number>, input2: table<number>) -> {
+    n: number,
+    sum_of_products: number,
+    slope: number,
+    intercept: number,
+    correlation: number,
+    covariance: number,
+    sample_covariance: number,
+  },
+}

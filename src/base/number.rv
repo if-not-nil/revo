@@ -1,0 +1,19 @@
+#* global number helpers, calllable as `1337:nan?` and `number.nan?(1337)` *#
+pub declare number = {
+  #* converts value to number: number("12") => 12 *#
+  __call: fn(value: string) -> number,
+  #* checks if number is NaN *#
+  nan?: fn(self: number) -> bool,
+  #* checks if number is finite *#
+  finite?: fn(self: number) -> bool,
+  #* checks if number is infinite *#
+  inf?: fn(self: number) -> bool,
+  #* largest integer <= self *#
+  floor: fn(self: number) -> number,
+  #* smallest integer >= self *#
+  ceil: fn(self: number) -> number,
+  #* rounds to nearest integer *#
+  round: fn(self: number) -> number,
+  #* absolute value *#
+  abs: fn(self: number) -> number,
+}

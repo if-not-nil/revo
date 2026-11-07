@@ -1,0 +1,122 @@
+#!
+welcome to revo's standard library
+!#
+
+#*
+formats a string with format specifiers
+~ %v is value (plain)
+~ %? is debug (quoted strings, multilined tables)
+~ %p is pretty (debug with colors)
+
+string literals also support `#{expr}`, `#{expr:?}`, and `#{expr:p}` interpolation
+you likely want to use them instead
+*#
+pub declare fmt = fn(format: string, args: any...) -> string
+
+#* returns length of string or table *#
+pub declare len = fn(value: any) -> number
+
+#* prints one value and returns it back *#
+pub declare inspect = fn(value: any) -> any
+
+#* returns metatable of value or :undef *#
+pub declare get_meta = fn(value: any) -> table | :undef
+
+#* sets metatable of value *#
+pub declare set_meta = fn(value: any, meta: table|:undef) -> any
+
+#* returns type of value as atom: nil, number, string, atom, function, table, opaque, resource *#
+pub declare typeof = fn(value: any) -> atom
+
+#* used in tests, returns value or {:err, :ExpectFailed} tuple *#
+pub declare expect = fn(value: any) -> !any/:ExpectFailed
+
+#* returns value or {:err, :NotEqual} tuple if values are not equal *#
+pub declare expect_eq = fn(a: any, b: any) -> !any/:NotEqual
+
+#* panics if value is falsy *#
+pub declare assert = fn(value: any) -> any
+
+#* panics if values are not equal *#
+pub declare assert_eq = fn(a: any, b: any) -> any
+
+#* sets debug flags from a table (all fields default to :false) *#
+pub declare set_debug = fn(flags: {dump: bool?, trace: bool?, instr: bool?, stack: bool?}) -> :ok
+
+#* returns debug info as a table *#
+pub declare debug_info = fn() -> {
+  flags: {dump: bool, trace: bool, instr: bool, stack: bool},
+  fiber_id: number,
+  pc: number,
+  stack_depth: number,
+  frame_depth: number,
+  program_len: number,
+  has_debug_info: bool,
+  source_name: string|:nil,
+  source: string|:nil,
+  span_count: number,
+  panic_message: string|:nil,
+}
+
+#* creates a new channel with optional buffer size *#
+pub declare chan = fn(?capacity: number...) -> {:chan, number}
+
+#* sends value to channel *#
+pub declare send = fn(chan: {:chan, number}, value: any) -> :ok
+
+#* receives value from channel, parks if empty *#
+pub declare recv = fn(chan: {:chan, number}) -> any
+
+#* blocks until the fiber completes and returns its result *#
+pub declare join = fn(handle: {:fiber, number}) -> any
+
+#* sleeps current fiber for given milliseconds *#
+pub declare sleep = fn(ms: number) -> :parked
+
+#* panics with given message *#
+pub declare panic = fn(args: any...) -> never
+
+#* prints values to stdout with space separator *#
+pub declare print = fn(args: any...) -> :ok
+
+#* hashes any value *#
+pub declare hash = fn(val: any) -> number
+
+# os
+
+# process and host access: cwd, exit, subprocesses, stdin lines, importing modules, running tests
+
+#* reads one line from stdin, or until a custom delimiter (?opts: { delimiter: string|:nil|:eof }) *#
+pub declare input = fn(?opts: os.InputOpts...) -> !string
+
+#* returns current working directory path *#
+pub declare cwd = fn() -> string
+
+#* exists the program with a status *#
+pub declare exit = fn(status: number) -> never
+
+#* runs a subprocess and returns (stdout, stderr) *#
+pub declare system = fn(args: table<string>) -> !{string, string}
+
+#* internal, do not use. the runtime half of `import`, takes a realpath *#
+pub declare __internal_import = fn(path: string) -> any
+
+#* internal, do not use. the natives of a `src/std` module, by name *#
+pub declare __internal_native = fn(name: string) -> table
+
+#* internal, do not use unless you know what you're doing. runs a test *#
+pub declare __internal_dotest = fn(name: string, body: function) -> :ok
+
+#* internal, pls dont use. runs a test suite *#
+pub declare __internal_dosuite = fn(name: string, body: function) -> :ok
+
+#* returns value of environment variable, or nil if not set *#
+pub declare getenv = fn(name: string) -> string?
+
+#* sets an environment variable, returns :ok *#
+pub declare setenv = fn(name: string, value: string) -> :ok
+
+#* read input options *#
+pub type os.InputOpts = {
+  ?delimiter: string | :nil | :eof
+}

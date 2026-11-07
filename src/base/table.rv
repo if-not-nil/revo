@@ -1,0 +1,93 @@
+#* global table helpers, calllable as `{1, 2}:at(0)` and `table.at({1, 2}, 0)` *#
+pub declare table = {
+  #*
+  gets value without metamethods
+  returns :undef if key missing
+  *#
+  rawget: fn(self: table, key: any) -> any | :undef,
+  #*
+  gets array element at 0-based index, metatable-ignoring
+  returns :undef when out of range
+  *#
+  at: fn<T>(self: table<T>, index: number) -> T | :undef,
+  #*
+  whether a 0-based index holds an array element, metatable-ignoring
+  *#
+  at?: fn(self: table, index: number) -> bool,
+  #*
+  gets map value, metatable-ignoring
+  returns :undef if key missing
+  *#
+  key: fn<V>(self: table<V>, key: any) -> V | :undef,
+  #* the array part's last element *#
+  last: fn(self: table) -> any,
+  #*
+  whether a key exists, metatable-ignoring
+  *#
+  key?: fn(self: table, key: any) -> bool,
+  #* sets value without metamethods *#
+  rawset: fn(self: table, key: any, value: any) -> table,
+  #* sets the metatable of the table, `:undef` clears it *#
+  set_meta: fn(self: table, meta: :undef|table) -> table,
+  #* makes the table read-only. you probably won't need it, it's mostly for pub records *#
+  freeze: fn<T>(self: T) -> T,
+  #* returns metatable of value or :undef *#
+  get_meta: fn(self: table) -> table | :undef,
+  #* unwraps result, panics if not :ok *#
+  unwrap: fn<T>(self: {:ok, T} | table) -> T,
+  #* extracts error from result, panics if not :err *#
+  unwrap_err: fn<T>(self: {:err, T} | table) -> T,
+  #* inserts value at position, shifting elements right *#
+  insert: fn<T>(self: table<T>, pos: number, value: T) -> :ok,
+  #* inserts elements as last *#
+  push: fn(self: table, values: any...) -> table,
+  #* removes and returns the last array element, or :undef if empty *#
+  pop: fn<T>(self: table<T>) -> T | :undef,
+  #* removes element at position or key, returns removed value *#
+  remove: fn<T>(self: table<T>, key: any) -> T,
+  #* joins array elements with delimiter *#
+  join: fn(self: table, delim: string) -> string,
+  #* returns all keys as table (array indices + hash keys) *#
+  keys: fn<K, V>(self: table<K, V>) -> table<K>,
+  #* returns all values as table *#
+  values: fn<K, V>(self: table<K, V>) -> table<V>,
+  #* creates shallow copy of table *#
+  copy: fn<T>(self: table<T>) -> table<T>,
+  #*
+  merges second table into first
+  later values overwrite earlier ones
+  *#
+  merge: fn<K, V>(self: table<K, V>, other: table<K, V>) -> table<K, V>,
+  #* sorts table array part in ascending order (numbers < strings) *#
+  sort: fn<T>(self: table<T>) -> table<T>,
+  #* sorts table array part using comparison function fn(a, b) -> bool (true if a < b) *#
+  sort_by: fn(self: table, fn: function) -> table,
+  #* reverses table array part in place *#
+  reverse: fn<T>(self: table<T>) -> table<T>,
+  #* flattens nested tables into single array (non-table elements pass through) *#
+  flatten: fn(self: table<any>) -> table<any>,
+  #* returns 0-based index of value in the array part, or nil if not found *#
+  index_of: fn(self: {}, value: any) -> number|:nil,
+  #* returns the number of times a specified value appears in a table's array part *#
+  count_of: fn(self: {}, search_val: any) -> number,
+  #* checks if table contains value *#
+  contains?: fn(self: table, value: any) -> bool,
+  #* removes duplicate elements *#
+  unique: fn<T>(self: table<T>) -> table<T>,
+  #* returns total length of table (array part + keyed entries) *#
+  len: fn(self: table) -> number,
+  #* returns length of table array part only *#
+  alen: fn(self: table) -> number,
+  #* returns length of table keyed entries only *#
+  klen: fn(self: table) -> number,
+  #* reports whether the table holds no entries at all *#
+  empty?: fn(self: table) -> bool,
+  #* creates a deep copy of the table, duplicating nested tables (cycles map to their in-progress copy) *#
+  deep_copy: fn<T>(self: table<T>) -> table<T>,
+  #* applies fn to the value at key (missing reads as :nil) and stores the result back, returns self *#
+  update: fn<T>(self: table<T>, key: any, fn: function) -> table<T>,
+  #* returns a new table with array items [start, end), end defaults to the array length, bounds clamp *#
+  slice: fn<T>(self: table<T>, start: number, end: number...) -> table<T>,
+  #* repeats table array part n times *#
+  repeat: fn<T>(self: table<T>, n: number) -> table<T>,
+}

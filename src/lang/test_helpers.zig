@@ -162,7 +162,7 @@ pub fn topTrueOptsInDir(
 
 fn expectTopNumber(result: *TopResult, expected: f64) !void {
     const actual = result.value.asNum() catch {
-        std.debug.print("result was not a number, it was {s}\n", .{revo.baselib.typeof(result.value, &result.vm)});
+        std.debug.print("result was not a number, it was {s}\n", .{revo.base.typeof(result.value, &result.vm)});
         return error.TypeMismatch;
     };
     if (@abs(expected - actual) > 0.000000001) {
@@ -173,7 +173,7 @@ fn expectTopNumber(result: *TopResult, expected: f64) !void {
 
 fn expectTopAtom(result: *TopResult, expected: []const u8) !void {
     const s = result.value.asAtom() orelse {
-        std.debug.print("result was not a atom, it was {s}\n", .{revo.baselib.typeof(result.value, &result.vm)});
+        std.debug.print("result was not a atom, it was {s}\n", .{revo.base.typeof(result.value, &result.vm)});
         return error.TypeMismatch;
     };
     std.testing.expectEqualStrings(expected, result.vm.stringValue(s)) catch {

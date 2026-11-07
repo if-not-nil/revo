@@ -383,7 +383,7 @@ test "vm gc stress test allocates many objects" {
 var res_gc_hits: usize = 0;
 var res_gc_saw_resource: bool = false;
 
-fn resGcFn(args: []const Value, _: *VM) anyerror!revo.baselib.host.HostResult {
+fn resGcFn(args: []const Value, _: *VM) anyerror!revo.base.host.HostResult {
     res_gc_hits += 1;
     res_gc_saw_resource = args.len == 1 and args[0].isResource();
     return .data(Value.new.nil());
@@ -488,11 +488,11 @@ test "typed resource params reject non-resources" {
     defer vm.deinit();
 
     const S = struct {
-        fn f(_: *VM, h: revo.baselib.host.ArgTypes.resource) anyerror!revo.baselib.host.HostResult {
+        fn f(_: *VM, h: revo.base.host.ArgTypes.resource) anyerror!revo.base.host.HostResult {
             return .data(Value.new.resource(@backingInt(h)));
         }
     };
-    const fid = try vm.installHost("res_echo", revo.baselib.host.def(S.f));
+    const fid = try vm.installHost("res_echo", revo.base.host.def(S.f));
     const callee = Value.new.function(fid);
 
     try testing.expectError(error.TypeError, vm.callFunctionParts(callee, null, &.{Value.new.num(1)}, null));

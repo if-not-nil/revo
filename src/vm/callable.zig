@@ -8,8 +8,8 @@ const t = revo.lang.test_helpers;
 const alloc_pool = @import("alloc_pool.zig");
 
 pub const RunError = revo.vm.RunError;
-pub const HostErrPayload = revo.baselib.host.HostErrPayload;
-pub const HostResult = revo.baselib.host.HostResult;
+pub const HostErrPayload = revo.base.host.HostErrPayload;
+pub const HostResult = revo.base.host.HostResult;
 
 pub const ProgramCounter = usize;
 pub const LocalSlot = revo.opcode.Register;
@@ -108,7 +108,7 @@ pub const Upvalue = struct {
 
 pub const Function = union(enum) {
     closure: Closure,
-    host: revo.baselib.host.HostFunc,
+    host: revo.base.host.HostFunc,
     c_function: CFunction,
 
     pub fn arity(self: Function) u8 {

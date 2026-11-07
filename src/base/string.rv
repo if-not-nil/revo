@@ -1,0 +1,76 @@
+#* global string helpers, calllable as `"hello   world":split(" ")` and `string.split("hello  world", " ")` *#
+pub declare string = {
+  #* returns length of string *#
+  len: fn(self: string) -> number,
+  #* converts string to uppercase *#
+  upper: fn(self: string) -> string,
+  #* converts string to lowercase *#
+  lower: fn(self: string) -> string,
+  #* extracts substring from start with given length *#
+  sub: fn(self: string, start: number, length: number) -> string,
+  #* replaces all occurrences of old with new *#
+  replace: fn(self: string, old: string, new: string) -> string,
+  #* splits string by delimiter into table *#
+  split: fn(self: string, delim: string) -> table<string>,
+  #* trims whitespace from both ends *#
+  trim: fn(self: string) -> string,
+  #* checks if string starts with prefix *#
+  starts_with?: fn(self: string, prefix: string) -> bool,
+  #* checks if string ends with suffix *#
+  ends_with?: fn(self: string, suffix: string) -> bool,
+  #* checks if all characters in the string are upper case *#
+  upper?: fn(self: string) -> bool,
+  #* checks if all characters in the string are lower case *#
+  lower?: fn(self: string) -> bool,
+  #* checks if all characters in the string are alphanumeric *#
+  alnum?: fn(self: string) -> bool,
+  #* checks if all characters in the string are alphabetic *#
+  alpha?: fn(self: string) -> bool,
+  #* checks if all characters in the string are whitespace *#
+  whitespace?: fn(self: string) -> bool,
+  #* checks if all characters in the string are punctuation *#
+  punct?: fn(self: string) -> bool,
+  #* reverses the string *#
+  reverse: fn(self: string) -> string,
+  #*
+  replaces character at index with given char or byte
+  index is 0-based
+  *#
+  with: fn(self: string, idx: number, char: string|number) -> string,
+  #*
+  converts string to table of characters
+  
+  ```
+  "asdf":table() => {"a", "s", "d", "f"}
+  ```
+  *#
+  table: fn(self: string) -> table<string>,
+  #*
+  returns ASCII code of first character
+  
+  ```
+  "a":ascii() => 97
+  ```
+  *#
+  ascii: fn(self: string) -> number,
+  #* checks if string contains substring *#
+  contains?: fn(self: string, substr: string) -> bool,
+  #* ret 0-based index of substring or nil *#
+  index_of: fn(self: string, substr: string) -> number|:nil,
+  #*
+  creates string from ASCII code(s)
+  
+  ```
+  of_ascii(97) => "a"
+  ```
+  *#
+  of_ascii: fn(code: number) -> string,
+  #* joins table elements into string with separator *#
+  join: fn(table: table<string>, sep: string) -> string,
+  #* converts value to string: string(x) *#
+  __call: fn(value: any) -> string,
+  #* concatenates two strings *#
+  concat: fn(self: string, other: string) -> string,
+  #* repeats string n times *#
+  repeat: fn(self: string, n: number) -> string,
+}

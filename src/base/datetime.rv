@@ -1,0 +1,5 @@
+#* you already know what it is (might merge into time, idk) *#
+pub declare datetime = {
+  #* returns current date in UTC using ISO 8601 (YYYY-MM-DD) date format *#
+  today: fn() -> string,
+}

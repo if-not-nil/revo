@@ -11,8 +11,8 @@ const Value = memory.Value;
 const functions = vm.callable;
 const RevoBinding = functions.RevoBinding;
 const HostBinding = functions.HostBinding;
-const HostFunc = revo.baselib.host.HostFunc;
-const ParamType = revo.baselib.host.ParamType;
+const HostFunc = revo.base.host.HostFunc;
+const ParamType = revo.base.host.ParamType;
 
 // for error/missing returns
 const nil_val = Value.new.nil();
@@ -358,7 +358,7 @@ pub export fn revo_c_err_arity(vm_ptr: *anyopaque, got: u64, expected: u64) call
 /// `expected` is a c string, `got` renders through typeof
 pub export fn revo_c_err_type(vm_ptr: *anyopaque, arg: u64, expected: [*:0]const u8, got: Value) callconv(.c) c_int {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
-    v.setRuntimeMessageFmt("arg {d}: wants {s}, got {s}", .{ arg, std.mem.span(expected), revo.baselib.typeof(got, v) }) catch {};
+    v.setRuntimeMessageFmt("arg {d}: wants {s}, got {s}", .{ arg, std.mem.span(expected), revo.base.typeof(got, v) }) catch {};
     return functions.c_err_type;
 }
 

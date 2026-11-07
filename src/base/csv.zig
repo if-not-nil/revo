@@ -169,7 +169,7 @@ fn buildOpts(raw_opts: Args.table, vm: *VM) !HostErrOr(Dialect) {
                 dialect.bom = true;
             }
         } else {
-            return .{ .err = HostResult.errType(@backingInt(raw_opts), ":true or :false", revo.baselib.typeof(id, vm)).err };
+            return .{ .err = HostResult.errType(@backingInt(raw_opts), ":true or :false", revo.base.typeof(id, vm)).err };
         }
     }
     return .{ .value = dialect };
@@ -178,6 +178,6 @@ fn buildOpts(raw_opts: Args.table, vm: *VM) !HostErrOr(Dialect) {
 fn HostErrOr(comptime T: type) type {
     return union(enum) {
         value: T,
-        err: revo.baselib.host.HostErrPayload,
+        err: revo.base.host.HostErrPayload,
     };
 }

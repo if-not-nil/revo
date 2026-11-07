@@ -1,0 +1,77 @@
+#* the revo metaprogramming lib *#
+pub declare revo = {
+  #*
+  structured diagnostic returned in `{:err, ...}` by functions that run revo code
+
+  ```
+  match revo.eval("let x: number = 'hi'") | {:ok, v} => v | {:err, e} => e.message
+  ```
+  *#
+  EvalError: {
+    #* first error line, never empty *#
+    message: string,
+    #* :parse | :expand | :semantic | :compile | :runtime | :io | :lex *#
+    phase: atom,
+    #* kebab-case problem slug like "type-mismatch", :nil when none *#
+    code: string | :nil,
+    #* primary span position, :nil when the error has no span *#
+    line: number | :nil,
+    #* primary span position, :nil when the error has no span *#
+    column: number | :nil,
+    #* module name or path the error came from, :nil when unknown *#
+    source: string | :nil,
+    #* full multi-line report as the cli would print it (no colors) *#
+    rendered: string,
+    #* runtime only: RunErrorKind tag like "DivisionByZero", else :nil *#
+    kind: string | :nil,
+    #* runtime stack frames as {function, source, line, column}, empty when none *#
+    trace: table,
+  },
+  #*
+  evaluates it as a module, gives you back its return value
+  you can treat it as a function's body
+  static and runtime failures come back as {:err, revo.EvalError}
+  *#
+  eval: fn(code: string) -> !any/revo.EvalError,
+  #*
+  dynamic `import`!
+  loads the module at `path` and gives you back its value
+  the path is data, so it resolves from the cwd
+
+  `name:x` collections work
+  shares the module table with `import`, `{fresh = true}` reruns it
+  *#
+  load: fn(path: string, opts: table?) -> !any/revo.EvalError,
+  #*
+  opens a dll and gives you back its functions in a table
+  `./x` and `../x` resolve from the calling file, anything else goes to the os
+
+  you're meant to type it with a binding
+  ```revo
+  const lib: {add: fn(number, number) -> number} = revo.dload("./lib.so")
+  ```
+  *#
+  dload: fn(path: string) -> table,
+  #*
+  builds it as a module, gives you back its bytecode in a string
+  the string is only useful for writing to a file or executing
+  build failures come back as {:err, revo.EvalError}
+  *#
+  compile: fn(code: string) -> !string/revo.EvalError,
+
+  LexToken: {
+    type: string,
+    class: string,
+    text: string,
+    line: number,
+    column: number,
+    start: number,
+    end: number,
+  },
+  #* lex source into an array of revo.LexToken tables *#
+  lex: fn(code: string) -> !table<revo.LexToken>/revo.EvalError,
+  #* version of your revo installation, like "revo v1.2.3" *#
+  version: fn() -> string,
+  #* worker thread count (see --threads) *#
+  threads: fn() -> number,
+}

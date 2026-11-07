@@ -1,0 +1,15 @@
+#* pseudo-random numbers with a settable seed *#
+pub declare rng = {
+  #* Statically sets the seed used for generation of pseudo-random numbers. *#
+  set_seed: fn(seed: number),
+  #* Reverts seed back to using the current time at the time of generation. *#
+  revert_seed: fn(),
+  #* Returns a random integer in the range [0, upper_bound] *#
+  rand: fn(upper_bound: number) -> number,
+  #* Returns a random integer in the range [lower_bound, upper_bound] *#
+  range: fn(lower_bound: number, upper_bound: number) -> number,
+  #* Returns a random float in the range [0, 1] *#
+  rand_float: fn() -> number,
+  #* Returns a random element from a table, or :nil if empty (note: this function *ignores* key value pairs.) *#
+  choice: fn<T>(input: table<T>) -> T | :nil,
+}

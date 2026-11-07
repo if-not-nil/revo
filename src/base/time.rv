@@ -1,0 +1,11 @@
+#* clocks *#
+pub declare time = {
+  #* returns current wall-clock time in milliseconds *#
+  now: fn() -> number,
+  #* returns current wall-clock time in nanoseconds since the first call *#
+  now_ns: fn() -> number,
+  #* returns monotonic clock in milliseconds *#
+  monotonic: fn() -> number,
+  #* returns monotonic clock in nanoseconds since the first call *#
+  monotonic_ns: fn() -> number,
+}
