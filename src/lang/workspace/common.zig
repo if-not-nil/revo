@@ -143,6 +143,7 @@ pub fn copyFilteredSymbols(
             .range = s.range,
             .type_name = if (s.type_name) |ti| try types.clone(ti, alloc) else null,
             .field_values = if (s.field_values) |fvs| try cloneFieldPreviews(alloc, fvs) else null,
+            .pub_ = s.pub_,
         });
     }
 

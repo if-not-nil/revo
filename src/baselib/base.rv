@@ -101,6 +101,9 @@ pub declare system = fn(args: table<string>) -> !{string, string}
 #* internal, do not use. the runtime half of `import`, takes a realpath *#
 pub declare __internal_import = fn(path: string) -> any
 
+#* internal, do not use. the natives of a `src/std` module, by name *#
+pub declare __internal_native = fn(name: string) -> table
+
 #* internal, do not use unless you know what you're doing. runs a test *#
 pub declare __internal_dotest = fn(name: string, body: function) -> :ok
 
@@ -733,55 +736,6 @@ pub declare http = {
 }
 
 type http.HeaderValue = string | number | :nil
-
-# uri
-
-#* parse uri strings *#
-pub declare uri = {
-  #*
-  parses string as uri
-  
-  examples:
-  ```repl
-  rεvo > uri.decode("https://example.com/hi/there?search&page=3#woah")
-  { :ok, {
-    scheme = "https",
-    host = "example.com",
-    path = "/hi/there",
-    query = { "search", page = 3 },
-    fragment = "woah"
-  } }
-  ```
-  *#
-  decode: fn(value: string) -> !uri.Uri,
-  #*
-  formats uri table as string
-  
-  examples:
-  ```repl
-  rεvo > uri.encode({
-       >   scheme = "https",
-       >   user = :nil,
-       >   host = "example.com",
-       >   path = "/hi/there",
-       >   query = { "search", "page" = 3 },
-       >   fragment = :nil
-       > })
-  { :ok, "https://example.com/hi/there?search&page=3" }
-  ```
-  *#
-  encode: fn(value: uri.Uri) -> !string,
-  #* parts of a uri; encode tolerates absent fields, decode fills them *#
-  Uri: {
-    ?scheme: string,
-    ?user: string,
-    ?host: string,
-    ?path: string,
-    ?query: table<string, string | number>,
-    ?fragment: string,
-    ?port: number,
-  }
-}
 
 # fs
 

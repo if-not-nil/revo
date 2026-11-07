@@ -138,6 +138,9 @@ pub const Symbol = struct {
     /// for value-showing hover
     /// no default so every constructor decides
     field_values: ?[]type_syntax.FieldPreview,
+    /// exported by a toplevel `pub` decl
+    /// kind of a workaround idk
+    pub_: bool = false,
 };
 
 pub const Hover = struct {

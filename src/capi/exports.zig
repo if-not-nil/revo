@@ -1,7 +1,6 @@
 //
 // callable functions for revo runtime interop
 //
-const builtin = @import("builtin");
 const std = @import("std");
 
 const revo = @import("revo");
@@ -422,13 +421,13 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
 }
 
 /// load a shared lib's `revo_bindings` as host functions
-pub fn loadHost(vm_ptr: *VM, lib_path: []const u8) ![]HostFunc {
+pub fn loadHost(vm_ptr: *VM, lib_path: []const u8, symbol: [:0]const u8) ![]HostFunc {
     if (!vm_ptr.runtime.caps.dlopen) return error.OsNotSupported;
 
     var lib = try std.DynLib.open(lib_path);
 
     const bindings_ptr: [*]const HostBinding =
-        lib.lookup([*]const HostBinding, "revo_native_bindings_ex") orelse {
+        lib.lookup([*]const HostBinding, symbol) orelse {
             return error.NoBindings;
         };
 

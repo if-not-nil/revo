@@ -1,0 +1,53 @@
+#!
+parse and format uri strings
+!#
+
+#* parts of a uri; encode tolerates absent fields, decode fills them *#
+pub type Uri = {
+  ?scheme: string,
+  ?user: string,
+  ?host: string,
+  ?path: string,
+  ?query: table<string, string | number>,
+  ?fragment: string,
+  ?port: number,
+}
+
+const native: {
+  decode: fn(value: string) -> !Uri,
+  encode: fn(value: Uri) -> !string,
+} = __internal_native("uri")
+
+#*
+parses string as uri
+
+examples:
+```repl
+rεvo > const uri = import("std:uri")
+rεvo > uri.decode("https://example.com/hi/there?search&page=3#woah")
+{ :ok, {
+  scheme = "https",
+  host = "example.com",
+  path = "/hi/there",
+  query = { "search", page = 3 },
+  fragment = "woah"
+} }
+```
+*#
+pub const decode = native.decode
+
+#*
+formats uri table as string
+
+examples:
+```repl
+rεvo > uri.encode({
+     >   scheme = "https",
+     >   host = "example.com",
+     >   path = "/hi/there",
+     >   query = { "search", "page" = 3 },
+     > })
+{ :ok, "https://example.com/hi/there?search&page=3" }
+```
+*#
+pub const encode = native.encode

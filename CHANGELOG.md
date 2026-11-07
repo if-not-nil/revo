@@ -59,11 +59,13 @@ most breaking change yet
 
       - `std:` is built in
         looks, relatively to the `revo` executable, for
-        - `../lib/revo/std`
-        - `../lib/std`
+        - `lib/revo/std`, `lib/std`
+        - `../lib/revo/std`, `../lib/std`
+        - and so on up
         (marked by `std.rv`)
-        `zig build` puts `lib/std` there
+        `zig build` installs the `.rv` files from `src/std` there
 
+      - `uri` was the first std module, `const uri = import("std:uri")`
 
   - `revo.load(path)`, dynamic import from the cwd
     `revo.load(path, {fresh = :true})` will also re-run it afresh

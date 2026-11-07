@@ -312,7 +312,7 @@ pub fn dload(args: []const Value, vm: *VM) !HostResult {
     defer vm.runtime.alloc.free(path);
 
     // `revo.extension` libs go first, so you get full arity and type checks
-    if (revo.ffi.loadHost(vm, path)) |native_mods| {
+    if (revo.ffi.loadHost(vm, path, "revo_native_bindings_ex")) |native_mods| {
         defer vm.runtime.alloc.free(native_mods);
         const t_id = try vm.tables.create();
 

@@ -61,7 +61,16 @@ pub fn importedModuleSymbols(
 /// syms off a dep file, caller frees
 pub fn symbolsFromDep(self: *Workspace, alloc: std.mem.Allocator, dep_id: FileId) ![]const Symbol {
     const entry = try self.ensureInspect(alloc, dep_id, .{});
-    return common.copyFilteredSymbols(alloc, entry.symbols, true);
+    const has_pub = for (entry.symbols) |s| {
+        if (s.pub_) break true;
+    } else false;
+    if (!has_pub) return common.copyFilteredSymbols(alloc, entry.symbols, true);
+
+    var pubs = try std.ArrayList(Symbol).initCapacity(alloc, entry.symbols.len);
+    defer pubs.deinit(alloc);
+    for (entry.symbols) |s| if (s.pub_) pubs.appendAssumeCapacity(s);
+
+    return common.copyFilteredSymbols(alloc, pubs.items, true);
 }
 
 /// realpath `name` is bound to in `file_id`, `const name = import("x")`

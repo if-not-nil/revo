@@ -1,13 +1,12 @@
-const revo = @import("../root.zig");
-const root = @import("root.zig");
-const specs = @import("specs.zig");
+const revo = @import("revo");
 const std = @import("std");
 
-const Args = root.host.ArgTypes;
-const Value = revo.Value;
+const extension = revo.extension;
+const Args = extension.ArgTypes;
+const Value = extension.Value;
 const testing = revo.lang.test_helpers;
-const VM = revo.VM;
-const HostResult = root.host.HostResult;
+const VM = extension.VM;
+const HostResult = extension.HostResult;
 const Uri = std.Uri;
 const Component = std.Uri.Component;
 const Table = revo.table.Table;
@@ -48,8 +47,6 @@ pub const Impl = struct {
         return .Ok(vm, data);
     }
 };
-
-pub const impls: []const specs.Impl = root.host.impls(Impl).val;
 
 fn writePart(val: Value, name: []const u8, prefix: ?[]const u8, postfix: ?[]const u8, w: *std.Io.Writer, vm: *VM) !void {
     if (vm.getField(val, name)) |part| {
@@ -205,8 +202,8 @@ fn parseComponent(component: ?Component, name: []const u8, root_id: usize, vm: *
 }
 
 test "encode url" {
-    const src =
-        \\ uri.encode({
+    var res = try testing.topResult(
+        \\ {
         \\   scheme = "https",
         \\   host = "example.com",
         \\   fragment = "woah",
@@ -214,7 +211,15 @@ test "encode url" {
         \\   path = "/p/TRUE",
         \\   query = { "1", "2", chilling = "yeah", t = { "y", "n" } },
         \\   port = 67
-        \\ })?
-    ;
-    try testing.topString(src, "https://username@example.com:67/p/TRUE?1&2&chilling=yeah&t=y&t=n#woah");
+        \\ }
+    , null);
+    defer res.deinit();
+
+    // the dylib can't be loaded from here, so call the impl on the built table
+    const out = try Impl.encode(&res.vm, @fromBackingInt(res.value.asTable().?));
+    var it = (try res.vm.tables.get(out.ok.asTable().?)).cursor();
+    try std.testing.expectEqual(Value.new.core(.ok), it.nextValue().?);
+
+    const s = it.nextValue().?.asString().?;
+    try std.testing.expectEqualStrings("https://username@example.com:67/p/TRUE?1&2&chilling=yeah&t=y&t=n#woah", res.vm.stringValue(s));
 }

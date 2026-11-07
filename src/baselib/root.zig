@@ -101,6 +101,7 @@ pub const os_impls: []const specs.Impl = &.{
     .{ .name = "exit", .f = gated(revo.default_caps.io, &[_]host.ParamType{.number}, exit) },
     .{ .name = "system", .f = gated(revo.default_caps.io, &[_]host.ParamType{.table}, system_) },
     .{ .name = "__internal_import", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, internal_import) },
+    .{ .name = "__internal_native", .f = if (revo.is_freestanding) host.defineStub(&.{.string}) else host.define(&.{.string}, internal_native) },
     .{ .name = "__internal_dotest", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dotest) },
     .{ .name = "__internal_dosuite", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dosuite) },
     .{ .name = "getenv", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, getenv_) },
@@ -769,6 +770,34 @@ const libc_setenv = setenv;
 pub fn internal_import(args: []const Value, vm: *VM) !host.HostResult {
     const path = args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm));
     return awaitModule(vm, vm.stringValue(path), try revo.run.startModule(vm, vm.stringValue(path), .{}));
+}
+
+pub fn internal_native(args: []const Value, vm: *VM) !host.HostResult {
+    const name = args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm));
+    const alloc = vm.runtime.alloc;
+
+    const dir = for (vm.collections.items) |c| {
+        if (std.mem.eql(u8, c.name, "std")) break c.dir;
+    } else return .errImportFailed("no std dir, so no std natives");
+
+    const target = builtin.target;
+    const lib_name = try std.fmt.allocPrint(alloc, "{s}revo_std{s}", .{ target.libPrefix(), target.dynamicLibSuffix() });
+    defer alloc.free(lib_name);
+    const path = try std.Io.Dir.path.join(alloc, &.{ dir, lib_name });
+    defer alloc.free(path);
+    const symbol = try std.fmt.allocPrintSentinel(alloc, "revo_std_{s}", .{vm.stringValue(name)}, 0);
+    defer alloc.free(symbol);
+
+    const fns = revo.ffi.loadHost(vm, path, symbol) catch |err| return .errImportFailed(@errorName(err));
+    defer alloc.free(fns);
+
+    const t_id = try vm.tables.create();
+    for (fns) |f| {
+        const fn_id = try vm.callable.create(.{ .host = f });
+        try vm.putField(t_id, f.name, Value.new.function(fn_id));
+    }
+
+    return .data(Value.new.table(t_id));
 }
 
 /// the module's value, parking on its loading fiber when it's still running

@@ -262,14 +262,14 @@ test "dotted pub type resolves bare in the same file" {
 
 test "baselib dotted type resolves qualified, unknown qualified errors" {
     try t.topNumber(
-        \\ const u: uri.Uri = { scheme = "https", host = "example.com", path = "/hi/there", query = { "search", "page" = 3 } }
+        \\ const o: os.InputOpts = { delimiter = ":" }
         \\ 1
     , 1);
     try t.expectSemanticError(
-        \\ const u: uri.Hi = 2
+        \\ const o: os.Hi = 2
     );
     try t.expectSemanticError(
-        \\ const u: uri.Bogus = 1
+        \\ const o: os.Bogus = 1
     );
 }
 

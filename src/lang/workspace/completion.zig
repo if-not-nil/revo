@@ -406,15 +406,15 @@ test "baselib dot completion unions runtime table w declared aliases" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const text = "uri.";
+    const text = "http.";
     const id = try ws.open("<test>", text);
     const items = try ws.completions(arena.allocator(), id, text, text.len);
-    // Hi is type-only: no runtime key, only a declared spec
-    try expectCompletion(items, "Uri", .class);
+    // FetchOpts is type-only
+    try expectCompletion(items, "FetchOpts", .class);
     // runtime members still come first without dupes
-    var decodes: usize = 0;
+    var fetches: usize = 0;
     for (items) |it| {
-        if (std.mem.eql(u8, it.label, "decode")) decodes += 1;
+        if (std.mem.eql(u8, it.label, "fetch")) fetches += 1;
     }
-    try std.testing.expectEqual(@as(usize, 1), decodes);
+    try std.testing.expectEqual(@as(usize, 1), fetches);
 }

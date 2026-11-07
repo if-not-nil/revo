@@ -270,11 +270,51 @@ const SymbolVisitor = struct {
             .fn_def => |f| for (f.params) |param| self.addName(param.name_tok.text, .param, param.name_tok.span()),
             .type_alias => |t| if (t.segs.len > 0) self.addName(t.segs[t.segs.len - 1].text, .type_alias, t.segs[0].span()),
             .use => |use| self.addName(use.name, .binding, u.span),
+            .decl => |d| if (d.pub_) {
+                const before = self.out.items.len;
+                cst.walkCst(SymbolVisitor, self, node);
+                self.markPub(d.inner, self.out.items[before..]);
+                return;
+            },
             else => {},
         }
         // decls fall through
         // walkCst reaches every binding exactly once
         cst.walkCst(SymbolVisitor, self, node);
+    }
+
+    fn markPub(_: *@This(), inner: *const cst.CstNode, added: []Symbol) void {
+        const u = cst.unwrapParen(inner) orelse return;
+        for (added, 0..) |*s, i| {
+            if (s.kind == .param) continue;
+
+            const exported = switch (u.kind) {
+                .binding => |b| bindsName(b.target, s.name),
+                .type_alias => |t| s.kind == .type_alias and t.segs.len > 0 and
+                    std.mem.eql(u8, t.segs[t.segs.len - 1].text, s.name),
+                else => false,
+            };
+            if (!exported) continue;
+
+            const seen = for (added[0..i]) |prev| {
+                if (prev.pub_ and std.mem.eql(u8, prev.name, s.name)) break true;
+            } else false;
+            if (!seen) s.pub_ = true;
+        }
+    }
+
+    fn bindsName(target: *const cst.CstNode, name: []const u8) bool {
+        const t = cst.unwrapParen(target) orelse return false;
+        switch (t.kind) {
+            .ident => |n| return std.mem.eql(u8, n.tok.text, name),
+            .table => |tbl| for (tbl.entries) |e| {
+                if (e != .bare) continue;
+                const n = cst.identText(e.bare.value) orelse continue;
+                if (std.mem.eql(u8, n, name)) return true;
+            },
+            else => {},
+        }
+        return false;
     }
 
     fn addBinding(self: *@This(), b: @FieldType(cst.CstKind, "binding")) void {

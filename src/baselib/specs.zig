@@ -59,7 +59,6 @@ pub const groups: []const Group = &.{
         @import("datetime.zig").impls,
         @import("net.zig").impls,
         if (http_on) @import("http.zig").impls else &.{},
-        @import("uri.zig").impls,
         @import("fs.zig").impls,
         @import("revo.zig").impls,
         @import("compress.zig").impls,

@@ -448,11 +448,23 @@ pub fn build(b: *Build) !void {
         // `std:` imports find this by walking up from the exe
         // , see src/import_path.zig
         const std_install = b.addInstallDirectory(.{
-            .source_dir = b.path("lib/std"),
-            .install_subdir = "revo/std",
+            .source_dir = b.path("src/std"),
+            .install_subdir = "std",
             .install_dir = .lib,
+            .include_extensions = &.{".rv"},
         });
         b.getInstallStep().dependOn(&std_install.step);
+
+        // the zig part of std
+        const std_mod = exeModule(b, null, "src/std/root.zig", target, effective_optimize, true);
+        std_mod.addImport("revo", revo_mod);
+        const std_lib = b.addLibrary(.{ .name = "revo_std", .root_module = std_mod, .linkage = .dynamic });
+
+        b.getInstallStep().dependOn(&b.addInstallArtifact(std_lib, .{
+            .dest_dir = .{ .override = .{ .custom = "lib/std" } },
+            .implib_dir = .disabled,
+            .pdb_dir = .disabled,
+        }).step);
 
         const lib_step = b.step("lib", "build the erevo library");
         lib_step.dependOn(&lib_install.step);
@@ -485,6 +497,16 @@ pub fn build(b: *Build) !void {
             }
 
             test_step.dependOn(&b.addRunArtifact(c_test).step);
+
+            const test_std_step = b.step("test-std", "test the zig part of std");
+            {
+                const mod = exeModule(b, null, "src/std/root.zig", target, effective_optimize, true);
+                mod.addImport("revo", revo_mod);
+                const run = b.addRunArtifact(b.addTest(.{ .root_module = mod, .filters = test_filters }));
+
+                test_std_step.dependOn(&run.step);
+                test_step.dependOn(&run.step);
+            }
             test_step.dependOn(&b.addRunArtifact(header_test).step);
 
             const test_lang_step = b.step("test-lang", "run the lang suite");
