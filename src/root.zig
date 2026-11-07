@@ -289,6 +289,7 @@ test {
     // lang suite runs split under test-lang instead, one binary per area
     _ = @import("./extension.zig");
     _ = @import("./import_path.zig");
+    _ = @import("./diff.zig");
     _ = @import("./base/ffi.zig");
     _ = @import("./base/host.zig");
     _ = @import("./base/specs.zig");
