@@ -1,37 +1,42 @@
 //
 // c api test suite for revo
 // compile and run with: zig build test-c
-// or: cc -I zig-out/include/revo src/capi/tests.c zig-out/lib/liberevo.a -lm -o
-// /tmp/revo-c-test && /tmp/revo-c-test
+// or: cc -I zig-out/include/revo src/capi/tests.c zig-out/lib/liberevo.a -lm
+// -o\
+//         /tmp/revo-c-test && /tmp/revo-c-test
 //
 
 #include "revo.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 static int failed = 0;
 
-#define FAIL(msg)                                                            \
-  do {                                                                       \
-    printf("FAIL: %s\n", msg);                                               \
-    failed = 1;                                                              \
-  } while (0)
-// prints the name on entry and "ok" on normal exit (assert aborts otherwise)
-#define T(name)                                                              \
-  for (int _t_done = (printf("  " name "... "), fflush(stdout), 0);          \
-       !_t_done;                                                             \
-       _t_done = (printf("ok\n"), 1))
-// asserts, reporting the vm error first on failure
-#define check(cond)                                                          \
-  do {                                                                       \
-    if (!(cond))                                                             \
-      FAIL(erevo_vm_last_error(vm));                                         \
-    assert(cond);                                                            \
+#define FAIL(msg)                                                              \
+  do {                                                                         \
+    printf("FAIL: %s\n", msg);                                                 \
+    failed = 1;                                                                \
   } while (0)
 
-static int test_double_fn(void *vm, size_t argc, RevoValue *argv, RevoValue *out) {
+#define T(name)                                                                \
+  for (int _t_done = (printf("  " name "... "), fflush(stdout), 0); !_t_done;  \
+       _t_done = (printf("ok\n"), 1))
+
+#define check(cond)                                                            \
+  do {                                                                         \
+    if (!(cond))                                                               \
+      FAIL(erevo_vm_last_error(vm));                                           \
+    assert(cond);                                                              \
+  } while (0)
+
+static int test_double_fn(void *vm, size_t argc, RevoValue *argv,
+                          RevoValue *out) {
   if (argc < 1)
     return revo_c_err_arity(vm, argc, 1);
 
@@ -186,8 +191,7 @@ int main(int argc, char **argv) {
     uint64_t a_atom = revo_intern_atom(vm, "a", 1);
     uint64_t b_atom = revo_intern_atom(vm, "b", 1);
 
-    assert(revo_table_set_name(vm, t, "a", 1,
-                               revo_num(10.0)));
+    assert(revo_table_set_name(vm, t, "a", 1, revo_num(10.0)));
     assert(revo_table_set(vm, t, revo_atom_val(b_atom), revo_num(20.0)));
 
     assert(revo_table_len(vm, t) == 2);
@@ -300,7 +304,7 @@ int main(int argc, char **argv) {
     assert(revo_is_string(call_result));
     assert(revo_string_length(vm, revo_string_id(call_result)) == 5);
     assert(memcmp(revo_string_data(vm, revo_string_id(call_result)), "hello",
-                5) == 0);
+                  5) == 0);
   }
 
   T("revo_call returning multi-word string") {
@@ -313,7 +317,7 @@ int main(int argc, char **argv) {
     assert(revo_is_string(call_result));
     assert(revo_string_length(vm, revo_string_id(call_result)) == 12);
     assert(memcmp(revo_string_data(vm, revo_string_id(call_result)),
-                "hello from c", 12) == 0);
+                  "hello from c", 12) == 0);
   }
 
   T("revo_call multiple args") {
@@ -335,8 +339,7 @@ int main(int argc, char **argv) {
   }
 
   T("revo_cfunc_new registers a callable c function") {
-    RevoValue cfn =
-        revo_cfunc_new(vm, (void *)test_double_fn, "double", 6);
+    RevoValue cfn = revo_cfunc_new(vm, (void *)test_double_fn, "double", 6);
     assert(revo_is_function(cfn));
 
     RevoValue dargs[1] = {revo_num(21.0)};
@@ -353,7 +356,8 @@ int main(int argc, char **argv) {
     assert(fabs(revo_num_value(val) - 42.0) < 1e-12);
 
     // empty name works, null fn gives nil
-    assert(revo_is_function(revo_cfunc_new(vm, (void *)test_double_fn, NULL, 0)));
+    assert(
+        revo_is_function(revo_cfunc_new(vm, (void *)test_double_fn, NULL, 0)));
     assert(revo_is_nil(revo_cfunc_new(vm, NULL, NULL, 0)));
   }
 
@@ -381,9 +385,7 @@ int main(int argc, char **argv) {
   //
   // helper macros and inline functions
   //
-  T("revo_nil") {
-    assert(revo_is_nil(revo_nil()));
-  }
+  T("revo_nil") { assert(revo_is_nil(revo_nil())); }
 
   T("revo_bool") {
     assert(revo_is_bool(revo_bool(1)));
@@ -419,21 +421,13 @@ int main(int argc, char **argv) {
     assert(!revo_is_number(revo_string_val(sid)));
   }
 
-  T("revo_is_string false on number") {
-    assert(!revo_is_string(revo_num(1)));
-  }
+  T("revo_is_string false on number") { assert(!revo_is_string(revo_num(1))); }
 
-  T("revo_is_atom false on number") {
-    assert(!revo_is_atom(revo_num(1)));
-  }
+  T("revo_is_atom false on number") { assert(!revo_is_atom(revo_num(1))); }
 
-  T("revo_is_table false on number") {
-    assert(!revo_is_table(revo_num(1)));
-  }
+  T("revo_is_table false on number") { assert(!revo_is_table(revo_num(1))); }
 
-  T("revo_is_bool false on nil") {
-    assert(!revo_is_bool(revo_nil()));
-  }
+  T("revo_is_bool false on nil") { assert(!revo_is_bool(revo_nil())); }
 
   T("revo_type") {
     assert(revo_type(revo_num(1)) == revo_number);
@@ -505,8 +499,7 @@ int main(int argc, char **argv) {
 
   T("revo_ref pins values across gc") {
     RevoValue rt = revo_table_create(vm);
-    assert(revo_table_set_name(vm, rt, "v", 1,
-                               revo_num(7.0)));
+    assert(revo_table_set_name(vm, rt, "v", 1, revo_num(7.0)));
     uint64_t r = revo_ref(vm, rt);
     assert(r != 0);
     assert(revo_ref(vm, revo_nil()) == 0);
@@ -538,8 +531,7 @@ int main(int argc, char **argv) {
     assert(revo_is_function(val));
 
     RevoValue flag = revo_table_create(vm);
-    assert(revo_table_set_name(vm, flag, "hit", 3,
-                               revo_num(0.0)));
+    assert(revo_table_set_name(vm, flag, "hit", 3, revo_num(0.0)));
     RevoValue fargs[1] = {flag};
     RevoValue fin_fn;
     call_ok = revo_call(vm, val, 1, fargs, &fin_fn);
@@ -636,7 +628,8 @@ int main(int argc, char **argv) {
   }
 
   T("resource __gc runs once on sweep") {
-    ok = erevo_eval(vm, "test", "fn(flag) fn(t) do flag.hit = flag.hit + 1 t end", &val);
+    ok = erevo_eval(vm, "test",
+                    "fn(flag) fn(t) do flag.hit = flag.hit + 1 t end", &val);
     check(ok);
     RevoValue eflag = revo_table_create(vm);
     assert(revo_table_set_name(vm, eflag, "hit", 3, revo_num(0.0)));
@@ -688,9 +681,7 @@ int main(int argc, char **argv) {
     assert(strlen(erevo_vm_last_error(vm)) > 0);
   }
 
-  T("run null program returns false") {
-    assert(!erevo_run(vm, NULL, &val));
-  }
+  T("run null program returns false") { assert(!erevo_run(vm, NULL, &val)); }
 
   //
   // eval with output
@@ -710,13 +701,9 @@ int main(int argc, char **argv) {
   //
   // program lifecycle
   //
-  T("erevo_program_destroy null is safe") {
-    erevo_program_destroy(NULL);
-  }
+  T("erevo_program_destroy null is safe") { erevo_program_destroy(NULL); }
 
-  T("erevo_vm_destroy null is safe") {
-    erevo_vm_destroy(NULL);
-  }
+  T("erevo_vm_destroy null is safe") { erevo_vm_destroy(NULL); }
 
   T("erevo_vm_last_error null returns empty") {
     assert(strcmp(erevo_vm_last_error(NULL), "") == 0);
@@ -727,9 +714,9 @@ int main(int argc, char **argv) {
   // skipped when built standalone)
   //
   if (argc > 1) {
-    T("import test extension") {
+    T("revo.dload test extension") {
       char src[4096];
-      snprintf(src, sizeof(src), "import \"%s\"", argv[1]);
+      snprintf(src, sizeof(src), "revo.dload(\"%s\")", argv[1]);
       ok = erevo_eval(vm, "test", src, &val);
       check(ok);
       assert(revo_is_table(val));
@@ -761,6 +748,42 @@ int main(int argc, char **argv) {
       assert(strlen(erevo_vm_last_error(vm)) > 0);
     }
 
+#ifndef _WIN32
+    T("revo.dload types through a wrapper module") {
+      char dir[] = "/tmp/revo-dload-XXXXXX";
+      assert(mkdtemp(dir) != NULL);
+      char lib[4096];
+      assert(realpath(argv[1], lib) != NULL);
+
+      char wrapper[4200];
+      snprintf(wrapper, sizeof(wrapper), "%s/wrapper.rv", dir);
+      FILE *f = fopen(wrapper, "w");
+      assert(f != NULL);
+      fprintf(f,
+              "const t: {\n  add: fn(a: number, b: number) -> number,\n} = "
+              "revo.dload(\"%s\")\n\nreturn t\n",
+              lib);
+      fclose(f);
+      char main_name[4200];
+      snprintf(main_name, sizeof(main_name), "%s/main.rv", dir);
+
+      ok = erevo_eval(vm, main_name, "import(\"./wrapper\").add(3, 4)", &val);
+      check(ok);
+      assert(revo_is_number(val));
+      assert(fabs(revo_num_value(val) - 7.0) < 1e-12);
+
+      // the bindings type is the modules type
+      // , so this canr to compile
+      ok = erevo_eval(vm, main_name, "import(\"./wrapper\").add(\"x\", 4)",
+                      &val);
+      assert(!ok);
+      assert(strstr(erevo_vm_last_error(vm), "wants number") != NULL);
+
+      remove(wrapper);
+      rmdir(dir);
+    }
+#endif
+
     T("revo_call errors land in last_error") {
       RevoValue tmod = revo_getglobal_cstr(vm, "tmod");
       assert(revo_is_table(tmod));
@@ -790,7 +813,9 @@ int main(int argc, char **argv) {
       check(ok);
       revo_setglobal_cstr(vm, "flib", val);
 
-      ok = erevo_eval(vm, "test", "ffi.func(flib, \"ffi_test_add\", :i32, {:i32, :i32})", &val);
+      ok = erevo_eval(vm, "test",
+                      "ffi.func(flib, \"ffi_test_add\", :i32, {:i32, :i32})",
+                      &val);
       check(ok);
       revo_setglobal_cstr(vm, "fadd", val);
 
@@ -801,11 +826,13 @@ int main(int argc, char **argv) {
     }
 
     T("ffi decl errors fail with messages") {
-      ok = erevo_eval(vm, "test", "ffi.func(flib, \"ffi_test_add\", :nope, {:i32})", &val);
+      ok = erevo_eval(vm, "test",
+                      "ffi.func(flib, \"ffi_test_add\", :nope, {:i32})", &val);
       assert(!ok);
       assert(strlen(erevo_vm_last_error(vm)) > 0);
 
-      ok = erevo_eval(vm, "test", "ffi.func(flib, \"missing_sym\", :i32, {})", &val);
+      ok = erevo_eval(vm, "test", "ffi.func(flib, \"missing_sym\", :i32, {})",
+                      &val);
       assert(!ok);
       assert(strlen(erevo_vm_last_error(vm)) > 0);
     }
@@ -821,7 +848,8 @@ int main(int argc, char **argv) {
     }
 
     T("ffi errno reads back") {
-      ok = erevo_eval(vm, "test", "ffi.func(flib, \"ffi_test_fail\", :i32, {})", &val);
+      ok = erevo_eval(vm, "test", "ffi.func(flib, \"ffi_test_fail\", :i32, {})",
+                      &val);
       check(ok);
       revo_setglobal_cstr(vm, "ffail", val);
 

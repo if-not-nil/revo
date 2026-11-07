@@ -88,7 +88,7 @@ fn replCompletions(
     input: []const u8,
     cursor: usize,
 ) ![]revo.lang.Workspace.Completion {
-    const fid = last_file orelse try ws.open("<repl>", input, .{});
+    const fid = last_file orelse try ws.open("<repl>", input);
     return ws.completions(alloc, fid, input, cursor);
 }
 
@@ -247,33 +247,24 @@ pub const Session = struct {
     gpa: Allocator,
     workspace: revo.lang.Workspace,
     source_acc: std.ArrayList(u8),
-    project: revo.lang.Project = .{ .mode = .script, .root = "" },
     last_file: ?revo.lang.FileId = null,
 
-    pub fn init(vm: *VM, gpa: Allocator, io: ?std.Io) !Session {
+    pub fn init(vm: *VM, gpa: Allocator) !Session {
         var workspace = try revo.lang.Workspace.initWithVm(vm, gpa);
         errdefer workspace.deinit();
         const source_acc = try std.ArrayList(u8).initCapacity(gpa, 256);
         errdefer source_acc.deinit(gpa);
-        var self = Session{
+        return .{
             .vm = vm,
             .gpa = gpa,
             .workspace = workspace,
             .source_acc = source_acc,
         };
-        self.project = if (io) |i|
-            .detectFromCwd(i, gpa)
-        else
-            .{ .mode = .script, .root = "" };
-        errdefer self.project.deinit(gpa);
-
-        return self;
     }
 
     pub fn deinit(self: *Session) void {
         self.source_acc.deinit(self.gpa);
         self.workspace.deinit();
-        self.project.deinit(self.gpa);
     }
 
     fn noteHistoryUnit(self: *Session, unit: []const u8) void {
@@ -441,7 +432,7 @@ pub const Session = struct {
 
     /// analyze + compile + run the buffer, settled runs record history + reset
     fn evalSource(self: *Session, out: *std.Io.Writer, source: []const u8) !bool {
-        const file_id = self.workspace.open("<repl>", source, .{}) catch |err| {
+        const file_id = self.workspace.open("<repl>", source) catch |err| {
             try out.print("repl open error: {}\n", .{err});
             return true;
         };
@@ -520,7 +511,7 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
     const signal_was_set = build_options.isocline and OS != .wasi;
     if (signal_was_set) _ = signal_c.signal(signal_c.SIGINT, @ptrCast(&sigintHandler));
 
-    var session = try Session.init(vm, gpa, init.io);
+    var session = try Session.init(vm, gpa);
     defer session.deinit();
 
     if (build_options.isocline) {
@@ -584,7 +575,7 @@ const TestEnv = struct {
 fn initTestEnv(alloc: std.mem.Allocator) !TestEnv {
     const vm = try alloc.create(revo.VM);
     vm.* = try revo.VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
-    const session = try Session.init(vm, alloc, std.testing.io);
+    const session = try Session.init(vm, alloc);
     const out = std.Io.Writer.Allocating.init(alloc);
     vm.runtime.supports_color = false;
     return TestEnv{ .vm = vm, .session = session, .out = out };

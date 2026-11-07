@@ -2,7 +2,7 @@
 this is how you make a module just to safe-ify-ish your bindings
 !#
 
-const cffi = import "./cffi.so"
+const cffi = revo.dload("./cffi.so")
 let lib = cffi.load("./libraylib.so")
 print(lib)
 

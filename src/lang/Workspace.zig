@@ -19,6 +19,9 @@ inspect_cache: std.AutoHashMap(FileId, InspectCacheEntry), // quick inspect cach
 parsed_cache: std.AutoHashMap(FileId, *ParsedEntry), // lazy parse per content version
 query_db: query_mod.QueryDb, // content hashes, guards no-op changes
 symbol_index: std.StringHashMap([]IndexedSymbol),
+/// file -> `const m = import("x")` bindings (`m` -> realpath) from its last
+/// analysis that parsed, the checker's graph fills it
+import_bindings: std.AutoHashMapUnmanaged(FileId, std.StringHashMapUnmanaged([]const u8)) = .empty,
 symbol_index_dirty: bool = true,
 next_file_id: FileId = 1,
 
@@ -38,8 +41,6 @@ pub const FileEntry = struct {
     version: u32,
     name: []u8,
     text: []u8,
-    mode: pipeline.ProjectMode = .script,
-    project_root: []u8 = &.{},
 };
 
 // cache for analyzeDetailed (full build)
@@ -183,11 +184,6 @@ pub const IndexedSymbol = struct {
     kind: SymbolKind,
 };
 
-pub const OpenOptions = struct {
-    mode: pipeline.ProjectMode = .script,
-    project_root: []const u8 = &.{},
-};
-
 // alloc workspace; vm must be put on later
 pub fn init(alloc: std.mem.Allocator) !Workspace {
     return .{
@@ -237,6 +233,9 @@ pub fn deinit(self: *Workspace) void {
         }
     }
     self.symbol_index.deinit();
+    var bit = self.import_bindings.valueIterator();
+    while (bit.next()) |m| common.freeImports(self.alloc, m);
+    self.import_bindings.deinit(self.alloc);
 }
 
 pub const open = store.open;
@@ -333,6 +332,7 @@ pub const invalidateCacheImpl = cache_mod.invalidateCacheImpl;
 
 /// import path to an open file, checking both source dir and project root
 pub const resolveOpenImport = imports.resolveOpenImport;
+pub const resolveImport = imports.resolveImport;
 
 /// given a file and the name of an import binding, return the symbols
 /// exported by the imported module. relies on file stem matching the
@@ -348,6 +348,7 @@ pub const symbolsFromDep = imports.symbolsFromDep;
 pub const findImportPathForBinding = imports.findImportPathForBinding;
 
 pub const resolveDepId = imports.resolveDepId;
+pub const setImportBindings = imports.setImportBindings;
 
 /// resolve an import and open the file from disk if not already open, checking
 /// both the source dir and project root; returns null if not found or unreadable
@@ -385,9 +386,6 @@ pub const collectSymbolsFromParsed = symbols_mod.collectSymbolsFromParsed;
 
 /// walk cst for fn_expr bindings and populate sig_map with ParamInfo slices
 pub const collectSigsFromParsed = symbols_mod.collectSigsFromParsed;
-
-/// walk cst for import expressions and resolve them to FileIds
-pub const collectDepsFromParsed = symbols_mod.collectDepsFromParsed;
 
 /// id -> mut *FileEntry
 pub const entryPtr = store.entryPtr;

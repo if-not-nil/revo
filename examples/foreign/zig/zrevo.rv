@@ -7,6 +7,6 @@ const zrevo: {
   zsetglobal: fn(name: string, value: any) -> number,
   #* get a string of parts separated by separator *#
   zconcat: fn(parts: table, sep: string) -> string,
-} = import "./zrevo.so"
+} = revo.dload("./zrevo.so")
 
 zrevo

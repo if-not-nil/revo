@@ -15,9 +15,9 @@ const HostFunc = root.host.HostFunc;
 
 pub const regex_on = @import("build_options").regex;
 pub const ffi_on = @import("build_options").ffi;
-pub const http_on = !revo.is_freestanding;
-pub const fs_on = !revo.is_freestanding;
-pub const net_on = !revo.is_freestanding;
+pub const http_on = revo.default_caps.io;
+pub const fs_on = revo.default_caps.io;
+pub const net_on = revo.default_caps.io;
 
 /// the zig side of one spec: registry key + implementation
 pub const Impl = struct {
@@ -91,8 +91,9 @@ pub fn loadAllSpecs(caller_alloc: std.mem.Allocator) ![]const []const FnSpec {
     }
     for (groups) |ig| {
         var specs = parseGroup(pa, ig.src) catch |err| {
-            if (comptime !revo.is_freestanding)
+            if (comptime revo.default_caps.io)
                 std.debug.print("iface group '{s}' failed to parse: {s}\n", .{ ig.name, @errorName(err) });
+
             return err;
         };
         specs = try dropDisabledModules(pa, specs);
@@ -106,7 +107,7 @@ pub fn loadAllSpecs(caller_alloc: std.mem.Allocator) ![]const []const FnSpec {
             };
 
             s.f = implFor(ig.impls, s, k) orelse {
-                if (comptime !revo.is_freestanding) {
+                if (comptime revo.default_caps.io) {
                     var err_buf = std.Io.Writer.Allocating.init(pa);
                     defer err_buf.deinit();
                     renderSignature(&err_buf.writer, s.*) catch {};
@@ -131,7 +132,6 @@ pub fn loadAllSpecs(caller_alloc: std.mem.Allocator) ![]const []const FnSpec {
 }
 
 /// permanent cache
-/// the cache lives in page_allocator so no debug allocator tracks it
 pub fn freeLoadedSpecs(_: std.mem.Allocator, _: []const []const FnSpec) void {}
 
 /// registry key for impl pairing

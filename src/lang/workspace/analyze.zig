@@ -8,6 +8,7 @@ const common = @import("common.zig");
 const cst = @import("../cst.zig");
 const diagnostic = @import("../diagnostic.zig");
 const hir = @import("../hir.zig");
+const import_graph = @import("../import_graph.zig");
 const pipeline = @import("../pipeline.zig");
 const semantic = @import("../semantic.zig");
 const txt = @import("text.zig");
@@ -108,15 +109,22 @@ pub fn analyzeDetailed(
     const root = parsed.ok.root;
     const symbols = try self.collectSymbolsFromParsed(root, snap.text);
     defer common.freeSymbols(self.alloc, symbols);
-    const deps = try self.collectDepsFromParsed(snap, root);
-    errdefer self.alloc.free(deps);
-    try self.updateDeps(id, deps);
+
+    // deps are whatever the build's checker resolved, into the caller's graph if given
+    var local_graph = import_graph.Graph.init(self.alloc);
+    defer local_graph.deinit();
+    var build_opts = opts;
+    const graph = opts.imports orelse &local_graph;
+    build_opts.imports = graph;
 
     var warn_report: ?diagnostic.Report = null;
     const build_result = try pipeline.buildParsedWithWarnings(vm, root, .{
         .name = snap.name,
         .text = snap.text,
-    }, opts, parsed_entry.warnings, &warn_report);
+    }, build_opts, parsed_entry.warnings, &warn_report);
+
+    try self.updateDeps(id, try depsFromGraph(self, graph));
+    try self.setImportBindings(id, graph);
     defer if (warn_report) |*wr| wr.deinit();
 
     return switch (build_result) {
@@ -319,9 +327,6 @@ pub fn ensureInspect(
     const root = parsed.ok.root;
     const symbols = try self.collectSymbolsFromParsed(root, snap.text);
     defer common.freeSymbols(self.alloc, symbols);
-    const deps = try self.collectDepsFromParsed(snap, root);
-    errdefer self.alloc.free(deps);
-    try self.updateDeps(id, deps);
     const known_globals = try common.getKnownGlobals(self, scratch);
     defer scratch.free(known_globals);
 
@@ -343,24 +348,18 @@ pub fn ensureInspect(
     const WorkspaceResolver = struct {
         ws: *Workspace,
         source_name: []const u8,
-        mode: pipeline.ProjectMode,
-        project_root: []const u8,
-        fn resolve(ptr: *anyopaque, path: []const u8, a: std.mem.Allocator) ?[]const u8 {
+        fn resolve(ptr: *anyopaque, importer: []const u8, raw: []const u8, a: std.mem.Allocator) semantic.ModuleResolver.Resolved {
             const s: *@This() = @ptrCast(@alignCast(ptr));
-            const file_id = s.ws.resolveOpenImport(s.source_name, path, s.mode, s.project_root) orelse return null;
-            const snap2 = s.ws.snapshot(file_id) orelse return null;
-            return a.dupe(u8, snap2.text) catch null;
+            const file_id = s.ws.resolveImport(importer, raw, true) catch |err| return .{ .err = err };
+            const snap2 = s.ws.snapshot(file_id) orelse return .{ .err = error.FileNotFound };
+            const path = a.dupe(u8, snap2.name) catch |err| return .{ .err = err };
+            const source = a.dupe(u8, snap2.text) catch |err| return .{ .err = err };
+            return .{ .ok = .{ .path = path, .source = source } };
         }
-    };
-    const project_root = blk: {
-        const entry = self.entryPtr(snap.id) catch break :blk "";
-        break :blk entry.project_root;
     };
     var ws_resolver = WorkspaceResolver{
         .ws = self,
         .source_name = snap.name,
-        .mode = opts.mode,
-        .project_root = project_root,
     };
 
     var docs = std.StringHashMap([]const u8).init(self.alloc);
@@ -373,8 +372,11 @@ pub fn ensureInspect(
         docs.deinit();
     }
 
+    var graph = import_graph.Graph.init(self.alloc);
+    defer graph.deinit();
+
     var dropped_warn: ?diagnostic.Report = null;
-    // semantic requires lowered input; symbols/deps above read the raw tree
+    // semantic requires lowered input; symbols above read the raw tree
     const lowered = try hir.lower(scratch, root);
     const semantic_error = try semantic.analyze(
         scratch,
@@ -386,10 +388,14 @@ pub fn ensureInspect(
         .{ .map = &type_annotations, .table = &type_table },
         &docs,
         .{ .ptr = &ws_resolver, .resolveFn = WorkspaceResolver.resolve },
+        &graph,
         &dropped_warn,
     );
 
     if (dropped_warn) |*wr| wr.deinit();
+
+    try self.updateDeps(id, try depsFromGraph(self, &graph));
+    try self.setImportBindings(id, &graph);
 
     const cache_diag = if (semantic_error) |failure|
         try common.copyError(self.alloc, .{ .semantic = failure }, snap.name, snap.text)
@@ -468,6 +474,16 @@ pub fn ensureInspect(
     return self.inspect_cache.getPtr(id) orelse return error.FileNotOpen;
 }
 
+/// every module the checker reached, as open files. the resolver opened them
+fn depsFromGraph(self: *Workspace, graph: *const import_graph.Graph) ![]FileId {
+    var out = try std.ArrayList(FileId).initCapacity(self.alloc, graph.files.count());
+    errdefer out.deinit(self.alloc);
+    for (graph.files.keys()) |path| {
+        if (self.file_names.get(path)) |fid| out.appendAssumeCapacity(fid);
+    }
+    return out.toOwnedSlice(self.alloc);
+}
+
 /// fn sig off the inspect cache
 pub fn fnSig(self: *Workspace, scratch: std.mem.Allocator, id: FileId, name: []const u8) !?FnSig {
     return fnSigOpts(self, scratch, id, name, .{});
@@ -497,7 +513,7 @@ test "workspace caches repeated analysis" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1", .{});
+    const id = try ws.open("<test>", "1 + 1");
     const first = try ws.analyze(alloc, id, .{});
     try std.testing.expect(first == .ok);
 
@@ -517,7 +533,7 @@ test "workspace invalidates cache on change" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1", .{});
+    const id = try ws.open("<test>", "1 + 1");
     const first = try ws.analyze(alloc, id, .{});
     defer switch (first) {
         .ok => |bytecode| {
@@ -553,9 +569,17 @@ test "workspace invalidates dependent caches" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const a = try ws.open("dir/a.rv", "1", .{});
-    const b = try ws.open("dir/b.rv", "import \"a\"", .{});
-    const c = try ws.open("dir/c.rv", "import \"b\"", .{});
+    // builds resolve imports on disk, so the files exist there too
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "a.rv", .data = "1" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "b.rv", .data = "import \"./a\"" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "c.rv", .data = "import \"./b\"" });
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", alloc);
+
+    const a = try ws.open(try std.Io.Dir.path.join(alloc, &.{ dir, "a.rv" }), "1");
+    const b = try ws.open(try std.Io.Dir.path.join(alloc, &.{ dir, "b.rv" }), "import \"./a\"");
+    const c = try ws.open(try std.Io.Dir.path.join(alloc, &.{ dir, "c.rv" }), "import \"./b\"");
 
     const res_b = try ws.analyze(alloc, b, .{});
     defer switch (res_b) {
@@ -595,7 +619,7 @@ test "identical text change keeps caches" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1", .{});
+    const id = try ws.open("<test>", "1 + 1");
     var first = try ws.analyzeDetailed(alloc, id, .{});
     defer first.deinit(alloc);
     try std.testing.expect(!first.cached);
@@ -624,7 +648,7 @@ test "analysis returns snapshot and bytecode" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1", .{});
+    const id = try ws.open("<test>", "1 + 1");
     var analysis = try ws.analyzeDetailed(alloc, id, .{});
     defer analysis.deinit(alloc);
 
@@ -641,7 +665,7 @@ test "workspace diagnostics query" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "const x =", .{});
+    const id = try ws.open("<test>", "const x =");
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 }
@@ -657,7 +681,7 @@ test "workspace diagnostics clean file" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "let x = 1\nprint(x)", .{});
+    const id = try ws.open("<test>", "let x = 1\nprint(x)");
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag == null);
 }
@@ -670,7 +694,7 @@ test "workspace diagnostics undefined name" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "hiasdhfasduf", .{});
+    const id = try ws.open("<test>", "hiasdhfasduf");
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 }
@@ -686,7 +710,7 @@ test "workspace diagnostics warn on missing return arrow" {
         \\ fn demo() string do
         \\   "ok"
         \\ end
-    , .{});
+    );
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 }
@@ -706,7 +730,7 @@ test "workspace diagnostics merge semantic and compile failures" {
         \\ end
         \\ bind(1, "hi")
     ;
-    const id = try ws.open("<test>", source, .{});
+    const id = try ws.open("<test>", source);
     const diag = try ws.diagnostics(alloc, id, .{});
     try std.testing.expect(diag != null);
 
@@ -737,7 +761,7 @@ test "workspace sig map survives typed fn invalidation" {
         \\const f = fn(x: table, y: fn(number) -> str) x
         \\type T = fn(table<number>, number) -> table<string, number>
         \\
-    , .{});
+    );
     _ = try ws.inspectDetailed(alloc, id, .{});
 
     try ws.change(id, "const f = fn(x: table) x");
@@ -749,4 +773,28 @@ test "workspace sig map survives typed fn invalidation" {
     try std.testing.expect(p.tag == .table);
     try std.testing.expect(p.tag.table.key == null);
     try std.testing.expect(p.tag.table.value.*.tag == .any);
+}
+
+test "workspace maps an import binding to its file through the checker's graph" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    var vm = try revo.VM.init(.{ .alloc = alloc, .io = std.testing.io, .diag_alloc = alloc });
+    defer vm.deinit();
+    var ws = try Workspace.initWithVm(&vm, alloc);
+    defer ws.deinit();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", alloc);
+    const one = try ws.open(try std.Io.Dir.path.join(alloc, &.{ dir, "one.rv" }), "pub fn hi(a: number) a\n");
+    const two = try ws.open(try std.Io.Dir.path.join(alloc, &.{ dir, "two.rv" }), "const one = import(\"./one.rv\")\none.hi(1)\n");
+
+    _ = try ws.ensureInspect(alloc, two, .{});
+    try std.testing.expectEqual(@as(?FileId, one), ws.resolveDepId(alloc, two, "one"));
+
+    var hov = try ws.hover(alloc, two, .{ .line = 2, .character = 5 }, .{ .install_debug_info = false });
+    defer if (hov) |*h| h.deinit(alloc);
+    try std.testing.expect(hov != null);
 }

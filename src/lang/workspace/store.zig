@@ -6,12 +6,12 @@ const W = @import("../Workspace.zig");
 const Workspace = W.Workspace;
 const FileId = W.FileId;
 const Snapshot = W.Snapshot;
-const OpenOptions = W.OpenOptions;
 const FileEntry = W.FileEntry;
 const ParsedEntry = W.ParsedEntry;
+const common = @import("common.zig");
 const pipeline = @import("../pipeline.zig");
 
-pub fn open(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOptions) !FileId {
+pub fn open(self: *Workspace, name: []const u8, text: []const u8) !FileId {
     if (self.file_names.get(name)) |id| {
         try self.change(id, text);
         return id;
@@ -28,25 +28,17 @@ pub fn open(self: *Workspace, name: []const u8, text: []const u8, opts: OpenOpti
     const id = self.next_file_id;
     self.next_file_id += 1;
 
-    const project_root: []u8 = if (opts.mode == .project and opts.project_root.len > 0)
-        try self.alloc.dupe(u8, opts.project_root)
-    else
-        &.{};
-
     try self.files.append(self.alloc, .{
         .id = id,
         .version = 1,
         .name = name_copy,
         .text = text_copy,
-        .mode = opts.mode,
-        .project_root = project_root,
     });
     stored = true;
     errdefer {
         const removed = self.files.pop().?;
         self.alloc.free(removed.name);
         self.alloc.free(removed.text);
-        if (removed.project_root.len > 0) self.alloc.free(removed.project_root);
     }
     const index = self.files.items.len - 1;
 
@@ -84,6 +76,10 @@ pub fn close(self: *Workspace, id: FileId) void {
     self.query_db.evict(id);
     self.invalidateCache(id);
     self.removeDeps(id);
+    if (self.import_bindings.fetchRemove(id)) |kv| {
+        var m = kv.value;
+        common.freeImports(self.alloc, &m);
+    }
     if (self.reverse_deps.fetchRemove(id)) |kv| {
         self.alloc.free(kv.value);
     }
@@ -91,7 +87,6 @@ pub fn close(self: *Workspace, id: FileId) void {
     _ = self.file_index.remove(id);
     self.alloc.free(removed.name);
     self.alloc.free(removed.text);
-    if (removed.project_root.len > 0) self.alloc.free(removed.project_root);
     if (index < self.files.items.len) {
         const moved = self.files.items[index];
         self.file_index.put(moved.id, index) catch {};
@@ -165,7 +160,6 @@ pub fn clearFiles(self: *Workspace) void {
         self.query_db.evict(entry.id);
         self.alloc.free(entry.name);
         self.alloc.free(entry.text);
-        if (entry.project_root.len > 0) self.alloc.free(entry.project_root);
     }
 }
 
@@ -177,7 +171,7 @@ test "workspace stale version tracking" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "1 + 1", .{});
+    const id = try ws.open("<test>", "1 + 1");
     const v1 = ws.snapshot(id).?.version;
     try std.testing.expectEqual(@as(u32, 1), v1);
     try std.testing.expect(!ws.isStale(id, v1));
@@ -197,7 +191,7 @@ test "workspace parse is lazy and cached per version" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<lazy>", "1 + 1", .{});
+    const id = try ws.open("<lazy>", "1 + 1");
     // opening must not lex or parse
     try std.testing.expectEqual(@as(usize, 0), ws.parsed_cache.count());
 

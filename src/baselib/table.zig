@@ -41,6 +41,7 @@ pub const Impl = struct {
 
     pub fn rawset(vm: *VM, self: Args.table, k: Args.any, val: Args.any) !HostResult {
         const t = try vm.tables.get(@backingInt(self));
+        if (t.frozen) return .other("pub records are read-only");
         try t.putRaw(k, val, vm);
         return .data(Value.new.table(@backingInt(self)));
     }
@@ -82,6 +83,7 @@ pub const Impl = struct {
             "table",
             typeof(Value.new.table(@backingInt(self)), vm),
         );
+        if (table.frozen) return .other("pub records are read-only");
         const pos: i64 = root.host.numToInt(i64, pos_num) orelse return .errType(
             1,
             "integer number",
@@ -105,6 +107,7 @@ pub const Impl = struct {
             "table",
             typeof(Value.new.table(@backingInt(self)), vm),
         );
+        if (table.frozen) return .other("pub records are read-only");
         if (table.array.items.len == 0) return .coreAtom(.undef);
 
         const removed = table.array.orderedRemove(table.array.items.len - 1);
@@ -117,6 +120,7 @@ pub const Impl = struct {
             "table",
             typeof(Value.new.table(@backingInt(self)), vm),
         );
+        if (table.frozen) return .other("pub records are read-only");
         const removed = table.removeAndReturn(k, vm) orelse return .other("not found");
         return .data(removed);
     }
@@ -190,6 +194,7 @@ pub const Impl = struct {
 
     pub fn sort(vm: *VM, self: Args.table) !HostResult {
         const tbl = try vm.tables.get(@backingInt(self));
+        if (tbl.frozen) return .other("pub records are read-only");
         const Context = struct {
             vm_: *VM,
             pub fn lessThanFn(ctx: @This(), lhs: Value, rhs: Value) bool {
@@ -202,6 +207,7 @@ pub const Impl = struct {
 
     pub fn sort_by(vm: *VM, self: Args.table, compare_fn: Args.function) !HostResult {
         const tbl = try vm.tables.get(@backingInt(self));
+        if (tbl.frozen) return .other("pub records are read-only");
         const Context = struct {
             vm_: *VM,
             fn_data: Value,
@@ -221,6 +227,7 @@ pub const Impl = struct {
 
     pub fn reverse(vm: *VM, self: Args.table) !HostResult {
         const tbl = try vm.tables.get(@backingInt(self));
+        if (tbl.frozen) return .other("pub records are read-only");
         std.mem.reverse(Value, tbl.array.items);
         return .data(Value.new.table(@backingInt(self)));
     }
@@ -272,6 +279,13 @@ pub const Impl = struct {
     pub fn len(vm: *VM, self: Args.table) !HostResult {
         const table = try vm.tables.get(@backingInt(self));
         return .data(Value.new.num(table.count()));
+    }
+
+    pub fn freeze(vm: *VM, self: Args.table) !HostResult {
+        const t = try vm.tables.get(@backingInt(self));
+        t.frozen = true;
+
+        return .data(Value.new.table(@backingInt(self)));
     }
 
     pub fn alen(vm: *VM, self: Args.table) !HostResult {
@@ -347,6 +361,7 @@ pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Imp
 fn push(args: []const Value, vm: *VM) !HostResult {
     const table_id = args[0].asTable().?;
     const table = vm.tables.get(table_id) catch return .errType(0, "table", typeof(args[0], vm));
+    if (table.frozen) return .other("pub records are read-only");
     try table.array.appendSlice(vm.runtime.alloc, args[1..]);
     return .data(Value.new.table(table_id));
 }

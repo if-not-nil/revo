@@ -25,15 +25,12 @@ pub const VM = @This();
 pub const UserGlobals = std.AutoHashMap(GlobalID, Value);
 pub const FrozenGlobals = std.AutoHashMap(GlobalID, void);
 
-pub const ImportStamp = struct {
-    mtime: u64,
-    size: usize,
+/// one per realpath, see `run.startModule`
+pub const Module = union(enum) {
+    /// its body runs on this fiber, importers join it
+    loading: FiberID,
+    loaded: Value,
 };
-
-pub const ImportCache = std.StringHashMap(struct {
-    result: Value,
-    stamp: ImportStamp,
-});
 
 pub const FiberID = usize;
 pub const DebugInfoID = usize;
@@ -191,16 +188,22 @@ atoms: std.StringHashMap(mem.AtomID),
 debug: DebugOptions = .{},
 user_globals: UserGlobals,
 frozen_globals: FrozenGlobals,
+/// dir of the file being compiled, imports resolve from it
 import_dir: ?[]const u8,
-project_root: []const u8 = "",
-loading_stack: std.ArrayList([]const u8),
 
 /// indexed by @intFromEnum(mem.ValueTag); tags are non-contiguous (0, 8-13)
 metatables: [
     @as(usize, @backingInt(memory.ValueTag.@"opaque")) + 1
 ]?mem.TableID = @splat(null),
-import_cache: ImportCache,
-package_path: std.ArrayList([]const u8),
+/// realpath -> module, owns keys
+modules: std.StringHashMapUnmanaged(Module) = .empty,
+/// loading fiber -> its module's key in `modules`
+module_fibers: std.AutoHashMapUnmanaged(FiberID, []const u8) = .empty,
+/// a bundled program's import graph, owned. imports resolve and load from it
+bundle: ?*revo.lang.import_graph.Graph = null,
+/// `name:` import prefixes, see `import_path.zig`
+/// , owns names and dirs
+collections: std.ArrayList(revo.import_path.Collection) = .empty,
 debug_infos: std.ArrayList(DebugInfo),
 pending_debug_info_id: ?DebugInfoID = null,
 panic_message: ?[]const u8 = null,
@@ -274,7 +277,7 @@ pub fn init(runtime: revo.Runtime) !VM {
     rt.diag_arena = null;
 
     if (rt.threads == 0) rt.threads = 1;
-    if (rt.threads > 1 and !revo.can_async) rt.threads = 1;
+    if (rt.threads > 1 and !rt.caps.threads) rt.threads = 1;
     if (rt.threads > 64) rt.threads = 64;
 
     try rt.ensureDiagArena();
@@ -292,12 +295,8 @@ pub fn init(runtime: revo.Runtime) !VM {
     errdefer resources.deinit();
     var strings = try Interner.init(rt.alloc);
     errdefer strings.deinit();
-    var package_path = try std.ArrayList([]const u8).initCapacity(rt.alloc, 4);
-    errdefer package_path.deinit(rt.alloc);
     var debug_infos = try std.ArrayList(DebugInfo).initCapacity(rt.alloc, 8);
     errdefer debug_infos.deinit(rt.alloc);
-    var loading_stack = try std.ArrayList([]const u8).initCapacity(rt.alloc, 1);
-    errdefer loading_stack.deinit(rt.alloc);
     var gc_mark_stack = try std.ArrayList(MarkItem).initCapacity(rt.alloc, 256);
     errdefer gc_mark_stack.deinit(rt.alloc);
 
@@ -311,27 +310,22 @@ pub fn init(runtime: revo.Runtime) !VM {
         .resources = resources,
         .strings = strings,
         .atoms = std.StringHashMap(mem.AtomID).init(rt.alloc),
-        .import_cache = ImportCache.init(rt.alloc),
-        .package_path = package_path,
         .debug_infos = debug_infos,
         .user_globals = UserGlobals.init(rt.alloc),
         .frozen_globals = FrozenGlobals.init(rt.alloc),
         .import_dir = null,
         .loaded_specs = &.{},
-        .loading_stack = loading_stack,
         .loaded_extensions = .empty,
         .gc_mark_stack = gc_mark_stack,
         .gc_finalizers = std.AutoHashMap(mem.TableID, Value).init(rt.alloc),
         .c_refs = std.AutoHashMap(u64, Value).init(rt.alloc),
     };
-    if (revo.can_async) {
+    if (runtime.caps.threads) {
         if (makeWakeupPipe()) |fds| {
             vm.sched.wakeup_r = fds[0];
             vm.sched.wakeup_w = fds[1];
         }
     }
-
-    try vm.package_path.appendSlice(rt.alloc, &.{ "./?", "./lib/?", "/usr/local/lib/revo/?" });
 
     _ = try vm.sched.appendFiber(.{
         .id = 0,
@@ -403,11 +397,36 @@ pub inline fn bumpPerfN(self: *VM, op: opcode.Opcode, n: usize) void {
     self.perf.countOpN(op, n);
 }
 
+/// `std:` -> std dir next to the exe
+/// , if there is one
+pub fn addStdCollection(self: *VM) !void {
+    if (comptime !self.runtime.caps.host_os) return;
+
+    const dir = revo.import_path.findStdDir(self.runtime.io, self.runtime.alloc) orelse return;
+    defer self.runtime.alloc.free(dir);
+
+    try self.addCollection("std", dir);
+}
+
+/// `name:` -> `dir`
+/// , later adds of a name win
+pub fn addCollection(self: *VM, name: []const u8, dir: []const u8) !void {
+    const alloc = self.runtime.alloc;
+
+    const owned_name = try alloc.dupe(u8, name);
+    errdefer alloc.free(owned_name);
+    const owned_dir = try alloc.dupe(u8, dir);
+    errdefer alloc.free(owned_dir);
+
+    try self.collections.insert(alloc, 0, .{ .name = owned_name, .dir = owned_dir });
+}
+
 pub fn deinit(self: *VM) void {
     self.clearProgramDebugInfo();
     self.clearPanicMessage();
     self.clearRuntimeMessage();
-    if (revo.can_async) {
+
+    if (self.runtime.caps.threads) {
         if (self.sched.wakeup_r >= 0) _ = std.c.close(self.sched.wakeup_r);
         if (self.sched.wakeup_w >= 0) _ = std.c.close(self.sched.wakeup_w);
         self.sched.wakeup_r = -1;
@@ -419,10 +438,6 @@ pub fn deinit(self: *VM) void {
     self.frozen_globals.deinit();
     self.builtin_globals.deinit();
     revo.baselib.specs.freeLoadedSpecs(self.runtime.alloc, self.loaded_specs);
-
-    for (self.loading_stack.items) |path|
-        self.runtime.alloc.free(path);
-    self.loading_stack.deinit(self.runtime.alloc);
 
     // run pending gc finalizers while scheduler + pools are alive
     {
@@ -462,21 +477,27 @@ pub fn deinit(self: *VM) void {
         self.runtime.alloc.free(info.source_name);
     }
     self.debug_infos.deinit(self.runtime.alloc);
-    self.package_path.deinit(self.runtime.alloc);
-    if (self.project_root.len > 0) self.runtime.alloc.free(self.project_root);
+    for (self.collections.items) |c| {
+        self.runtime.alloc.free(c.name);
+        self.runtime.alloc.free(c.dir);
+    }
+    self.collections.deinit(self.runtime.alloc);
 
-    var cache_it = self.import_cache.keyIterator();
-    while (cache_it.next()) |key|
+    var mod_it = self.modules.keyIterator();
+    while (mod_it.next()) |key|
         self.runtime.alloc.free(key.*);
 
-    self.import_cache.deinit();
-
-    if (!revo.is_freestanding) {
-        for (self.loaded_extensions.items) |*lib| {
-            if (builtin.target.os.tag != .windows and builtin.target.os.tag != .wasi)
-                lib.close();
-        }
+    self.modules.deinit(self.runtime.alloc);
+    self.module_fibers.deinit(self.runtime.alloc);
+    if (self.bundle) |b| {
+        b.deinit();
+        self.runtime.alloc.destroy(b);
     }
+
+    if (self.runtime.caps.dlclose) {
+        for (self.loaded_extensions.items) |*lib| lib.close();
+    }
+
     self.loaded_extensions.deinit(self.runtime.alloc);
     self.gc_mark_stack.deinit(self.runtime.alloc);
     self.runtime.deinitDiagArena();
@@ -505,22 +526,6 @@ pub fn runResourceGc(self: *VM, id: mem.ResourceID) bool {
 /// true when the table has a finalizer pending
 pub fn hasFinalizer(self: *VM, table_id: mem.TableID) bool {
     return self.gc_finalizers.contains(table_id);
-}
-
-pub fn importStamp(self: *VM, path: []const u8) !ImportStamp {
-    const stat = try std.Io.Dir.cwd().statFile(self.runtime.io, path, .{});
-    return .{
-        .mtime = @intCast(stat.mtime.toNanoseconds()),
-        .size = @intCast(stat.size),
-    };
-}
-
-pub fn invalidateImportCache(self: *VM, path: []const u8) bool {
-    if (self.import_cache.fetchRemove(path)) |entry| {
-        self.runtime.alloc.free(entry.key);
-        return true;
-    }
-    return false;
 }
 
 pub fn addConstant(self: *VM, val: Value) !ConstantID {
@@ -1654,10 +1659,8 @@ fn callNonClosureFunction(
                             try self.setRuntimeMessage(msg);
                             return error.Panic;
                         },
-                        .module_not_found => {
-                            return error.ModuleNotFound;
-                        },
-                        .cyclic_import => {
+                        .cyclic_import => |chain| {
+                            try self.setRuntimeMessage(chain);
                             return error.CyclicImport;
                         },
                         .import_failed => |msg| {
@@ -1945,6 +1948,10 @@ pub fn returnRegister(
         // final value from `closed`, never from a dead fiber's slots
         if (fiber.open_upvalues.items.len > 0)
             try self.closeUpvalues(0);
+        if (self.module_fibers.count() > 0) {
+            if (self.module_fibers.fetchRemove(finished_id)) |m|
+                self.modules.getPtr(m.value).?.* = .{ .loaded = result };
+        }
         try self.sched.finishFiber(finished_id, result);
         if (finished_id == 0) {
             fiber.registers_len = 0;
@@ -2019,6 +2026,9 @@ fn reuseSpawnFiber(self: *VM, parent: *Fiber, program: []const Instruction, reg_
         break :blk try self.sched.appendFiber(child);
     };
 
+    // a module fiber that died to a panic never finished, drop its stale entry
+    if (self.module_fibers.count() > 0) _ = self.module_fibers.remove(child_id);
+
     const child = self.sched.fibers.items[child_id];
     if (reg_need > child.registers.len)
         child.registers = try self.runtime.alloc.realloc(child.registers, reg_need);
@@ -2069,6 +2079,36 @@ fn publishSpawnHandle(self: *VM, base: usize, result_reg: opcode.Register, child
         Value.new.atom(revo.CoreAtoms.atomId(.fiber)),
         Value.new.num(@as(i64, @intCast(child_id))),
     });
+}
+
+/// run closure `func_id` with no args on a new, enqueued fiber
+pub fn spawnClosure(self: *VM, func_id: mem.FunctionID) !FiberID {
+    const closure = switch ((try self.functionFast(func_id)).*) {
+        .closure => |f| f,
+        .host, .c_function => return error.TypeError,
+    };
+    const parent = self.currentFiber();
+    const program = if (self.callable.segments.items.len > closure.segment_id)
+        self.callable.segments.items[closure.segment_id]
+    else
+        parent.program;
+
+    const child_id = try self.reuseSpawnFiber(parent, program, closure.register_count);
+    const child = self.sched.fibers.items[child_id];
+    try child.frames.append(self.runtime.alloc, .{
+        .return_addr = @intCast(child.program.len),
+        .base = 0,
+        .program = child.program,
+        .call_site_pc = null,
+        .result_register = 0,
+        .register_count = closure.register_count,
+        .closure_id = try self.detachClosureForFiber(func_id),
+    });
+    child.top_base = 0;
+    child.pc = closure.addr;
+
+    try self.sched.enqueueRunnable(child_id);
+    return child_id;
 }
 
 /// start a fiber and hand back its handle; __call tables pass self first
@@ -2215,7 +2255,7 @@ pub const FieldLookup = lookup.FieldLookup;
 pub const setMetatable = lookup.setMetatable;
 pub const setTableMetatable = lookup.setTableMetatable;
 pub const setResourceMetatable = lookup.setResourceMetatable;
-pub const runImportedModule = run.runImportedModule;
+pub const startModule = run.startModule;
 const Scheduler = @import("scheduler.zig");
 const vm_dispatch = @import("dispatch.zig");
 const vm_gc = @import("gc.zig");

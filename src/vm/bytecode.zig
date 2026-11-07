@@ -19,8 +19,22 @@ pub const Error = error{
 };
 
 pub const MAGIC = [4]u8{ 'R', 'E', 'V', 'O' };
-pub const VERSION_MAJOR: u16 = 1; // 1: nanbox tag values changed (0, 8-15)
-pub const VERSION_MINOR: u16 = 2; // 2: const_local_bits serialized at its real width
+pub const VERSION_MAJOR: u16 = 2; // 2: atoms travel by name, older files bake vm-specific ids
+pub const VERSION_MINOR: u16 = 0; // 0: optional bundle of the import graph after the atoms
+
+/// header flag: the import graph's files and edges follow the atoms
+pub const FLAG_BUNDLE: u32 = 1;
+/// header flag: the atoms the instructions name follow the templates, by name
+/// , ids are per vm, so a load re-interns them and remaps
+pub const FLAG_ATOMS: u32 = 2;
+
+/// ops whose `bx` is an atom id
+fn atomOperand(op: opcode.Opcode) bool {
+    return switch (op) {
+        .load_user_global, .load_builtin_global, .store_user_global, .store_user_global_const, .table_set_atom, .table_get_atom => true,
+        else => false,
+    };
+}
 
 /// on-disk
 pub const Header = extern struct {
@@ -75,7 +89,18 @@ fn serializeValue(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, ite
             try buffer.appendSlice(allocator, str);
         },
         .function => try writeIntLE(buffer, allocator, u64, item.asFunction().?),
-        .table => try writeIntLE(buffer, allocator, u64, item.asTable().?),
+        // by value, a table id means nothing in the vm that loads it (`comp` results)
+        .table => {
+            const t = try vm.tables.get(item.asTable().?);
+            try writeIntLE(buffer, allocator, u64, t.array.items.len);
+            for (t.array.items) |v| try serializeValue(buffer, allocator, vm, v);
+            try writeIntLE(buffer, allocator, u64, t.hash.count);
+            var it = t.hash.orderedIterator();
+            while (it.next()) |e| {
+                try serializeValue(buffer, allocator, vm, e.key);
+                try serializeValue(buffer, allocator, vm, e.value);
+            }
+        },
         .@"opaque" => unreachable,
         .resource => unreachable,
     }
@@ -86,7 +111,8 @@ fn serializeValue(buffer: *std.ArrayList(u8), allocator: Allocator, vm: *VM, ite
 //
 
 /// write compiled bytecode + vm constants/templates into a byte array
-pub fn serialize(vm: *VM, bytecode: Bytecode, allocator: Allocator) ![]u8 {
+/// ; with `bundle`, every module it reached rides along, so it runs without them on disk
+pub fn serialize(vm: *VM, bytecode: Bytecode, allocator: Allocator, bundle: ?*const lang.import_graph.Graph) ![]u8 {
     var buffer = try std.ArrayList(u8).initCapacity(allocator, 256);
     defer buffer.deinit(allocator);
 
@@ -94,7 +120,7 @@ pub fn serialize(vm: *VM, bytecode: Bytecode, allocator: Allocator) ![]u8 {
         .magic = MAGIC,
         .version_major = VERSION_MAJOR,
         .version_minor = VERSION_MINOR,
-        .flags = 0,
+        .flags = FLAG_ATOMS | @as(u32, if (bundle != null) FLAG_BUNDLE else 0),
         .constants_count = @intCast(vm.constants.items.len),
         .instructions_count = @intCast(bytecode.instructions.len),
         .spans_count = @intCast(bytecode.spans.len),
@@ -146,6 +172,35 @@ pub fn serialize(vm: *VM, bytecode: Bytecode, allocator: Allocator) ![]u8 {
         try buffer.appendSlice(allocator, template.const_local_bits[0..bits_len]);
     }
 
+    var atoms: std.AutoArrayHashMapUnmanaged(u32, void) = .empty;
+    defer atoms.deinit(allocator);
+    for (bytecode.instructions) |i| if (atomOperand(i.op)) try atoms.put(allocator, i.bx, {});
+    try writeIntLE(&buffer, allocator, u32, @intCast(atoms.count()));
+    for (atoms.keys()) |id| {
+        const name = try vm.strings.get(id);
+        try writeIntLE(&buffer, allocator, u32, id);
+        try writeIntLE(&buffer, allocator, u32, @intCast(name.len));
+        try buffer.appendSlice(allocator, name);
+    }
+
+    if (bundle) |b| {
+        try writeIntLE(&buffer, allocator, u32, @intCast(b.files.count()));
+        for (b.files.keys(), b.files.values()) |path, source| {
+            try writeIntLE(&buffer, allocator, u32, @intCast(path.len));
+            try buffer.appendSlice(allocator, path);
+            try writeIntLE(&buffer, allocator, u64, source.len);
+            try buffer.appendSlice(allocator, source);
+        }
+        try writeIntLE(&buffer, allocator, u32, @intCast(b.edges.count()));
+        var it = b.edges.iterator();
+        while (it.next()) |e| {
+            try writeIntLE(&buffer, allocator, u32, @intCast(e.key_ptr.len));
+            try buffer.appendSlice(allocator, e.key_ptr.*);
+            try writeIntLE(&buffer, allocator, u32, @intCast(e.value_ptr.len));
+            try buffer.appendSlice(allocator, e.value_ptr.*);
+        }
+    }
+
     return buffer.toOwnedSlice(allocator);
 }
 
@@ -177,8 +232,22 @@ fn readValue(vm: *VM, reader: *std.Io.Reader) anyerror!memory.Value {
             break :blk memory.Value.new.function(@intCast(fid));
         },
         @backingInt(memory.ValueTag.table) => blk: {
-            const tid = std.mem.readInt(u64, try reader.takeArray(8), .little);
-            break :blk memory.Value.new.table(@intCast(tid));
+            const tid = try vm.tables.create();
+            const items = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            for (0..items) |_| {
+                const v = try readValue(vm, reader);
+                const t = try vm.tables.get(tid);
+                try t.array.append(vm.runtime.alloc, v);
+            }
+
+            const entries = std.mem.readInt(u64, try reader.takeArray(8), .little);
+            for (0..entries) |_| {
+                const k = try readValue(vm, reader);
+                const v = try readValue(vm, reader);
+                const t = try vm.tables.get(tid);
+                try t.putRaw(k, v, vm);
+            }
+            break :blk memory.Value.new.table(tid);
         },
         else => blk: {
             _ = try reader.takeArray(8); // skip u64 payload
@@ -197,7 +266,8 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     const version_major = std.mem.readInt(u16, try reader.takeArray(2), .little);
     if (version_major != VERSION_MAJOR) return error.VersionMismatch;
     _ = std.mem.readInt(u16, try reader.takeArray(2), .little); // version_minor
-    _ = std.mem.readInt(u32, try reader.takeArray(4), .little); // flags
+
+    const flags = std.mem.readInt(u32, try reader.takeArray(4), .little);
     const constants_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
     const instructions_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
     const spans_count = std.mem.readInt(u32, try reader.takeArray(4), .little);
@@ -226,6 +296,9 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
     for (0..constants_count) |_| {
         try vm.constants.append(allocator, try readValue(vm, &reader));
     }
+
+    var template_ids = try std.ArrayList(usize).initCapacity(allocator, templates_count);
+    defer template_ids.deinit(allocator);
 
     // templates
     for (0..templates_count) |_| {
@@ -262,7 +335,7 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
         if (const_bits_len > 0) try reader.readSliceAll(const_local_bits);
 
         // createTemplate takes ownership do NOT free these slices after pls
-        _ = try vm.callable.createTemplate(.{
+        const template_id = try vm.callable.createTemplate(.{
             .addr = addr,
             .arity = arity,
             .total_arity = arity,
@@ -272,13 +345,73 @@ pub fn deserialize(vm: *VM, data: []const u8, allocator: Allocator) !Deserialize
             .const_locals = const_locals,
             .const_local_bits = const_local_bits,
         });
+        template_ids.appendAssumeCapacity(template_id);
     }
+
+    if (flags & FLAG_ATOMS != 0) try remapAtoms(vm, &reader, instructions, allocator);
+    if (flags & FLAG_BUNDLE != 0) try readBundle(vm, &reader);
+
+    // templates run from their own copy of the program
+    // ; segment 0 might already hold code compiled at runtime (a loaded module, `revo.eval`)
+    const segment_id = try vm.callable.addBytecodeSegment(try vm.callable.alloc.dupe(Instruction, instructions));
+    for (template_ids.items) |id| vm.callable.templates.items[id].segment_id = segment_id;
 
     return .{
         .instructions = instructions,
         .spans = spans,
         .allocator = allocator,
     };
+}
+
+/// atom ids from the compiling vm -> this vm's, rewritten in place
+fn remapAtoms(vm: *VM, reader: *std.Io.Reader, instructions: []Instruction, allocator: Allocator) !void {
+    var map: std.AutoHashMapUnmanaged(u32, u32) = .empty;
+    defer map.deinit(allocator);
+    const count = std.mem.readInt(u32, try reader.takeArray(4), .little);
+    for (0..count) |_| {
+        const old = std.mem.readInt(u32, try reader.takeArray(4), .little);
+        const name = try reader.take(std.mem.readInt(u32, try reader.takeArray(4), .little));
+        try map.put(allocator, old, @intCast(try vm.internAtom(name)));
+    }
+    for (instructions) |*i| {
+        if (!atomOperand(i.op)) continue;
+        i.bx = map.get(i.bx) orelse return error.InvalidBytecode;
+    }
+}
+
+/// the bundled graph becomes `vm.bundle`, imports resolve and load from it
+fn readBundle(vm: *VM, reader: *std.Io.Reader) !void {
+    const alloc = vm.runtime.alloc;
+    const graph = try alloc.create(lang.import_graph.Graph);
+    errdefer alloc.destroy(graph);
+    graph.* = .init(alloc);
+    errdefer graph.deinit();
+
+    const files = std.mem.readInt(u32, try reader.takeArray(4), .little);
+    for (0..files) |_| {
+        const path = try reader.take(std.mem.readInt(u32, try reader.takeArray(4), .little));
+        const owned_path = try alloc.dupe(u8, path);
+        errdefer alloc.free(owned_path);
+        const source = try reader.take(@intCast(std.mem.readInt(u64, try reader.takeArray(8), .little)));
+        try graph.addFile(owned_path, source);
+        alloc.free(owned_path);
+    }
+
+    const edges = std.mem.readInt(u32, try reader.takeArray(4), .little);
+    for (0..edges) |_| {
+        const key = try alloc.dupe(u8, try reader.take(std.mem.readInt(u32, try reader.takeArray(4), .little)));
+        errdefer alloc.free(key);
+        const path = try alloc.dupe(u8, try reader.take(std.mem.readInt(u32, try reader.takeArray(4), .little)));
+        errdefer alloc.free(path);
+        try graph.edges.put(alloc, key, path);
+    }
+
+    if (vm.bundle) |old| {
+        old.deinit();
+        alloc.destroy(old);
+    }
+
+    vm.bundle = graph;
 }
 
 //
@@ -302,7 +435,7 @@ test "serialize and deserialize round trip" {
     };
     const input = Bytecode{ .instructions = &instrs, .spans = &spans };
 
-    const bytecode = try serialize(&vm, input, runtime.alloc);
+    const bytecode = try serialize(&vm, input, runtime.alloc, null);
     defer runtime.alloc.free(bytecode);
 
     try expectEqual('R', bytecode[0]);
@@ -338,11 +471,50 @@ test "serialize writes valid file header" {
     defer vm.deinit();
 
     const input = Bytecode{ .instructions = &.{}, .spans = &.{} };
-    const bytecode = try serialize(&vm, input, runtime.alloc);
+    const bytecode = try serialize(&vm, input, runtime.alloc, null);
     defer runtime.alloc.free(bytecode);
 
     try expectEqual('R', bytecode[0]);
     try expectEqual('V', bytecode[2]);
     try expectEqual(VERSION_MAJOR, std.mem.readInt(u16, bytecode[4..6], .little));
     try expectEqual(VERSION_MINOR, std.mem.readInt(u16, bytecode[6..8], .little));
+}
+
+test "deserialize refuses a version 1 file" {
+    const runtime = revo.lang.test_helpers.runtime();
+    var vm = try VM.init(runtime);
+    defer vm.deinit();
+
+    // version 1 baked vm-specific atom ids, there's nothing to remap
+    var old: [28]u8 = @splat(0);
+    @memcpy(old[0..8], "REVO\x01\x00\x02\x00");
+    try std.testing.expectError(error.VersionMismatch, deserialize(&vm, &old, runtime.alloc));
+}
+
+test "table constants and atoms survive a round trip into a vm that interned other atoms first" {
+    const runtime = revo.lang.test_helpers.runtime();
+    const blob = blk: {
+        var vm = try VM.init(runtime);
+        defer vm.deinit();
+        const bytecode = switch (try lang.build(&vm, .{ .name = "t.rv", .text = "fn get(r) r.zz_a + r.zz_b[1]\nget(comp ({zz_a = 1, zz_b = {2, 3}}))" }, .{})) {
+            .ok => |ok| ok,
+            .err => return error.ParseError,
+        };
+        defer runtime.alloc.free(bytecode.instructions);
+        defer runtime.alloc.free(bytecode.spans);
+        break :blk try serialize(&vm, bytecode, runtime.alloc, null);
+    };
+    defer runtime.alloc.free(blob);
+
+    var vm = try VM.init(runtime);
+    defer vm.deinit();
+
+    // shift the ids the compiling vm handed out
+    for ([_][]const u8{ "zz_one", "zz_two", "zz_b", "zz_a" }) |n| _ = try vm.internAtom(n);
+
+    var loaded = try deserialize(&vm, blob, runtime.alloc);
+    defer loaded.deinit();
+    const res = try revo.run.runBytecodeReport(&vm, "t.rv", loaded.instructions);
+    try std.testing.expect(res == .ok);
+    try std.testing.expectEqual(memory.Value.new.num(4), vm.mainResult());
 }

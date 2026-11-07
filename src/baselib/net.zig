@@ -35,7 +35,7 @@ pub const Impl = struct {
             return HostResult.Err(vm, @errorName(err));
         };
 
-        if (revo.can_async) {
+        if (vm.runtime.caps.threads) {
             const ip4 = switch (addr) {
                 .ip4 => |a| a,
                 .ip6 => return HostResult.Err(vm, "AddressFamilyUnsupported"),
@@ -96,7 +96,7 @@ pub const Impl = struct {
     }
 
     pub fn accept(vm: *VM, self: Args.table) !HostResult {
-        if (builtin.target.os.tag == .windows) return error.OsNotSupported;
+        if (!vm.runtime.caps.sockets) return error.OsNotSupported;
         const socket_data = Value.new.table(@backingInt(self));
 
         if (!try isServer(socket_data, vm)) return HostResult.Err(vm, "NotServerSocket");
@@ -132,7 +132,7 @@ pub const Impl = struct {
     }
 
     pub fn send(vm: *VM, self: Args.table, data: Args.string) !HostResult {
-        if (builtin.target.os.tag == .windows or builtin.target.os.tag == .wasi) return error.OsNotSupported;
+        if (!vm.runtime.caps.sockets) return error.OsNotSupported;
         const socket_data = Value.new.table(@backingInt(self));
         const message = vm.stringValue(@backingInt(data));
 
@@ -172,7 +172,7 @@ pub const Impl = struct {
     }
 
     pub fn recv(vm: *VM, self: Args.table, opts: Args.table) !HostResult {
-        if (builtin.target.os.tag == .windows or builtin.target.os.tag == .wasi) return error.OsNotSupported;
+        if (!vm.runtime.caps.sockets) return error.OsNotSupported;
         const socket_data = Value.new.table(@backingInt(self));
         const opts_data = Value.new.table(@backingInt(opts));
 
@@ -268,7 +268,7 @@ pub const Impl = struct {
     }
 };
 
-pub const impls: []const specs.Impl = if (@import("build_options").is_freestanding)
+pub const impls: []const specs.Impl = if (!revo.default_caps.io)
     &[_]specs.Impl{}
 else
     root.host.impls(Impl).val ++ &[_]specs.Impl{

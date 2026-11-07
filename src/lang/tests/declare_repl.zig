@@ -310,7 +310,7 @@ test "a module returning one ascribed table types its members" {
     );
 }
 
-test ".so imports are untyped on their own" {
+test "revo.dload is untyped on its own" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "fake.so", .data = "" },
     });
@@ -318,13 +318,17 @@ test ".so imports are untyped on their own" {
     const source_name = try std.Io.Dir.path.join(std.testing.allocator, &.{ m.dir, "<source>" });
     defer std.testing.allocator.free(source_name);
 
-    const source = "import \"fake.so\"\nfake.open(5)\n";
+    const source = "const fake = revo.dload(\"./fake.so\")\nfake.open(5)\n";
 
     {
         var vm = try VM.init(t.runtime());
         defer vm.deinit();
         vm.import_dir = m.dir;
-        const result = try lang.build(&vm, .{ .name = source_name, .text = source }, .{ .install_debug_info = false });
+        const result = try lang.build(
+            &vm,
+            .{ .name = source_name, .text = source },
+            .{ .install_debug_info = false },
+        );
         switch (result) {
             .ok => |artifact| {
                 std.testing.allocator.free(artifact.instructions);
@@ -374,9 +378,7 @@ test "a module imported on a repl line parses as a module" {
     defer m.deinit();
 
     try t.topTrueOptsInDir(m.dir, .{ .repl_mode = true },
-        \\import {
-        \\    mod = "mod"
-        \\}
+        \\const mod = import("./mod")
         \\mod.find("hello", "ell") == 1
     );
 }
@@ -390,9 +392,7 @@ test "repl_mode still promotes a top-level binding to a global" {
 
 test "repl_mode does not leak into a module compiled with default options" {
     const src =
-        \\import {
-        \\    mod = "stdmod"
-        \\}
+        \\const mod = import("./stdmod")
         \\mod.find("hello", "ell") == 1
     ;
     var m = try t.TmpMod.init(&.{.{ .path = "stdmod.rv", .data = module_with_loop_local }});

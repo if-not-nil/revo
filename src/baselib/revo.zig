@@ -1,7 +1,3 @@
-const Args = root.host.ArgTypes;
-
-const diagnostic = revo.lang.diagnostic;
-
 fn runSource(vm: *VM, name: []const u8, src: []const u8, module_scope: bool) !HostResult {
     const bytecode = switch (revo.lang.build(
         vm,
@@ -50,8 +46,10 @@ pub const Impl = struct {
             .ok => |bytecode| {
                 defer vm.runtime.alloc.free(bytecode.instructions);
                 defer vm.runtime.alloc.free(bytecode.spans);
-                const bc = try revo.bytecode.serialize(vm, bytecode, vm.runtime.alloc);
+
+                const bc = try revo.bytecode.serialize(vm, bytecode, vm.runtime.alloc, null);
                 defer vm.runtime.alloc.free(bc);
+
                 const sid = try vm.strings.own(bc);
                 return HostResult.Ok(vm, Value.new.str(sid));
             },
@@ -145,7 +143,14 @@ pub const Impl = struct {
 };
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Impl{
-    .{ .name = "dofile", .f = if (@import("build_options").is_freestanding) root.host.defineStub(&.{.string}) else root.host.define(&.{.string}, dofile) },
+    .{
+        .name = "load",
+        .f = if (freestanding) root.host.defineStubVariadic(&.{.string}) else root.host.defineVariadic(&.{.string}, load),
+    },
+    .{
+        .name = "dload",
+        .f = if (freestanding) root.host.defineStub(&.{.string}) else root.host.define(&.{.string}, dload),
+    },
 };
 
 test "native eval works" {
@@ -252,42 +257,92 @@ test "eval diags" {
     , "parse");
 }
 
-pub fn dofile(args: []const Value, vm: *VM) !HostResult {
-    if (args.len != 1) return .errArity(args.len, 1);
+pub fn load(args: []const Value, vm: *VM) !HostResult {
+    const raw = vm.stringValue(args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm)));
+    const fresh = if (args.len > 1 and args[1].tag() == .table)
+        if (vm.getField(args[1], "fresh")) |f| !revo.isFalse(f) else false
+    else
+        false;
 
-    const path = switch (args[0].tag()) {
-        .string => vm.stringValue(args[0].asString().?),
-        else => return .errType(0, "string", typeof(args[0], vm)),
+    const path = revo.import_path.resolveFile(vm.runtime.io, vm.runtime.alloc, raw, ".", vm.collections.items, .dynamic) catch |err| {
+        if (err == error.OutOfMemory) return err;
+        return HostResult.errValue(vm, try diagnostic.evalErrorTable(vm, .{ .message = revo.import_path.message(err) }, raw, "", "io", null, &.{}));
+    };
+    defer vm.runtime.alloc.free(path);
+
+    const fid = switch (try revo.run.startModule(vm, path, .{ .fresh = fresh, .report = .value })) {
+        .loaded => |v| return HostResult.Ok(vm, v),
+        .failed => |f| return HostResult.errValue(vm, f.eval_error.?),
+        .loading => |fid| fid,
     };
 
-    // import-style resolution: ./mod.rv means "next to the script", not
-    // "next to the cwd"; raw path is the fallback for repl/-e runs
-    const resolved: ?[]const u8 = revo.resolveImportFile(
-        vm.runtime.io,
-        vm.runtime.alloc,
-        path,
-        vm.import_dir,
-        vm.project_root,
-        vm.package_path.items,
-    ) catch null;
-    defer if (resolved) |p| vm.runtime.alloc.free(p);
-    const real_path = resolved orelse path;
+    if (try root.importCycle(vm, fid)) |chain|
+        return HostResult.errValue(vm, try diagnostic.evalErrorTable(vm, .{ .message = chain }, path, "", "runtime", "CyclicImport", &.{}));
 
-    const source = std.Io.Dir.cwd().readFileAlloc(
-        vm.runtime.io,
-        real_path,
-        vm.runtime.alloc,
-        .limited(fs.max_read_size),
-    ) catch |err| {
-        const rep: diagnostic.Report = .{ .message = @errorName(err) };
-        return HostResult.errValue(vm, try diagnostic.evalErrorTable(vm, rep, real_path, "", "io", null, &.{}));
+    // a result table can't ride a join wake, so this one waits in place
+    if (try revo.vm.dispatch.pumpUntilDone(vm, fid)) |failure| {
+        var rep = failure.report;
+        rep.parts = failure.parts[0..failure.part_len];
+        return HostResult.errValue(vm, try diagnostic.evalErrorTable(
+            vm,
+            rep,
+            path,
+            "",
+            "runtime",
+            @tagName(failure.kind),
+            failure.trace[0..failure.trace_len],
+        ));
+    }
+
+    return switch (vm.modules.get(path).?) {
+        .loaded => |v| HostResult.Ok(vm, v),
+        .loading => HostResult.other("module did not finish loading"),
     };
-    defer vm.runtime.alloc.free(source);
-
-    return runSource(vm, real_path, source, false);
 }
 
-test "revo.dofile returns the file's value" {
+pub fn dload(args: []const Value, vm: *VM) !HostResult {
+    const raw = vm.stringValue(args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm)));
+    const relative = std.mem.startsWith(u8, raw, "./") or std.mem.startsWith(u8, raw, "../");
+    const dir = if (vm.currentDebugSourceName()) |name| std.Io.Dir.path.dirname(name) orelse "." else ".";
+
+    const path = if (relative)
+        try std.Io.Dir.path.resolveAlloc(vm.runtime.alloc, &.{ dir, raw })
+    else
+        try vm.runtime.alloc.dupe(u8, raw);
+    defer vm.runtime.alloc.free(path);
+
+    // `revo.extension` libs go first, so you get full arity and type checks
+    if (revo.ffi.loadHost(vm, path)) |native_mods| {
+        defer vm.runtime.alloc.free(native_mods);
+        const t_id = try vm.tables.create();
+
+        for (native_mods) |host_fn| {
+            const fn_id = try vm.callable.create(.{ .host = host_fn });
+            try vm.putField(t_id, host_fn.name, Value.new.function(fn_id));
+        }
+        return .data(Value.new.table(t_id));
+    } else |err| switch (err) {
+        error.NoBindings => {},
+        else => return HostResult.errImportFailed(@errorName(err)),
+    }
+
+    const mods = revo.ffi.loadC(vm, path) catch |err| switch (err) {
+        error.NoBindings => return HostResult.errImportFailed("dll has no revo_native_bindings_ex or revo_bindings export"),
+        else => return HostResult.errImportFailed(@errorName(err)),
+    };
+    defer vm.runtime.alloc.free(mods);
+
+    const t_id = try vm.tables.create();
+
+    for (mods) |c_fn| {
+        const fn_id = try vm.callable.create(.{ .c_function = c_fn });
+        try vm.putField(t_id, c_fn.name, Value.new.function(fn_id));
+    }
+
+    return .data(Value.new.table(t_id));
+}
+
+test "revo.load returns the file's value, from the cwd" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "hi.rv", .data = "{x = 2}" });
@@ -298,7 +353,7 @@ test "revo.dofile returns the file's value" {
     defer std.testing.allocator.free(file_path);
 
     const source = try std.testing.allocator.print(
-        \\ const {{_, res}} = revo.dofile('{s}')
+        \\ const {{_, res}} = revo.load('{s}')
         \\ res.x
     , .{file_path});
     defer std.testing.allocator.free(source);
@@ -306,26 +361,16 @@ test "revo.dofile returns the file's value" {
     try testing.topNumber(source, 2);
 }
 
-test "revo.dofile resolves relative paths against the module dir" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "dep.rv", .data = "\"from-dep\"" });
-
-    const dir_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
-    defer std.testing.allocator.free(dir_path);
-
-    try testing.topStringInDir(dir_path,
-        \\ revo.dofile("./dep.rv")[1]
-    , "from-dep");
-}
+const std = @import("std");
+const freestanding = @import("build_options").is_freestanding;
 
 const revo = @import("../root.zig");
 const testing = revo.lang.test_helpers;
-const std = @import("std");
 const Value = revo.Value;
 const VM = revo.VM;
-const fs = @import("fs.zig");
+const diagnostic = revo.lang.diagnostic;
 const root = @import("root.zig");
-const specs = @import("specs.zig");
 const HostResult = root.host.HostResult;
 const typeof = root.typeof;
+const Args = root.host.ArgTypes;
+const specs = @import("specs.zig");

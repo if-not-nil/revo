@@ -11,14 +11,14 @@ const completion = @import("completion.zig");
 const txt = lang.text;
 
 pub fn main(init: std.process.Init) !void {
-    try runLsp(init.gpa, init.io, .script, "");
+    try runLsp(init.gpa, init.io);
 }
 
-pub fn runLsp(gpa: std.mem.Allocator, io: std.Io, mode: revo.lang.ProjectMode, project_root: []const u8) !void {
+pub fn runLsp(gpa: std.mem.Allocator, io: std.Io) !void {
     var read_buf: [1024]u8 = undefined;
     var stdio = lsp.Transport.Stdio.init(&read_buf, .stdin(), .stdout());
 
-    var handler = try Handler.init(gpa, &stdio.transport, io, mode, project_root);
+    var handler = try Handler.init(gpa, &stdio.transport, io);
     handler.ws.attachVm(&handler.vm);
     defer handler.deinit();
 
@@ -41,17 +41,15 @@ const Handler = struct {
     uri_to_file: std.StringHashMapUnmanaged(Workspace.FileId) = .empty, // uri -> ws id
     file_to_uri: std.AutoHashMapUnmanaged(Workspace.FileId, []const u8) = .empty, // ws id -> uri
     deinited: bool = false,
-    project: lang.Project = .{ .mode = .script, .root = "" },
 
     fn init(
         alloc: std.mem.Allocator,
         transport: *lsp.Transport,
         io: std.Io,
-        mode: revo.lang.ProjectMode,
-        project_root: []const u8,
     ) !Handler {
         var vm = try revo.VM.init(.{ .alloc = alloc, .io = io, .diag_alloc = alloc });
         errdefer vm.deinit();
+        try vm.addStdCollection();
         var workspace = try Workspace.Workspace.init(alloc);
         errdefer workspace.deinit();
         return .{
@@ -60,7 +58,6 @@ const Handler = struct {
             .io = io,
             .ws = workspace,
             .vm = vm,
-            .project = .{ .mode = mode, .root = project_root },
         };
     }
 
@@ -101,6 +98,18 @@ const Handler = struct {
 
     /// advertise supported features and pick position encoding from client prefs
     pub fn initialize(h: *Handler, _: std.mem.Allocator, params: T.InitializeParams) T.InitializeResult {
+        // `{"collections": {"name": "dir"}}`, like `revo --collection name=dir`
+        if (params.initializationOptions) |opts| collections: {
+            if (opts != .object) break :collections;
+            const cols = opts.object.get("collections") orelse break :collections;
+            if (cols != .object) break :collections;
+            var it = cols.object.iterator();
+            while (it.next()) |e| {
+                if (e.value_ptr.* != .string or !revo.import_path.isCollectionName(e.key_ptr.*)) continue;
+                h.vm.addCollection(e.key_ptr.*, e.value_ptr.string) catch {};
+            }
+        }
+
         // clients first known pos encoding
         if (params.capabilities.general) |general| {
             for (general.positionEncodings orelse &.{}) |pe| {
@@ -184,11 +193,15 @@ const Handler = struct {
     /// open a file in the workspace and publish initial diags
     pub fn @"textDocument/didOpen"(h: *Handler, arena: std.mem.Allocator, params: T.TextDocument.DidOpenParams) !void {
         // strip file:// pref for ws api
-        const path = if (std.mem.startsWith(u8, params.textDocument.uri, "file://"))
+        const raw = if (std.mem.startsWith(u8, params.textDocument.uri, "file://"))
             params.textDocument.uri["file://".len..]
         else
             params.textDocument.uri;
-        const id = try h.project.open(&h.ws, path, params.textDocument.text);
+
+        // on disk it goes by realpath, the same name builds and imports use
+        var real_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const path = if (std.Io.Dir.cwd().realPathFile(h.io, raw, &real_buf)) |n| real_buf[0..n] else |_| raw;
+        const id = try h.ws.open(path, params.textDocument.text);
         try h.registerDoc(params.textDocument.uri, id);
         try h.publishDiagnostics(arena, params.textDocument.uri, id);
     }

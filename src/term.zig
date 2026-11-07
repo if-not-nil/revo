@@ -2,7 +2,7 @@ const revo = @import("revo");
 const std = @import("std");
 
 pub fn defaultSupportsColor() bool {
-    return !revo.is_freestanding;
+    return revo.default_caps.io;
 }
 
 pub fn isColorSupported(env: *std.process.Environ.Map, io: std.Io) bool {
@@ -79,7 +79,7 @@ pub fn replStyleDef(styleName: []const u8) [:0]const u8 {
 }
 
 pub fn fatal(comptime format: []const u8, args: anytype, vm: ?*revo.VM) noreturn {
-    if (comptime !revo.is_freestanding) {
+    if (comptime revo.default_caps.io) {
         std.debug.print("a very unexpected error occurred. please report to https://github.com/if-not-nil/revo", .{});
         if (vm) |v|
             std.debug.print("info:\npc {}", .{v.currentFiber().pc});

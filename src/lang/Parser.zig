@@ -57,6 +57,7 @@ pub const Kind = enum {
     ExpectedMatchArm,
     InvalidNumber,
     UnknownAttribute,
+    MisplacedPub,
 };
 
 pub const ParseResult = union(enum) {
@@ -74,7 +75,7 @@ fn failureError(kind: Kind) anyerror {
         .ExpectedIdentifier => error.ExpectedIdentifier,
         .ExpectedMatchArm => error.ExpectedMatchArm,
         .UnknownAttribute => error.UnknownAttribute,
-        .LexUnknown, .InvalidNumber => error.ParseFailed,
+        .LexUnknown, .InvalidNumber, .MisplacedPub => error.ParseFailed,
     };
 }
 
@@ -875,8 +876,9 @@ fn parsePrefix(self: *Parser) anyerror!*CstNode {
             break :blk try self.allocCst(span, .{ .return_expr = .{ .kw_tok = token, .value = value } });
         },
         .kw_comp => self.parseComp(token),
-        .kw_import => self.parseImport(token),
         .kw_spawn => self.parseUnary(.spawn, 60, token),
+        .kw_import => self.parseImport(token),
+        .kw_use => self.parseUse(token),
         .kw_yield => self.allocCst(token.span(), .{ .yield = .{ .tok = token } }),
         .lsquiggly => self.parseTable(token),
         .kw_type => {
@@ -1367,9 +1369,9 @@ fn parseDecl(self: *Parser, start: Token) anyerror!*CstNode {
             break :blk self.parseTypeAliasDecl(start, first, .type_alias_decl, false);
         },
         .kw_declare => blk: {
-            // `type` and `import` are baselib globals, usable as names
+            // `type` is a baselib global, usable as a name
             if (!self.check(.ident)) switch (self.peek().type) {
-                .kw_type, .kw_import => {},
+                .kw_type => {},
                 else => return error.UnexpectedToken,
             };
             const first = self.advance();
@@ -1612,7 +1614,6 @@ fn parsePubPrefix(self: *Parser) anyerror!*CstNode {
         .kw_test,
         .kw_suite,
         .kw_type,
-        .kw_import,
         .kw_declare,
     };
     var found = false;
@@ -1625,96 +1626,11 @@ fn parsePubPrefix(self: *Parser) anyerror!*CstNode {
     if (!found) return error.UnexpectedToken;
     const decl_start = self.advance();
 
-    // todo: import is no decl node
-    if (decl_start.type == .kw_import) {
-        const node = try self.parseImport(decl_start);
-        // fresh node
-        // constructiontime attach (no pub_tok slot on imports)
-        if (node.kind == .import) node.kind.import.pub_ = true;
-        return node;
-    }
-
     const node = try self.parseDecl(decl_start);
     // fresh node
     // constructiontime attach (decl always wraps here)
     if (node.kind == .decl) cst.attachDeclPub(node, pub_tok);
     return node;
-}
-
-/// `import "path"` or `import { ... }`
-fn parseImport(self: *Parser, start: Token) anyerror!*CstNode {
-    // table form `{ m1 = "mod1", "mod2" }`
-    if (self.peek().type == .lsquiggly) {
-        const lbrace_tok = try self.expect(.lsquiggly);
-        var items = try std.ArrayList(cst.CstImportItem).initCapacity(self.alloc, 4);
-        errdefer items.deinit(self.alloc);
-        var commas = try std.ArrayList(Token).initCapacity(self.alloc, 4);
-        errdefer commas.deinit(self.alloc);
-
-        while (self.peek().type != .rsquiggly) {
-            const pt = self.peek().type;
-            if (pt == .string or pt == .string_start or pt == .ml_string_start) {
-                // `"path"` auto-binds
-                const path_token = try self.expectStringLiteral();
-                try items.append(self.alloc, .{
-                    .name_tok = null,
-                    .eq_tok = null,
-                    .path = path_token,
-                    .span = Span.merge(start.span(), path_token.span),
-                });
-            } else {
-                // `ident = "path"` with custom name
-                const name_token = try self.expect(.ident);
-                const eq_tok = try self.expect(.assign);
-                const path_token = try self.expectStringLiteral();
-                try items.append(self.alloc, .{
-                    .name_tok = name_token,
-                    .eq_tok = eq_tok,
-                    .path = path_token,
-                    .span = Span.merge(start.span(), path_token.span),
-                });
-            }
-            if (self.peek().type != .rsquiggly) {
-                _ = try self.expect(.comma);
-                try commas.append(self.alloc, self.prevToken());
-            }
-        }
-        const rbrace_tok = try self.expect(.rsquiggly);
-
-        return self.allocCst(start.span(), .{
-            .import = .{
-                .import_tok = start,
-                .lbrace_tok = lbrace_tok,
-                .items = try items.toOwnedSlice(self.alloc),
-                .commas = try commas.toOwnedSlice(self.alloc),
-                .rbrace_tok = rbrace_tok,
-                .pub_ = false,
-            },
-        });
-    }
-
-    // autobind `import "path"`
-    {
-        const path_token = try self.expectStringLiteral();
-        var items = try std.ArrayList(cst.CstImportItem).initCapacity(self.alloc, 1);
-        errdefer items.deinit(self.alloc);
-        try items.append(self.alloc, .{
-            .name_tok = null,
-            .eq_tok = null,
-            .path = path_token,
-            .span = Span.merge(start.span(), path_token.span),
-        });
-        return self.allocCst(Span.merge(start.span(), path_token.span), .{
-            .import = .{
-                .import_tok = start,
-                .lbrace_tok = null,
-                .items = try items.toOwnedSlice(self.alloc),
-                .commas = &.{},
-                .rbrace_tok = null,
-                .pub_ = false,
-            },
-        });
-    }
 }
 
 /// `do expr end`
@@ -1784,16 +1700,25 @@ fn parseTable(self: *Parser, start: Token) anyerror!*CstNode {
             continue;
         }
 
-        const first = try self.parseExpression(6);
+        // `{end = 1}`, a key takes any name, same as after a `.`
+        const first = if (self.peek().type.isKeyword() and self.peekAt(1).type == .assign) blk: {
+            const tok = self.advance();
+            break :blk try self.allocCst(tok.span(), .{ .ident = .{ .tok = tok } });
+        } else try self.parseExpression(6);
+
         if (self.match(.assign)) {
             const eq_tok = self.prevToken();
             const keyed_value = try self.parseExpression(0);
             end_span = keyed_value.span;
-            try entries.append(self.alloc, .{ .keyed = .{ .key = first, .eq_tok = eq_tok, .value = keyed_value } });
+
+            try entries.append(self.alloc, .{
+                .keyed = .{ .key = first, .eq_tok = eq_tok, .value = keyed_value },
+            });
         } else if (self.check(.colon)) {
             const colon_tok = try self.expect(.colon);
             const type_name = try self.parseTypeExpr();
             const asc_span = Span.merge(first.span, type_name.span);
+
             const asc = try self.allocCst(asc_span, .{
                 .ascribed = .{ .expr = first, .colon_tok = colon_tok, .type = type_name },
             });
@@ -1826,6 +1751,10 @@ test "compiled table equals-key entries" {
     try testing_helpers.topNumber("{ 7 = 10 }[7]", 10);
     try testing_helpers.topNumber("{ \"a\" = 5 }[\"a\"]", 5);
     try testing_helpers.topNumber("let t = { 1 } t[1] = 5 len(t)", 2);
+}
+
+test "compiled table keys take keywords" {
+    try testing_helpers.topNumber("let t = {end = 1, import = 2, use = 3} t.end + t.import + t.use", 6);
 }
 
 test "compiled table square bracket special case" {
@@ -1915,7 +1844,7 @@ fn isGenericBareArgAhead(self: *Parser) bool {
     while (budget > 0) {
         budget -= 1;
         switch (self.peekAt(i).type) {
-            .ident, .kw_type, .kw_import => i += 1,
+            .ident, .kw_type => i += 1,
             .comma => i += 1,
             .gt => {
                 const arg = self.peekAt(i + 1);
@@ -2260,7 +2189,7 @@ pub fn expect(self: *Parser, kind: TokenType) error{UnexpectedToken}!Token {
 fn expectIdent(self: *Parser) error{ExpectedIdentifier}!Token {
     const token = self.peek();
     switch (token.type) {
-        .ident, .kw_type, .kw_import => {},
+        .ident, .kw_type => {},
         else => return error.ExpectedIdentifier,
     }
     self.pos += 1;
@@ -2276,9 +2205,57 @@ fn expectName(self: *Parser) error{ExpectedIdentifier}!Token {
     return token;
 }
 
+/// `import "x"` / `import("x")`, the path is a plain string
+/// , computed paths are `revo.load`'s job
+fn parseImport(self: *Parser, kw_tok: Token) anyerror!*CstNode {
+    const lparen_tok: ?Token = if (self.match(.lparen)) self.prevToken() else null;
+    const path = self.expectStringLiteral() catch {
+        const has_arg = lparen_tok != null or (!self.atValueEnd() and !self.peek().nl_before);
+        const msg = try self.alloc.print("`{s}` takes a plain string path, use `revo.load` for computed ones", .{kw_tok.text});
+        try self.recordError(.UnexpectedToken, msg, if (has_arg) self.peek().span() else kw_tok.span());
+
+        // eat the argument so the rest of the line doesn't pile on
+        var end = kw_tok.span();
+        if (has_arg) end = (try self.parseExpression(0)).span;
+        if (lparen_tok != null) end = (try self.expect(.rparen)).span();
+        return self.allocCst(Span.merge(kw_tok.span(), end), .{ .err = .{ .toks = try self.dupeToks(&.{kw_tok}) } });
+    };
+    const rparen_tok: ?Token = if (lparen_tok != null) try self.expect(.rparen) else null;
+    const end = if (rparen_tok) |t| t.span() else path.span;
+    return self.allocCst(Span.merge(kw_tok.span(), end), .{ .import = .{
+        .kw_tok = kw_tok,
+        .lparen_tok = lparen_tok,
+        .path = path,
+        .rparen_tok = rparen_tok,
+    } });
+}
+
+/// `use "./x"` binds `x`, the path's stem past any `name:` prefix
+fn parseUse(self: *Parser, kw_tok: Token) anyerror!*CstNode {
+    const im = try self.parseImport(kw_tok);
+    if (im.kind != .import) return im;
+
+    const stem = std.Io.Dir.path.stem(im.kind.import.path.text);
+    const name = stem[if (std.mem.findScalarLast(u8, stem, ':')) |i| i + 1 else 0..];
+    const is_name = name.len > 0 and Lexer.isIdentStart(name[0]) and
+        for (name[1..]) |c| {
+            if (!Lexer.isIdentContinue(c)) break false;
+        } else !TokenType.of_string.has(name);
+    if (!is_name) {
+        const msg = try self.alloc.print("`use` binds the path's stem, and `{s}` isn't a name", .{name});
+        try self.recordError(.UnexpectedToken, msg, im.kind.import.path.span);
+        return im;
+    }
+    return self.allocCst(im.span, .{ .use = .{ .import = im, .name = name } });
+}
+
 /// plain string for import/test names; no interpolation
 /// , also returns consumed tokens so cst retains delimiters
+/// , consumes nothing when it fails
 fn expectStringLiteral(self: *Parser) error{UnexpectedToken}!cst.StringLit {
+    const start_pos = self.pos;
+    errdefer self.pos = start_pos;
+
     const t = self.peek();
     if (t.type == .string) {
         _ = self.advance();
@@ -2555,13 +2532,14 @@ const call_stmt_boundary_tokens = makeTokenSet(&.{
 });
 
 const expr_start_tokens = makeTokenSet(&.{
-    .number,    .string,    .string_start, .ml_string_start,
-    .atom,      .ident,     .kw_const,     .kw_let,
-    .minus,     .kw_not,    .pipe_forward, .lparen,
-    .kw_fn,     .kw_if,     .kw_unless,    .kw_match,
-    .kw_do,     .kw_loop,   .kw_break,     .kw_continue,
-    .kw_return, .kw_import, .kw_spawn,     .kw_yield,
-    .lsquiggly, .kw_type,   .kw_pub,       .eof,
+    .number,    .string,   .string_start, .ml_string_start,
+    .atom,      .ident,    .kw_const,     .kw_let,
+    .minus,     .kw_not,   .pipe_forward, .lparen,
+    .kw_fn,     .kw_if,    .kw_unless,    .kw_match,
+    .kw_do,     .kw_loop,  .kw_break,     .kw_continue,
+    .kw_return, .kw_spawn, .kw_yield,     .lsquiggly,
+    .kw_type,   .kw_pub,   .kw_import,    .kw_use,
+    .eof,
 });
 
 // test smokezone
@@ -2803,50 +2781,6 @@ test "unknown attribute is a parse error" {
     const tokens = try Lexer.lexAt(alloc, "@bar fn foo() 1");
     try std.testing.expectError(error.UnknownAttribute, parseTokens(alloc, tokens, .{}));
 }
-test "parses import statement" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const root = try testing.parseOne(alloc, "import \"json\"");
-    try std.testing.expect(root.kind == .import);
-    const im = root.kind.import;
-    try std.testing.expectEqual(@as(usize, 1), im.items.len);
-    try std.testing.expectEqualStrings("json", im.items[0].path.text);
-    try std.testing.expect(im.items[0].name_tok == null);
-    try std.testing.expect(!im.pub_);
-}
-
-test "parses multi-import table" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    {
-        const root = try testing.parseOne(alloc, "import {\"a\", \"b\"}");
-        try std.testing.expect(root.kind == .import);
-        const items = root.kind.import.items;
-        try std.testing.expectEqual(@as(usize, 2), items.len);
-        try std.testing.expectEqualStrings("a", items[0].path.text);
-        try std.testing.expectEqualStrings("b", items[1].path.text);
-    }
-    {
-        const root = try testing.parseOne(alloc, "import {x = \"a\"}");
-        try std.testing.expect(root.kind == .import);
-        const items = root.kind.import.items;
-        try std.testing.expectEqual(@as(usize, 1), items.len);
-        try std.testing.expectEqualStrings("x", items[0].name_tok.?.text);
-        try std.testing.expectEqualStrings("a", items[0].path.text);
-    }
-    {
-        const root = try testing.parseOne(alloc, "import {x = \"a\", \"b\"}");
-        try std.testing.expect(root.kind == .import);
-        const items = root.kind.import.items;
-        try std.testing.expectEqual(@as(usize, 2), items.len);
-        try std.testing.expectEqualStrings("x", items[0].name_tok.?.text);
-        try std.testing.expectEqualStrings("b", items[1].path.text);
-    }
-}
 
 test "parses pub const with pub_ flag" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -2857,17 +2791,6 @@ test "parses pub const with pub_ flag" {
     try std.testing.expect(root.kind == .decl);
     try std.testing.expect(root.kind.decl.pub_);
     try std.testing.expect(root.kind.decl.kind == .@"const");
-}
-
-test "parses pub import statement" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const root = try testing.parseOne(alloc, "pub import \"json\"");
-    try std.testing.expect(root.kind == .import);
-    try std.testing.expect(root.kind.import.pub_);
-    try std.testing.expectEqualStrings("json", root.kind.import.items[0].path.text);
 }
 
 test "parses pub fn with pub_ flag" {
@@ -3114,7 +3037,9 @@ test "retained tokens exactly cover lexed tokens" {
         "match x | 1 => a | _ => b",
         "for i in 0..10 do i end",
         "t = { a = 1, [k] = 2, 3 }",
-        "import {x = \"a\", \"b\"}",
+        "import \"./a\"",
+        "use(\"./b\")",
+        "{end = 1}",
         "test/skip \"t\" do 1 end",
         "type T = number | string",
         "declare f = fn(a: number) -> bool",

@@ -749,6 +749,8 @@ pub const Compiler = struct {
     pub fn compileValue(self: *Compiler, expr: *const Node) InternalCompileError!void {
         switch (expr.kind) {
             .binding => unreachable, // all bindings arrive wrapped in .decl
+            .import => |im| try self.compileImport(im.path.text, expr),
+            .use => unreachable, // desugared by hir.lower or a checker error
             .number => |n| {
                 const value = n.value;
                 // fit in i64 and whole? -> tagged int, else float
@@ -1051,32 +1053,6 @@ pub const Compiler = struct {
                 const inner = cst.unwrapParen(d.inner) orelse return self.pushNil();
                 switch (inner.kind) {
                     .binding => |*b| {
-                        const bv = cst.unwrapParen(b.value);
-                        const bt = cst.unwrapParen(b.target);
-                        if (bv != null and bv.?.kind == .import and bt != null and bt.?.kind == .ident) {
-                            // imports must be const, no type annotations
-                            const user_name = bt.?.kind.ident.tok.text;
-                            if (d.kind != .@"const") {
-                                return self.fail(.ParseError, expr, "import binding must be const");
-                            }
-                            // compile import directly so it handles its own slot
-                            // then also bind the user-specified name if it differs
-                            // (single autobind items already carry the target
-                            // name from bindImportNames, so this is usually a no-op)
-                            try self.compile(b.value, true);
-                            const im = bv.?.kind.import;
-                            const first_name = if (im.items.len > 0)
-                                importItemName(im.items[0])
-                            else
-                                user_name;
-                            if (!std.mem.eql(u8, user_name, first_name)) {
-                                const slot = try state_mod.declareLocal(self, user_name, false);
-                                state_mod.reserveLocalSlots(self);
-                                try self.regDupe();
-                                try self.emit(.bind_local, slot);
-                            }
-                            return;
-                        }
                         const kind: bindings.BindingKind = switch (d.kind) {
                             .@"const" => .@"const",
                             .let => .let,
@@ -1145,13 +1121,6 @@ pub const Compiler = struct {
                     try self.compile(v, true);
                 } else try self.pushNil();
                 try self.emit(.ret, 1);
-            },
-            .import => |im| {
-                for (im.items) |item| {
-                    try self.compileImportItem(item);
-                }
-                // importing is a statement; leave the last value on top
-                // (single imports leave one value, matching old behavior)
             },
             .comp_block => |cb| try self.compileComp(cb.expr),
             .loop_expr => |v| try control.compileLoop(self, v.body, cst.labelText(v.label_tok)),
@@ -1261,53 +1230,23 @@ pub const Compiler = struct {
         return cst.allocNode(self.alloc, self.active_span, .{ .err = .{ .toks = &.{} } });
     }
 
-    fn compileImportItem(self: *Compiler, item: cst.CstImportItem) !void {
-        const name = importItemName(item);
-        const path = item.path.text;
-        const err_node = try cst.allocNode(self.alloc, item.span, .{ .err = .{ .toks = &.{} } });
-        const cur = state_mod.currentFunctionState(self) orelse return self.fail(
-            .ParseError,
-            err_node,
-            "import statement outside function context",
-        );
-        if (state_mod.findLocalInCurrentScope(self, name)) |_| {
-            const msg = try self.alloc.print("name `{s}` is already defined", .{name});
-            return self.fail(.ParseError, err_node, msg);
-        }
-        // also check import_locals to prevent double import of same name
-        for (cur.import_locals.items) |il| {
-            if (std.mem.eql(u8, il.name, name)) {
-                const msg = try self.alloc.print("name `{s}` is already defined by another import", .{name});
-                return self.fail(.ParseError, err_node, msg);
-            }
-        }
-        const slot = self.slot_allocators.items[self.slot_allocators.items.len - 1];
-        self.slot_allocators.items[self.slot_allocators.items.len - 1] += 1;
+    /// the checker resolved it already, so the vm only sees realpaths
+    fn compileImport(self: *Compiler, path: []const u8, expr: *const Node) !void {
+        const graph = if (self.annotations) |a| a.imports else null;
+        const resolved = (graph orelse return self.fail(.CompileError, expr, "imports need the checker's import graph"))
+            .sites.get(expr) orelse {
+            const msg = try self.alloc.print("`{s}` wasn't resolved", .{path});
+            return self.fail(.CompileError, expr, msg);
+        };
 
-        const import_local = LocalVar{ .name = name, .slot = slot, .mutable = false, .initialized = true };
-        try cur.import_locals.append(self.alloc, import_local);
-        try cur.all_locals.append(self.alloc, import_local);
-
-        state_mod.reserveLocalSlots(self);
-
-        try self.emit(.load_user_global, revo.CoreAtoms.import.atomId());
-        try self.@"const"(try self.vm.ownValueString(path));
-
+        try self.emit(.load_user_global, try self.vm.internAtom("__internal_import"));
+        try self.@"const"(try self.vm.ownValueString(resolved));
         try self.emit(.call, 1);
-        try self.regDupe();
-
-        try self.emit(.bind_local, slot);
     }
 
     /// wrap a test body in a zero-param closure and compile it
     fn compileTestBody(self: *Compiler, body: *const Node) !void {
         try self.compileFn(&.{}, null, body, "<test>", null, &.{});
-    }
-
-    /// bound name of an import item (explicit or path stem)
-    fn importItemName(item: cst.CstImportItem) []const u8 {
-        if (item.name_tok) |nt| return nt.text;
-        return std.Io.Dir.path.stem(item.path.text);
     }
 
     pub fn compileCallCst(

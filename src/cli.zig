@@ -130,7 +130,7 @@ fn handleSource(
         .disassemble => {
             var vm = try initVM(init, gpa, config.argv, config.threads);
             defer vm.deinit();
-            const bytecode = try compileSource(init, &vm, gpa, name, source, config.test_mode);
+            const bytecode = try compileSource(init, &vm, gpa, name, source, config.test_mode, null);
             defer gpa.free(bytecode.instructions);
             defer gpa.free(bytecode.spans);
             try revo.vm.disasm.printDisassembly(&vm, bytecode, source);
@@ -173,12 +173,12 @@ fn runMain(init: std.process.Init) !void {
         return try repl.run(&vm, init.gpa, init);
     }
     if (config.mode == .lsp) {
-        var project = revo.lang.Project.detectFromCwd(init.io, init.gpa);
-        defer project.deinit(init.gpa);
-        return try @import("lsp_main").runLsp(init.gpa, init.io, project.mode, project.root);
+        return try @import("lsp_main").runLsp(init.gpa, init.io);
     }
     if (config.mode == .doc) {
-        return try docgen.Cli.run(init, init.gpa, arena, config.script_path, config.doc_format == .html, config.force_splice);
+        var vm = try initVM(init, init.gpa, config.argv, config.threads);
+        defer vm.deinit();
+        return try docgen.Cli.run(init, init.gpa, arena, config.script_path, config.doc_format == .html, config.force_splice, &vm);
     }
     if (config.mode == .format) {
         return try formatPaths(init, init.gpa, arena, config.argv, config.check, config.diff);
@@ -299,7 +299,7 @@ fn hostColor(init: std.process.Init) bool {
 }
 
 fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8, threads: usize) !VM {
-    return VM.init(.{
+    var vm = VM.init(.{
         .alloc = gpa,
         .io = init.io,
         .argv = argv,
@@ -310,7 +310,26 @@ fn initVM(init: std.process.Init, gpa: Allocator, argv: []const [:0]const u8, th
         printError(init, "initializing vm - {}", .{err});
         return error.VmInitError;
     };
+    errdefer vm.deinit();
+    try vm.addStdCollection();
+
+    // later adds win, so `--collection std=...` overrides the builtin one
+    var it = std.mem.splitScalar(u8, cli_collections, ',');
+    while (it.next()) |pair| {
+        const eq = std.mem.findScalar(u8, pair, '=') orelse continue;
+        const dir = std.Io.Dir.cwd().realPathFileAlloc(init.io, pair[eq + 1 ..], gpa) catch {
+            printError(init, "--collection dir '{s}' doesn't exist", .{pair[eq + 1 ..]});
+            return error.InvalidArgs;
+        };
+        defer gpa.free(dir);
+        try vm.addCollection(pair[0..eq], dir);
+    }
+
+    return vm;
 }
+
+/// `--collection` as given, applied by every initVM
+var cli_collections: []const u8 = "";
 
 fn compileSource(
     init: std.process.Init,
@@ -319,18 +338,18 @@ fn compileSource(
     source_name: []const u8,
     source_text: []const u8,
     test_mode: bool,
+    /// filled with every module the program reaches, for bundling
+    imports: ?*revo.lang.import_graph.Graph,
 ) !Bytecode {
     var ws = try revo.lang.Workspace.initWithVm(vm, gpa);
     defer ws.deinit();
 
-    var project = revo.lang.Project.detect(source_name, init.io, gpa);
-    defer project.deinit(gpa);
-
-    if (project.mode == .project and project.root.len > 0)
-        vm.project_root = try gpa.dupe(u8, project.root);
-
-    const file_id = try project.open(&ws, source_name, source_text);
-    var analysis = ws.analyzeDetailed(gpa, file_id, .{ .test_mode = test_mode, .mode = project.mode }) catch |err| {
+    const file_id = try ws.open(source_name, source_text);
+    var analysis = ws.analyzeDetailed(
+        gpa,
+        file_id,
+        .{ .test_mode = test_mode, .imports = imports },
+    ) catch |err| {
         printError(init, "compilation - {}", .{err});
         return error.CompilationError;
     };
@@ -421,6 +440,7 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         .{ .name = "check", .kind = .boolean, .description = "list files whose formatting differs, dont write (fmt)" },
         .{ .name = "diff", .kind = .boolean, .description = "print a unified diff, dont write (fmt)" },
         .{ .name = "threads", .kind = .string, .description = "worker threads (default 1, single-threaded without async)" },
+        .{ .name = "collection", .kind = .string, .description = "import collections, `name=dir[,name=dir]`, for `import(\"name:x\")`" },
         .{ .name = "help", .short = 'h', .kind = .boolean, .description = "show this help message" },
         // terminal positional:
         //   stops flag-parsing, goes to passthru argv
@@ -530,14 +550,27 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         config.script_path = ap.cliArg(&arg_list, "script").value; // script positional
     }
 
+    if (ap.cliArg(&arg_list, "collection").value) |v| { // --collection
+        var it = std.mem.splitScalar(u8, v, ',');
+        while (it.next()) |pair| {
+            const eq = std.mem.findScalar(u8, pair, '=') orelse 0;
+
+            if (!revo.import_path.isCollectionName(pair[0..eq])) {
+                printError(init, "--collection wants `name=dir` with a name of 2+ [a-zA-Z0-9_], got '{s}'", .{pair});
+                return error.InvalidArgs;
+            }
+        }
+        cli_collections = v;
+    }
+
     if (ap.cliArg(&arg_list, "threads").value) |v| { // --threads
         config.threads = std.fmt.parseUnsigned(usize, v, 10) catch {
             printError(init, "--threads requires a positive integer, got '{s}'", .{v});
             return error.InvalidArgs;
         };
         if (config.threads == 0) config.threads = 1;
-        if (config.threads > 1 and !revo.can_async)
-            std.debug.print("warning: --threads={d} not supported on this platform, running single-threaded\n", .{config.threads});
+        if (config.threads > 1 and !revo.default_caps.threads)
+            std.debug.print("warning: --threads={d} not supported on this platform! running single-threaded\n", .{config.threads});
     }
 
     // compile mode: steal the second positional as output path
@@ -557,7 +590,7 @@ fn runInlineCode(init: std.process.Init, gpa: Allocator, code: []const u8, confi
     var vm = try initVM(init, gpa, config.argv, config.threads);
     defer vm.deinit();
 
-    const bytecode = try compileSource(init, &vm, gpa, "<inline>", code, config.test_mode);
+    const bytecode = try compileSource(init, &vm, gpa, "<inline>", code, config.test_mode, null);
     defer gpa.free(bytecode.instructions);
     defer gpa.free(bytecode.spans);
 
@@ -575,7 +608,7 @@ fn runSource(
     var vm = try initVM(init, gpa, config.argv, config.threads);
     defer vm.deinit();
 
-    const bytecode = try compileSource(init, &vm, gpa, path, source, config.test_mode);
+    const bytecode = try compileSource(init, &vm, gpa, path, source, config.test_mode, null);
     defer gpa.free(bytecode.instructions);
     defer gpa.free(bytecode.spans);
 
@@ -679,7 +712,7 @@ fn benchSource(init: std.process.Init, gpa: Allocator, path: []const u8, source:
     var vm = try initVM(init, gpa, config.argv, config.threads);
     defer vm.deinit();
 
-    const bytecode = try compileSource(init, &vm, gpa, path, source, config.test_mode);
+    const bytecode = try compileSource(init, &vm, gpa, path, source, config.test_mode, null);
     defer gpa.free(bytecode.instructions);
     defer gpa.free(bytecode.spans);
 
@@ -736,11 +769,14 @@ fn compileToBytecode(
     var vm = try initVM(init, gpa, config.argv, config.threads);
     defer vm.deinit();
 
-    const compiled = try compileSource(init, &vm, gpa, path, source, config.test_mode);
+    // the whole import graph rides along, so the .rvo runs with the sources gone
+    var graph = revo.lang.import_graph.Graph.init(gpa);
+    defer graph.deinit();
+    const compiled = try compileSource(init, &vm, gpa, path, source, config.test_mode, &graph);
     defer gpa.free(compiled.instructions);
     defer gpa.free(compiled.spans);
 
-    const bytecode = revo.bytecode.serialize(&vm, compiled, gpa) catch |err| {
+    const bytecode = revo.bytecode.serialize(&vm, compiled, gpa, if (graph.files.count() > 0) &graph else null) catch |err| {
         printError(init, "serializing bytecode - {}", .{err});
         return error.CompilationError;
     };

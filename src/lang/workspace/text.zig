@@ -372,7 +372,7 @@ fn walkRoles(n: *const cst.CstNode, m: *std.AutoHashMap(usize, u32)) !void {
             try walkRoles(f.body, m);
         },
         .fn_method => |f| try walkRoles(f.body, m),
-        .import, .type_alias, .number, .string, .atom, .ident, .err, .interpolated => {},
+        .type_alias, .number, .string, .atom, .ident, .err, .interpolated, .import, .use => {},
     }
 }
 

@@ -52,7 +52,6 @@ pub const TokenType = enum {
     kw_break,
     kw_continue,
     kw_return,
-    kw_import,
     kw_spawn,
     kw_yield,
     kw_and,
@@ -67,6 +66,8 @@ pub const TokenType = enum {
     kw_orelse,
     kw_pub,
     kw_declare,
+    kw_import,
+    kw_use,
     plus,
     minus,
     star,
@@ -173,7 +174,6 @@ pub const TokenType = enum {
         .{ "break", .kw_break },
         .{ "continue", .kw_continue },
         .{ "return", .kw_return },
-        .{ "import", .kw_import },
         .{ "spawn", .kw_spawn },
         .{ "yield", .kw_yield },
         .{ "and", .kw_and },
@@ -187,6 +187,8 @@ pub const TokenType = enum {
         .{ "orelse", .kw_orelse },
         .{ "pub", .kw_pub },
         .{ "declare", .kw_declare },
+        .{ "import", .kw_import },
+        .{ "use", .kw_use },
     });
 };
 

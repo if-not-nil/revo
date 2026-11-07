@@ -1007,7 +1007,7 @@ ONE_RV_CONTENT = """pub fn hi(a: number, b: number) -> number
 pub const CT: number = 5
 """
 
-TWO_RV_CONTENT = """import "one.rv"
+TWO_RV_CONTENT = """const one = import("./one.rv")
 
 one.hi(1, 2)
 """
@@ -1078,20 +1078,20 @@ async def test_import_completion(client: LanguageClient):
 
 
 @pytest.mark.asyncio(loop_scope="module")
-async def test_bare_import_completion_after_dot(client: LanguageClient):
-    """typing `.` after a bare-imported module keeps completing its members
+async def test_import_completion_after_dot(client: LanguageClient):
+    """typing `.` after an imported module keeps completing its members
     (deps recorded while valid must survive the unparseable keystroke)"""
     import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
         with open(os.path.join(tmpdir, "a.rv"), "w") as f:
-            f.write('pub fn f() 10\npub let v = 5\n')
+            f.write('pub fn f() 10\npub const v = 5\n')
 
         user_path = os.path.join(tmpdir, "b.rv")
         user_uri = "file://" + user_path
         client.text_document_did_open(params=DidOpenTextDocumentParams(
             text_document=TextDocumentItem(
                 uri=user_uri, language_id="revo", version=1,
-                text='import "a"\na'),
+                text='const a = import("./a")\na'),
         ))
 
         await client.wait_for_notification("textDocument/publishDiagnostics")
@@ -1099,7 +1099,7 @@ async def test_bare_import_completion_after_dot(client: LanguageClient):
             text_document=VersionedTextDocumentIdentifier(
                 uri=user_uri, version=2),
             content_changes=[TextDocumentContentChangeWholeDocument(
-                text='import "a"\na.')],
+                text='const a = import("./a")\na.')],
         ))
 
         await client.wait_for_notification("textDocument/publishDiagnostics")

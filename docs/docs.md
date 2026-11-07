@@ -1139,39 +1139,114 @@ sleep(100)
 
 ## modules
 
-import resolves a string path to a table of public declarations
+`import("x")` gives you a module. it's resolved at compile time, from the file that wrote it
 
-```revo
+```rb
 ## ./helper.rv ##
 pub fn help() do
-    print("helped")
+  print("helped")
 end
 ```
 
-```revo
+```rb
 ## ./main.rv ##
-import "./helper"  # relative: module_dir only
-import "json"      # bare: project_root -> package_path
+const helper = import("./helper")   # next to this file
+const json = import("std:json")     # inside the std collection
 
 helper.help() # helped
 ```
 
-each candidate dir tries `name`, `name.rv`, `name/init.rv`
+the path is a literal. `import` isn't a value, and it can't be shadowed
 
-{{< ref "fn resolveImportPath(raw_path" >}}
-{{< ref "NativeResult.other" >}}
-
-```revo
-import "nope"  # panic: module not found at main.rv:1:1
+```rb
+import("helper")    # error: bare paths are reserved, write `./helper`
+import("/opt/x")    # error: absolute paths aren't portable
+import(path)        # error: use `revo.load` for computed paths
+let imp = import    # error: not a value
 ```
 
-cached by absolute path + mtime. change the file, re-import reloads
-cycles caught via `loading_stack` before they hang
+`./x` means `x.rv` or `x/init.rv`. both existing is an error. `./x.rv` means just that file
 
-```revo
-import "config" # compile and cache
-import "config" # stamp match: instant
+a module is a body that runs once. with `pub`, its value is a read-only record of the pub names. without, it's the last value
+
+```rb
+## ./geo.rv ##
+pub const pi = 3
+pub fn area(r) pi * r * r
+print("loaded geo")   # runs, the module is still {pi, area}
+
+## ./double.rv ##
+fn(x) x * 2
+
+## ./main.rv ##
+const geo = import("./geo")
+geo.area(2)            # 12
+geo.pi = 4             # error: pub records are read-only
+import("./double")(3)  # 6
 ```
+
+an explicit `return` wins over `pub`, with a warning. `pub` is const-only, so expose state through a fn
+
+```rb
+let n = 0
+pub fn count() n
+pub fn bump() do n = n + 1 end
+pub const {lo, hi} = {0, 9}   # exports both
+```
+
+`pub type` exports a type, through the module's binding
+
+```rb
+## ./shapes.rv ##
+pub type Point = {x: number, y: number}
+
+## ./main.rv ##
+const shapes = import("./shapes")
+let p: shapes.Point = {x = 1, y = 2}
+```
+
+`use` binds a module by its path stem
+
+```rb
+use("std:json")   # const json = import("std:json")
+use("./helper")   # const helper = import("./helper")
+
+helper.help() # helped
+```
+
+it's a statement with a literal path, and the stem has to be a name. otherwise bind it yourself
+
+```rb
+const my_lib = import("./my-lib")
+```
+
+a module loads the first time its import runs, once per vm. fibers that import it while it loads wait for it
+
+```rb
+fn lazy() import("./big").run()   # loads on the first call
+```
+
+a cycle of top-level imports is a compile error. a lazy one is fine, unless it runs while its target is still loading
+
+`revo.load` is the dynamic one. the path is data, so it resolves from the cwd. it shares the module table
+
+```rb
+const plugin = revo.load(path)?                    # {:ok, m} | {:err, e}
+const again = revo.load(path, {fresh = :true})?    # reruns it
+```
+
+dlls go through `revo.dload`. type them with a binding
+
+```rb
+## ./lib.rv ##
+const lib: {
+  add: fn(a: number, b: number) -> number,
+} = revo.dload("./lib.so")
+
+return lib
+```
+
+collections are `name:x` prefixes. `std:` is built in, add more with `revo --collection name=dir`
 
 ## doc comments
 

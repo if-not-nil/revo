@@ -8,7 +8,6 @@ const common = @import("common.zig");
 const cst = @import("../cst.zig");
 const Lexer = @import("../Lexer.zig");
 const pipeline = @import("../pipeline.zig");
-const txt = @import("text.zig");
 const type_syntax = @import("../type_syntax.zig");
 const types = @import("../compiler/types.zig");
 
@@ -16,7 +15,6 @@ const W = @import("../Workspace.zig");
 const Workspace = W.Workspace;
 const FileId = W.FileId;
 const Location = W.Location;
-const Snapshot = W.Snapshot;
 const Symbol = W.Symbol;
 const SymbolKind = W.SymbolKind;
 const FnSig = W.FnSig;
@@ -260,29 +258,10 @@ const SigVisitor = struct {
 };
 
 /// walk cst for import expressions and resolve them to FileIds
-pub fn collectDepsFromParsed(self: *Workspace, snap: Snapshot, root: *cst.CstNode) ![]FileId {
-    var out = try std.ArrayList(FileId).initCapacity(self.alloc, 4);
-    errdefer out.deinit(self.alloc);
-    const file_entry = self.entryPtr(snap.id) catch return out.toOwnedSlice(self.alloc);
-    var visitor = ImportVisitor{
-        .ws = self,
-        .out = &out,
-        .base = snap.name,
-        .mode = file_entry.mode,
-        .project_root = file_entry.project_root,
-        .failed = false,
-    };
-    visitor.visit(root);
-    if (visitor.failed) return error.OutOfMemory;
-    return out.toOwnedSlice(self.alloc);
-}
-
 const SymbolVisitor = struct {
     alloc: std.mem.Allocator,
     out: *std.ArrayList(Symbol),
     text: []const u8,
-    /// a binding like `const x = import "foo"` names the module itself
-    import_named: bool = false,
 
     pub fn visit(self: *@This(), node: *const cst.CstNode) void {
         const u = cst.unwrapParen(node) orelse return;
@@ -290,22 +269,7 @@ const SymbolVisitor = struct {
             .binding => |b| self.addBinding(b),
             .fn_def => |f| for (f.params) |param| self.addName(param.name_tok.text, .param, param.name_tok.span()),
             .type_alias => |t| if (t.segs.len > 0) self.addName(t.segs[t.segs.len - 1].text, .type_alias, t.segs[0].span()),
-            .import => |im| {
-                if (self.import_named) {
-                    self.import_named = false;
-                    if (im.items.len != 1) {
-                        for (im.items) |item| {
-                            const nm: []const u8 = if (item.name_tok) |nt| nt.text else std.Io.Dir.path.stem(item.path.text);
-                            self.addName(nm, .binding, self.importNameSpan(node, nm));
-                        }
-                    }
-                } else {
-                    for (im.items) |item| {
-                        const nm: []const u8 = if (item.name_tok) |nt| nt.text else std.Io.Dir.path.stem(item.path.text);
-                        self.addName(nm, .binding, self.importNameSpan(node, nm));
-                    }
-                }
-            },
+            .use => |use| self.addName(use.name, .binding, u.span),
             else => {},
         }
         // decls fall through
@@ -315,7 +279,6 @@ const SymbolVisitor = struct {
 
     fn addBinding(self: *@This(), b: @FieldType(cst.CstKind, "binding")) void {
         const bv = cst.unwrapParen(b.value);
-        self.import_named = if (bv) |v| v.kind == .import else false;
         const bt = cst.unwrapParen(b.target) orelse return;
         switch (bt.kind) {
             .ident => |n| {
@@ -411,32 +374,6 @@ const SymbolVisitor = struct {
         return out.toOwnedSlice(self.alloc) catch null;
     }
 
-    /// module name = right after the path's opening quote; fall back to the
-    /// whole statement (subdir paths, table form)
-    fn importNameSpan(self: *@This(), node: *const cst.CstNode, name: []const u8) Lexer.Span {
-        var q = node.span.start;
-        while (q < node.span.end and self.text[q] != '\'' and self.text[q] != '"') q += 1;
-        const start = q + 1;
-
-        if (q >= node.span.end or start + name.len > node.span.end) return node.span;
-        if (!std.mem.eql(u8, self.text[start .. start + name.len], name)) return node.span;
-        if (start + name.len < node.span.end and txt.isWordChar(self.text[start + name.len])) return node.span;
-
-        var line = node.span.line;
-        var column = node.span.column;
-        var i = node.span.start;
-
-        while (i < start) : (i += 1) {
-            if (self.text[i] == '\n') {
-                line += 1;
-                column = 1;
-            } else {
-                column += 1;
-            }
-        }
-        return .{ .start = start, .end = start + name.len, .line = line, .column = column };
-    }
-
     fn addName(self: *@This(), name: []const u8, kind: SymbolKind, span: Lexer.Span) void {
         const owned = self.alloc.dupe(u8, name) catch return;
         self.out.append(self.alloc, .{
@@ -451,39 +388,6 @@ const SymbolVisitor = struct {
     }
 };
 
-//
-// import visitor
-//
-
-const ImportVisitor = struct {
-    ws: *Workspace,
-    out: *std.ArrayList(FileId),
-    base: []const u8,
-    mode: pipeline.ProjectMode,
-    project_root: []const u8,
-    failed: bool,
-
-    // walk the cst; collect import statements and resolve them
-    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
-        const u = cst.unwrapParen(node) orelse return;
-        if (u.kind == .import) {
-            const raw = if (u.kind.import.items.len > 0) u.kind.import.items[0].path.text else "";
-            if (raw.len != 0) {
-                const id = self.ws.resolveOpenImport(self.base, raw, self.mode, self.project_root) orelse
-                    self.ws.resolveOpenImportOrOpen(self.base, raw, self.mode, self.project_root);
-                if (id) |resolved| {
-                    if (!txt.containsId(self.out.items, resolved)) {
-                        self.out.append(self.ws.alloc, resolved) catch {
-                            self.failed = true;
-                        };
-                    }
-                }
-            }
-        }
-        cst.walkCst(ImportVisitor, self, node);
-    }
-};
-
 test "workspace cross-file symbol index" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -493,8 +397,8 @@ test "workspace cross-file symbol index" {
     defer ws.deinit();
 
     // *opens two files with overlapping symbol names*
-    const a = try ws.open("<a>", "const x = 1\nconst y = 2", .{});
-    const b = try ws.open("<b>", "const x = 3\nconst z = 4", .{});
+    const a = try ws.open("<a>", "const x = 1\nconst y = 2");
+    const b = try ws.open("<b>", "const x = 3\nconst z = 4");
 
     // *populates inspect caches*
     _ = try ws.inspectDetailed(alloc, a, .{});

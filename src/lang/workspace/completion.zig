@@ -156,13 +156,13 @@ fn completionTargetType(
     _ = semantic.analyze(arena, lowered, snap.name, truncated, known_globals, &type_map, null, null, .{
         .ptr = @ptrCast(&anchor),
         .resolveFn = nullResolve,
-    }, &dropped_warn) catch return null;
+    }, null, &dropped_warn) catch return null;
 
     return type_map.get(target);
 }
 
-fn nullResolve(_: *anyopaque, _: []const u8, _: std.mem.Allocator) ?[]const u8 {
-    return null;
+fn nullResolve(_: *anyopaque, _: []const u8, _: []const u8, _: std.mem.Allocator) semantic.ModuleResolver.Resolved {
+    return .{ .err = error.FileNotFound };
 }
 
 /// completions for fields of a table (after a dot); nested
@@ -407,7 +407,7 @@ test "baselib dot completion unions runtime table w declared aliases" {
     defer ws.deinit();
 
     const text = "uri.";
-    const id = try ws.open("<test>", text, .{});
+    const id = try ws.open("<test>", text);
     const items = try ws.completions(arena.allocator(), id, text, text.len);
     // Hi is type-only: no runtime key, only a declared spec
     try expectCompletion(items, "Uri", .class);

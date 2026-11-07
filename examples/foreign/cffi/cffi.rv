@@ -13,6 +13,6 @@ const cffi: {
   ```
   *#
   func: fn(lib: table, name: string, sig: table<atom>, ret: atom) -> table,
-} = import "./cffi.so"
+} = revo.dload("./cffi.so")
 
 cffi

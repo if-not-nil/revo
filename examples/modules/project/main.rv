@@ -1,5 +1,5 @@
-# bare import resolves lib/init.rv via project_root -> package_path
-import "lib"
+# a bare path is relative to this file, so `lib` finds lib/init.rv
+const lib = import("./lib")
 
 print(lib.greeting)
 print(lib.add(2, 3))

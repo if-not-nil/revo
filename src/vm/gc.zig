@@ -213,8 +213,11 @@ pub inline fn markRoots(self: *VM) void {
         self.strings.mark(atom_id);
     }
 
-    var cache_it = self.import_cache.iterator();
-    while (cache_it.next()) |v| pushMark(self, v.value_ptr.*.result);
+    var mod_it = self.modules.valueIterator();
+    while (mod_it.next()) |m| switch (m.*) {
+        .loaded => |v| pushMark(self, v),
+        .loading => {},
+    };
 
     var channel_it = self.sched.channels.iterator();
     while (channel_it.next()) |entry| {

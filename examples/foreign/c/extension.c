@@ -2,7 +2,7 @@
 // c extensions, for revo
 // build: make extension   (produces extension.so on mac)
 //
-// the shared lib exports revo_bindings which import(".so") picks up
+// the shared lib exports revo_bindings which revo.dload(".so") picks up
 //
 // boundary :nanboxed RevoValue (u64)
 // . numbers are raw f64 bits

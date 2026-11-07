@@ -43,6 +43,54 @@ most breaking change yet
 
 - `revo fmt`, the simple standard formatter
 
+- new imports!
+  - `import("./x")` does not auto-bind anymore, `use` does
+     import is now more-or-less lua's require
+
+  - `use("./x")`, sugar for `const x = import("./x")`
+    the name is the path stem, so `use("std:json")` binds `json`
+
+  - `import` and `use` are keywords, and their path is a plain string with no `#{}`
+    so `import = 1` and `fn f(import)` are parse errors now
+
+  - `name:path` imports from a collection dir, like odin
+      - `revo --collection name=dir[,name=dir]` adds import collections
+        the lsp takes `{"collections": {"name": "dir"}}` as init options
+
+      - `std:` is built in
+        looks, relatively to the `revo` executable, for
+        - `../lib/revo/std`
+        - `../lib/std`
+        (marked by `std.rv`)
+        `zig build` puts `lib/std` there
+
+
+  - `revo.load(path)`, dynamic import from the cwd
+    `revo.load(path, {fresh = :true})` will also re-run it afresh
+    replaces `revo.dofile`
+
+  - `revo.dload(path)` loads a dll, you can type it with a binding. `import` used to do that, but no more
+
+    ```ruby
+    const lib: { add: fn(a: number, b: number) -> number } = revo.dload("./lib.so")
+    ```
+
+  - `revo compile` bundles every module the program imports into the `.rvo`,
+    so it runs even with the sources gone. use a `revo.load` where you do need to load revo dynamically
+
+  - `revo doc main.rv` also documents every module `main.rv` imports
+
+  - modules load lazily, once per vm, each on its own fiber
+    - fibers that import a module while it loads wait for it
+    - a lazy import that runs while its target loads is a `CyclicImport`
+
+  - a module with `pub` is a read-only record of its pub names
+    pub was always "put this into an export table, then return that table explicitly at the end of the closure"
+    it's still that way, an explicit `return` still wins, with a with a `pub-with-return` warning
+
+    - `pub` is const-only, and only at the top of a file or fn body
+    - `pub const {a, b} = ...` exports both
+
 - ffi!
   dynamically call any & all c functions right from revo
   ```ruby
@@ -186,6 +234,7 @@ most breaking change yet
   - `examples/errors.rv` is the error gallery you can run
 
 - std:
+  - `table.freeze(t)` freezes a table
   - `revo.lex(code)` lexes source into an array of `revo.LexToken` tables
   - `stats` module -- build a table for statistics
   - `frame` module -- dataframe-like structure
@@ -261,6 +310,7 @@ most breaking change yet
 
 ### Changed
 
+- table keys take keywords too, `{end = 1, import = 2}`
 - `number` is the only spelling of the number type
   `num` and `int` no longer exist, so `let x: num` is now an untyped binding
   the `num?` type predicate is gone too, use `number?`
@@ -358,6 +408,10 @@ most breaking change yet
 - rendered types use spaces
 
 ### Fixed
+
+- `.rvo` files keep working after code compiles at runtime (`revo.eval`, a
+  loaded module): atoms travel by name and the program gets its own segment.
+  the format is version 2, older `.rvo` files are refused
 
 - host functions dropped explicit `:false` bool args: `unwrapArg` used `isBoolAtom` (true for both `:true`
   and `:false`) as the value instead of comparing against `:true`

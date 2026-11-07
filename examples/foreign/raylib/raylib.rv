@@ -53,6 +53,6 @@ const raylib: {
   get_mouse_y: fn() -> number,
   #* measure text width in pixels *#
   measure_text: fn(text: string, size: number) -> number,
-} = import "./raylib.so"
+} = revo.dload("./raylib.so")
 
 raylib

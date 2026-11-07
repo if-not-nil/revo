@@ -4,7 +4,7 @@ the inline ffi example
 see ./readme.md, ./example.rv
 !#
 
-const cffi = import "./cffi.rv"
+const cffi = import("./cffi.rv")
 
 let rl = cffi.load("./libraylib.so")
 

@@ -11,7 +11,7 @@ test "module import auto-binds filename" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./mymod"
+        \\ const mymod = import("./mymod")
         \\ mymod
     , 42);
 }
@@ -22,7 +22,7 @@ test "module import with custom name" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import { m = "./mymod" }
+        \\ const m = import("./mymod")
         \\ m
     , 7);
 }
@@ -56,7 +56,7 @@ test "module non-pub values are not exported" {
     , 42);
 }
 
-test "const x = import \"foo\" with different names binds both" {
+test "const x = import \"./foo\" with different names binds both" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "mymod.rv", .data = "pub const val = 42\n" },
     });
@@ -67,13 +67,13 @@ test "const x = import \"foo\" with different names binds both" {
     , 42);
 }
 
-test "import of non-existent file reports runtime error" {
+test "import of non-existent file is a compile error" {
     var m = try t.TmpMod.init(&.{});
     defer m.deinit();
-    try t.expectRuntimeErrorInDir(m.dir,
-        \\ import "./nonexistent"
+    try t.expectCompileErrorInDir(m.dir,
+        \\ const nonexistent = import("./nonexistent")
         \\ nonexistent
-    , .ModuleNotFound);
+    );
 }
 
 test "import empty module does not crash" {
@@ -82,7 +82,7 @@ test "import empty module does not crash" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./empty"
+        \\ const empty = import("./empty")
         \\ 42
     , 42);
 }
@@ -94,7 +94,7 @@ test "import in function body binds correctly" {
     defer m.deinit();
     try t.topNumberInDir(m.dir,
         \\ fn get_val() do
-        \\   import "./helper"
+        \\   const helper = import("./helper")
         \\   helper.val
         \\ end
         \\ get_val()
@@ -110,7 +110,7 @@ test "pub type alias from imported module is available" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./types"
+        \\ const types = import("./types")
         \\ const x: UserId = 42
         \\ types.greet(x)
     , 42);
@@ -125,7 +125,7 @@ test "non-pub type alias in imported module does not pollute importer" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./priv_types"
+        \\ const priv_types = import("./priv_types")
         \\ priv_types.val
     , 42);
 }
@@ -140,7 +140,7 @@ test "pub type alias referencing another type alias from same module" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./chain"
+        \\ const chain = import("./chain")
         \\ chain.take(42)
     , 42);
 }
@@ -154,7 +154,7 @@ test "pub type alias works in type annotation after import" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./alias_mod"
+        \\ const alias_mod = import("./alias_mod")
         \\ const x: Code = 99
         \\ alias_mod.lookup(x)
     , 99);
@@ -166,16 +166,16 @@ test "module with only non-pub items compiles and imports" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./priv"
+        \\ const priv = import("./priv")
         \\ 1
     , 1);
 }
 
-test "pub import { x = \"a\" } re-exports module" {
+test "pub const re-exports an import" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "inner.rv", .data = "pub const val = 42\n" },
         .{ .path = "outer.rv", .data =
-        \\ pub import { inner = "./inner" }
+        \\ pub const inner = import("./inner")
         },
     });
     defer m.deinit();
@@ -185,11 +185,11 @@ test "pub import { x = \"a\" } re-exports module" {
     , 42);
 }
 
-test "pub import \"foo\" at statement level re-exports" {
+test "bare-call import re-exports" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "inner.rv", .data = "pub const val = 42\n" },
         .{ .path = "outer.rv", .data =
-        \\ pub import "./inner"
+        \\ pub const inner = import "./inner"
         },
     });
     defer m.deinit();
@@ -199,14 +199,15 @@ test "pub import \"foo\" at statement level re-exports" {
     , 42);
 }
 
-test "multi-import with two entries" {
+test "two imports in one scope" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "alpha.rv", .data = "pub const a = 1\n" },
         .{ .path = "beta.rv", .data = "pub const b = 2\n" },
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import { x = "./alpha", y = "./beta" }
+        \\ const x = import("./alpha")
+        \\ const y = import("./beta")
         \\ x.a + y.b
     , 3);
 }
@@ -218,7 +219,7 @@ test "import inside do block binds correctly" {
     defer m.deinit();
     try t.topNumberInDir(m.dir,
         \\ do
-        \\   import "./helper"
+        \\   const helper = import("./helper")
         \\   helper.val
         \\ end
     , 7);
@@ -230,7 +231,7 @@ test "import with relative path works" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./sub_rel"
+        \\ const sub_rel = import("./sub_rel")
         \\ sub_rel.val
     , 42);
 }
@@ -239,14 +240,14 @@ test "circular import does not hang" {
     return error.SkipZigTest; // noisy
 }
 
-test "transitive pub import through re-export chain" {
+test "transitive re-export through a pub const" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "leaf.rv", .data = "pub const deep = 99\n" },
-        .{ .path = "middle.rv", .data = "pub import \"./leaf\"\npub const mid = 50\n" },
+        .{ .path = "middle.rv", .data = "pub const leaf = import(\"./leaf\")\npub const mid = 50\n" },
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./middle"
+        \\ const middle = import("./middle")
         \\ middle.leaf.deep + middle.mid
     , 149);
 }
@@ -257,12 +258,13 @@ test "same file imported under multiple names" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import { a = "./shared", b = "./shared" }
+        \\ const a = import("./shared")
+        \\ const b = import("./shared")
         \\ a.v + b.v
     , 14);
 }
 
-test "import with absolute path" {
+test "absolute paths are for `revo.load`, not `import`" {
     var m = try t.TmpMod.init(&.{
         .{ .path = "absm.rv", .data = "pub const x = 42\n" },
     });
@@ -270,7 +272,11 @@ test "import with absolute path" {
     const abs_path = try alloc.print("{s}/absm.rv", .{m.dir});
     defer alloc.free(abs_path);
 
-    const source = try alloc.print("import '{s}'\nabsm.x", .{abs_path});
+    const bad = try alloc.print("import('{s}')", .{abs_path});
+    defer alloc.free(bad);
+    try t.expectCompileErrorInDir(m.dir, bad);
+
+    const source = try alloc.print("revo.load('{s}')[1].x", .{abs_path});
     defer alloc.free(source);
 
     var result = try t.topResult(source, m.dir);
@@ -278,32 +284,6 @@ test "import with absolute path" {
     const actual = try result.value.asNum();
     if (@abs(@as(f64, 42) - actual) > 0.000000001)
         return error.TestExpectedEqual;
-}
-
-test "@exports shadow in module is caught at compile time" {
-    return error.SkipZigTest; // noisy
-}
-
-test "let import binding is rejected" {
-    var m = try t.TmpMod.init(&.{
-        .{ .path = "mod.rv", .data = "pub const x = 42\n" },
-    });
-    defer m.deinit();
-    try t.expectCompileErrorInDir(m.dir,
-        \\ let m = import "./mod"
-        \\ m.x
-    );
-}
-
-test "duplicate import name is rejected at compile time" {
-    var m = try t.TmpMod.init(&.{
-        .{ .path = "mod.rv", .data = "pub const v = 1\n" },
-    });
-    defer m.deinit();
-    try t.expectCompileErrorInDir(m.dir,
-        \\ import "./mod"
-        \\ import "./mod"
-    );
 }
 
 test "labeled loops break from outer loop via label" {

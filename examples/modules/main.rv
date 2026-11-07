@@ -1,6 +1,4 @@
-import {
-  m = "math_lib",
-}
+const m = import("./math_lib")
 
 m.pi
   |> m.double()

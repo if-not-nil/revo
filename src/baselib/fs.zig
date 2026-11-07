@@ -260,7 +260,7 @@ pub const Impl = struct {
     pub const @"fs.stat" = statImpl(Args.string);
 };
 
-pub const impls: []const specs.Impl = if (@import("build_options").is_freestanding)
+pub const impls: []const specs.Impl = if (!revo.default_caps.io)
     &[_]specs.Impl{}
 else
     root.host.impls(Impl).val ++ &[_]specs.Impl{

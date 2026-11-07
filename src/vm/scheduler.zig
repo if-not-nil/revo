@@ -275,7 +275,7 @@ inline fn parkFiberLocked(self: *@This(), fid: FiberID, wait: Fiber.WaitKind, re
 /// , a new waiter, sleeper, or queued fiber can unblock the poller
 /// , a full pipe still reads as ready and the write end never blocks
 inline fn signalWakeup(self: *@This()) void {
-    if (revo.can_async and self.thread_count > 1 and self.wakeup_w >= 0) {
+    if (revo.default_caps.threads and self.thread_count > 1 and self.wakeup_w >= 0) {
         var one: [1]u8 = .{0};
         _ = std.c.write(self.wakeup_w, &one, 1);
     }

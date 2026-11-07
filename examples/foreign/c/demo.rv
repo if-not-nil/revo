@@ -8,7 +8,7 @@
   ```
 !#
 
-const extension = import "./extension.rv"
+const extension = import("./extension.rv")
 
 print(extension.greet("world"))
 print(extension.add(3, 4))

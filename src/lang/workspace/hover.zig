@@ -361,7 +361,7 @@ test "workspace hover shows record field values" {
         \\}
         \\t
     ;
-    const id = try ws.open("<test>", source, .{});
+    const id = try ws.open("<test>", source);
     const query_opts: pipeline.BuildOptions = .{
         .install_debug_info = false,
         .test_mode = false,
@@ -385,7 +385,7 @@ test "workspace hover over bare fn definition" {
     var ws = try Workspace.init(alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "let x = 42\n\nfn say_hi(name) do\n  print(\"hello \" + name)\nend\n", .{});
+    const id = try ws.open("<test>", "let x = 42\n\nfn say_hi(name) do\n  print(\"hello \" + name)\nend\n");
     _ = try ws.inspectDetailed(alloc, id, query_opts);
 
     var hov = try ws.hover(alloc, id, .{ .line = 3, .character = 5 }, query_opts);
@@ -407,7 +407,7 @@ test "workspace hover over baselib module name shows member card" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "print(math.floor(1.5))\n", .{});
+    const id = try ws.open("<test>", "print(math.floor(1.5))\n");
     var hov = try ws.hover(alloc, id, .{ .line = 1, .character = 8 }, query_opts);
     defer if (hov) |*h| h.deinit(alloc);
     try std.testing.expect(hov != null);
@@ -430,7 +430,7 @@ test "workspace hover over qualified member prefers its module" {
     var ws = try Workspace.initWithVm(&vm, alloc);
     defer ws.deinit();
 
-    const id = try ws.open("<test>", "print(math.floor(1.5))\n", .{});
+    const id = try ws.open("<test>", "print(math.floor(1.5))\n");
     // `floor` exists in several modules; the `math.` qualifier must win
     // over the unqualified first match (`number.floor`)
     var hov = try ws.hover(alloc, id, .{ .line = 1, .character = 13 }, query_opts);

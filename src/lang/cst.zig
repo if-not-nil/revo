@@ -2,8 +2,6 @@
 //! cst? i hardly know her
 //!   lossless syntax tree
 //!
-//! ~ parser builds this, pipeline never sees raw tokens
-//! ~ every significant token lives on exactly one node, trivia via `Token`
 
 const std = @import("std");
 
@@ -12,8 +10,6 @@ const Span = Lexer.Span;
 const Token = Lexer.Token;
 const TokenType = Lexer.TokenType;
 
-/// shared leaf vocabulary (operators, decl kinds, interpolation modes)
-/// lives here, not in the lexer: positions originate there, meaning here
 pub const discard_name = "_";
 
 pub inline fn isDiscardName(name: []const u8) bool {
@@ -266,14 +262,10 @@ pub const CstKind = union(enum) {
         value: *CstNode,
     },
     decl: struct { pub_tok: ?Token, kind: DeclKind, inner: *CstNode, pub_: bool = false },
-    import: struct {
-        import_tok: Token,
-        lbrace_tok: ?Token,
-        items: []CstImportItem,
-        commas: []Token,
-        rbrace_tok: ?Token,
-        pub_: bool,
-    },
+    /// `import "x"` / `import("x")`
+    import: struct { kw_tok: Token, lparen_tok: ?Token, path: StringLit, rparen_tok: ?Token },
+    /// `use "./x"`, hir.lower turns it into `const x = import "./x"`
+    use: struct { import: *CstNode, name: []const u8 },
     test_block: struct {
         kw_tok: Token,
         slash_tok: ?Token,
@@ -380,15 +372,6 @@ pub const CstArm = struct {
 pub const CstMatcher = union(enum) {
     wildcard: Token,
     expr: *CstNode,
-};
-
-/// import item; `name =` absent means autobind
-pub const CstImportItem = struct {
-    name_tok: ?Token,
-    eq_tok: ?Token,
-    path: StringLit,
-    span: Span,
-    pub_: bool = false,
 };
 
 /// dotted head for `declare`/`type` plus optional type params
@@ -811,16 +794,12 @@ fn walkTokens(out: *std.ArrayList(Token), alloc: std.mem.Allocator, node: *CstNo
             try walkTokens(out, alloc, d.inner);
         },
         .import => |im| {
-            try out.append(alloc, im.import_tok);
-            if (im.lbrace_tok) |t| try out.append(alloc, t);
-            for (im.items, 0..) |item, i| {
-                if (item.name_tok) |t| try out.append(alloc, t);
-                if (item.eq_tok) |t| try out.append(alloc, t);
-                try out.appendSlice(alloc, item.path.toks);
-                if (i < im.commas.len) try out.append(alloc, im.commas[i]);
-            }
-            if (im.rbrace_tok) |t| try out.append(alloc, t);
+            try out.append(alloc, im.kw_tok);
+            if (im.lparen_tok) |t| try out.append(alloc, t);
+            try out.appendSlice(alloc, im.path.toks);
+            if (im.rparen_tok) |t| try out.append(alloc, t);
         },
+        .use => |u| try walkTokens(out, alloc, u.import),
         .test_block => |t| {
             try out.append(alloc, t.kw_tok);
             if (t.slash_tok) |tok| try out.append(alloc, tok);
@@ -1186,15 +1165,27 @@ pub fn unwrapParen(node: *const CstNode) ?*const CstNode {
     return cur;
 }
 
-/// mutable variant of unwrapParen
-pub fn unwrapParenMut(node: *CstNode) ?*CstNode {
-    var cur: *CstNode = node;
-    while (cur.kind == .paren) {
-        if (cur.kind.paren.expr) |e| {
-            cur = e;
-        } else return null;
-    }
-    return cur;
+/// `use "x"` -> `const x = import "x"`, else null
+pub fn desugarUse(alloc: std.mem.Allocator, node: *CstNode) std.mem.Allocator.Error!?*CstNode {
+    if (node.kind != .use) return null;
+    const use = node.kind.use;
+    const binding = try allocNode(alloc, node.span, .{ .binding = .{
+        .kind_tok = syntheticToken("const", node.span),
+        .kind = .@"const",
+        .target = try allocIdent(alloc, node.span, use.name),
+        .colon_tok = null,
+        .type = null,
+        .eq_tok = syntheticToken("=", node.span),
+        .value = use.import,
+    } });
+    const out = try allocNode(alloc, node.span, .{ .decl = .{
+        .pub_tok = null,
+        .kind = .@"const",
+        .inner = binding,
+    } });
+
+    if (node.doc_tok) |dt| attachDoc(out, dt);
+    return out;
 }
 
 /// stmts of a block-like node (block/do_block/root), null otherwise
@@ -1417,7 +1408,7 @@ pub fn walkCst(comptime Visitor: type, visitor: *Visitor, node: *const CstNode) 
             visitor.visit(b.value);
         },
         .decl => |d| visitor.visit(d.inner),
-        .import => {},
+        .import, .use => {},
         .test_block => |t| visitor.visit(t.body),
         .test_suite => |t| visitor.visit(t.body),
         .type_alias => {},
@@ -1453,7 +1444,7 @@ fn walkCstSliceWith(
 
 /// transforming walker over `*CstNode`, preserving all tokens
 /// , Transform must have `walk(alloc, *CstNode, ctx) !*CstNode`
-/// , leaves and token-only nodes (`import`, `type_alias`) are aliased
+/// , leaves and token-only nodes (`import`, `use`, `type_alias`) are aliased
 /// , doc/attr-carrying kinds (decl/fn_def/fn_method/binding/assign) keep them
 pub fn walkCstExpr(
     alloc: std.mem.Allocator,
@@ -1462,7 +1453,7 @@ pub fn walkCstExpr(
     ctx: Transform,
 ) !*CstNode {
     switch (node.kind) {
-        .number, .string, .atom, .ident, .err, .yield, .import, .type_alias => return node,
+        .number, .string, .atom, .ident, .err, .yield, .type_alias, .import, .use => return node,
         .unary => |u| return allocNode(alloc, node.span, .{ .unary = .{
             .op_tok = u.op_tok,
             .op = u.op,

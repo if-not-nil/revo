@@ -392,10 +392,7 @@ pub export fn revo_table_remove_finalizer(vm_ptr: *anyopaque, table: Value) call
 
 /// register a shared lib's revo_bindings into the module table
 pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
-    if (builtin.target.os.tag == .wasi or builtin.target.os.tag == .freestanding) {
-        std.debug.print("error: dynamic library loading is not supported on this platform\n", .{});
-        return error.OsNotSupported;
-    }
+    if (!vm_ptr.runtime.caps.dlopen) return error.OsNotSupported;
 
     var lib = try std.DynLib.open(lib_path);
 
@@ -426,9 +423,7 @@ pub fn loadC(vm_ptr: *VM, lib_path: []const u8) ![]functions.CFunction {
 
 /// load a shared lib's `revo_bindings` as host functions
 pub fn loadHost(vm_ptr: *VM, lib_path: []const u8) ![]HostFunc {
-    if (builtin.target.os.tag == .wasi or builtin.target.os.tag == .freestanding) {
-        return error.OsNotSupported;
-    }
+    if (!vm_ptr.runtime.caps.dlopen) return error.OsNotSupported;
 
     var lib = try std.DynLib.open(lib_path);
 

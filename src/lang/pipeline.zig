@@ -58,9 +58,7 @@ pub fn buildWithWarnings(vm: *VM, source: Source, opts: BuildOptions, warnings: 
 }
 
 /// build a tree that already came out of `parse`/`parseWithWarnings`
-///
-/// ; the tree is borrowed and must stay alive for the build
-/// , callers that cache parses use this to avoid lexing + parsing twice
+/// ; the tree is borrowed and must stay alive for the build, callers that cache parses use this to avoid lexing + parsing twice
 pub fn buildParsedWithWarnings(
     vm: *VM,
     root: *Node,
@@ -73,6 +71,74 @@ pub fn buildParsedWithWarnings(
     defer arena.deinit();
 
     return buildParsedWithAllocator(vm, arena.allocator(), root, source, opts, parse_warnings, warnings);
+}
+
+/// the disk, or a bundled program's own graph when the vm has one
+const PipelineResolver = struct {
+    vm: *VM,
+    fs: import_scan.Fs,
+
+    /// deps come in as realpaths and resolve from their own dir
+    /// , the root file from the dir the build set
+    fn resolve(ptr: *anyopaque, importer: []const u8, raw: []const u8, a: std.mem.Allocator) semantic.ModuleResolver.Resolved {
+        const self: *@This() = @ptrCast(@alignCast(ptr));
+        if (self.vm.bundle) |b| {
+            const path = b.edge(importer, raw) orelse return .{ .err = error.FileNotFound };
+            return .{ .ok = .{ .path = path, .source = b.files.get(path).? } };
+        }
+        if (comptime revo.is_freestanding) return .{ .err = error.FileNotFound };
+
+        const dir = if (std.Io.Dir.path.isAbsolute(importer))
+            std.Io.Dir.path.dirname(importer) orelse "/"
+        else
+            self.fs.import_dir orelse ".";
+        const path = revo.import_path.resolveFile(self.fs.io, a, raw, dir, self.fs.collections, .static) catch |err|
+            return .{ .err = err };
+        const text = std.Io.Dir.cwd().readFileAlloc(self.fs.io, path, a, .unlimited) catch |err|
+            return .{ .err = err };
+        return .{ .ok = .{ .path = path, .source = text } };
+    }
+};
+
+/// the checker's import graph for `source`, without compiling
+/// ; errors don't stop it, an import that doesn't resolve just isn't in it
+pub fn importGraph(vm: *VM, source: Source, graph: *import_graph.Graph) !void {
+    var arena = std.heap.ArenaAllocator.init(vm.runtime.alloc);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const prev_import_dir = vm.import_dir;
+    defer vm.import_dir = prev_import_dir;
+    if (source.name) |name| if (std.Io.Dir.path.dirname(name)) |dir| {
+        vm.import_dir = dir;
+    };
+
+    const parsed = switch (try parseWithWarnings(alloc, source, .{}, null)) {
+        .ok => |p| p.root,
+        .err => return,
+    };
+    const root = try hir.lower(alloc, parsed);
+
+    const known_globals = try knownGlobalsFromVm(vm, vm.runtime.alloc);
+    defer vm.runtime.alloc.free(known_globals);
+
+    var resolver = PipelineResolver{ .vm = vm, .fs = import_scan.Fs.fromVm(vm) };
+    var warn: ?diagnostic.Report = null;
+    const failure = try semantic.analyze(
+        vm.runtime.alloc,
+        root,
+        source.name orelse "",
+        source.text,
+        known_globals,
+        null,
+        null,
+        null,
+        .{ .ptr = &resolver, .resolveFn = PipelineResolver.resolve },
+        graph,
+        &warn,
+    );
+    if (failure) |f| deinitError(.{ .semantic = f });
+    if (warn) |*w| w.deinit();
 }
 
 fn buildParsedWithAllocator(
@@ -113,36 +179,21 @@ fn buildParsedWithAllocator(
     defer type_annotations.deinit();
 
     var type_table = compiler.types.TypeTable.init(alloc);
+
+    // the checker fills this with every import, the compiler just reads it
+    var local_graph = import_graph.Graph.init(alloc);
+    defer local_graph.deinit();
+    const graph = opts.imports orelse &local_graph;
     const annotations = compiler.types.Annotations{
         .map = &type_annotations,
         .table = &type_table,
+        .imports = graph,
     };
 
     const known_globals = try knownGlobalsFromVm(vm, vm.runtime.alloc);
     defer vm.runtime.alloc.free(known_globals);
 
-    const PipelineResolver = struct {
-        fs: import_scan.Fs,
-
-        fn resolve(ptr: *anyopaque, path: []const u8, a: std.mem.Allocator) ?[]const u8 {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-
-            if (comptime !revo.is_freestanding) {
-                const resolved = (import_scan.resolveModuleFileWithFs(self.fs, path) catch return null) orelse return null;
-                defer self.fs.alloc.free(resolved);
-
-                // shared libs are opaque to the compiler; the module resolves untyped
-                if (std.mem.endsWith(u8, resolved, ".so") or std.mem.endsWith(u8, resolved, ".dylib")) {
-                    return null;
-                }
-
-                return std.Io.Dir.cwd().readFileAlloc(self.fs.io, resolved, a, std.Io.Limit.unlimited) catch null;
-            }
-            return null;
-        }
-    };
-
-    var pipeline_resolver = PipelineResolver{ .fs = import_scan.Fs.fromVm(vm) };
+    var pipeline_resolver = PipelineResolver{ .vm = vm, .fs = import_scan.Fs.fromVm(vm) };
 
     var combined_warnings = parse_warnings;
     if (try semantic.analyze(
@@ -155,6 +206,7 @@ fn buildParsedWithAllocator(
         annotations,
         null,
         .{ .ptr = &pipeline_resolver, .resolveFn = PipelineResolver.resolve },
+        graph,
         &combined_warnings,
     )) |failure| {
         warnings.* = combined_warnings;
@@ -167,6 +219,7 @@ fn buildParsedWithAllocator(
         deinitError(.{ .semantic = failure });
         return .{ .err = .{ .semantic = .{ .kind = failure.kind, .report = copied } } };
     }
+
     warnings.* = combined_warnings;
 
     const compile_result = try compile(vm, root, .{
@@ -207,20 +260,16 @@ pub const CompileOptions = struct {
     /// optional annotation-cov counters for tests/tooling
     annotation_stats: ?*compiler.CompileStats = null,
 };
-pub const ProjectMode = enum {
-    script,
-    project,
-};
-
 pub const BuildOptions = struct {
     install_debug_info: bool = true,
     test_mode: bool = false,
-    mode: ProjectMode = .script,
     module_scope: bool = false, // build exports table from pub decls
     repl_mode: bool = false,
     /// optional annotation-cov counters
     /// normally left null
     annotation_stats: ?*compiler.CompileStats = null,
+    /// filled with the build's import graph when set, the bundler reads it
+    imports: ?*import_graph.Graph = null,
 };
 
 fn parserOpts(opts: ParseOptions) Parser.Options {
@@ -250,13 +299,18 @@ pub fn parseWithWarnings(
     warnings: ?*?diagnostic.Report,
 ) !ParseResult {
     return switch (try Parser.parseSourceReportWithWarnings(allocator, source.text, parserOpts(opts), warnings)) {
-        // name autobind imports after their targets, then lower
-        // interpolation sugar first so users only see `fmt` calls
+        // lower interpolation sugar first so users only see `fmt` calls
         .ok => |expr| blk: {
+            if (try scope_wiring.checkPub(allocator, expr, source.text, warnings)) |failure| {
+                var diag = failure;
+                diag.report.source_name = source.name;
+                break :blk .{ .err = diag };
+            }
             if (warnings) |out| {
                 if (out.*) |*w| w.source_name = source.name;
             }
-            break :blk .{ .ok = .{ .root = try interpolation.lowerRoot(allocator, try scope_wiring.bindImportNames(allocator, expr)) } };
+
+            break :blk .{ .ok = .{ .root = try interpolation.lowerRoot(allocator, expr) } };
         },
         .err => |failure| blk: {
             var diag = failure;
@@ -319,8 +373,7 @@ pub fn renderError(
 }
 
 /// render a warnings report
-/// ; same shape as errors
-/// , never fails the build
+/// ; same shape as errors, and it never fails the build
 pub fn renderWarnings(writer: *std.Io.Writer, source: Source, report: diagnostic.Report, opts: diagnostic.RenderOptions) !void {
     var rep = report;
     rep.source_name = rep.source_name orelse source.name;
@@ -345,10 +398,11 @@ const Node = cst.CstNode;
 const compiler = @import("compiler/root.zig");
 const diagnostic = @import("diagnostic.zig");
 const hir = @import("hir.zig");
+pub const import_graph = @import("import_graph.zig");
 const import_scan = @import("pipeline/import_scan.zig");
 const interpolation = @import("pipeline/interpolation.zig");
 const Parser = @import("Parser.zig");
-const scope_wiring = @import("pipeline/scope_wiring.zig");
+pub const scope_wiring = @import("pipeline/scope_wiring.zig");
 const semantic = @import("semantic.zig");
 pub const Bytecode = compiler.Bytecode;
 pub const ParseFailure = Parser.ParseFailure;

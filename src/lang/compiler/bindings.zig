@@ -24,15 +24,6 @@ pub fn compileLocalBinding(
     type_name: ?*const cst.CstType,
 ) !void {
     try self.validateName(name, value.span);
-    if (!cst.isDiscardName(name)) if (locals.currentFunctionState(self)) |fn_state|
-        for (fn_state.import_locals.items) |il|
-            if (std.mem.eql(u8, il.name, name)) {
-                try self.appendFailureReport(.ParseError, &.{
-                    .{ .@"error" = "name conflicts with an import" },
-                    .{ .span = .{ .span = value.span, .role = .primary, .message = name } },
-                });
-                return error.CompileFailed;
-            };
     // fn slots can be reused if not initialized
     const vu = cst.unwrapParen(value);
     const is_fn = if (vu) |u| u.kind == .fn_def else false;
@@ -689,7 +680,7 @@ pub const IsolationVisitor = struct {
         if (self.found) return;
         const u = cst.unwrapParen(node) orelse return;
         switch (u.kind) {
-            .decl, .binding, .import, .loop_expr, .for_loop, .while_loop => self.found = true,
+            .decl, .binding, .loop_expr, .for_loop, .while_loop => self.found = true,
             .do_block => |d| if (d.label_tok != null) {
                 self.found = true;
             } else cst.walkCst(IsolationVisitor, self, node),

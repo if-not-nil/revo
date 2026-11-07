@@ -30,7 +30,6 @@ pub const FunctionState = struct {
     locals: std.ArrayList(LocalVar),
     all_locals: std.ArrayList(LocalVar),
     upvalues: std.ArrayList(UpvalueSpec),
-    import_locals: std.ArrayList(LocalVar),
     scope_starts: std.ArrayList(usize),
     type_hints: std.ArrayList(TypeHint),
     type_scope_starts: std.ArrayList(usize),
@@ -43,7 +42,6 @@ pub const FunctionState = struct {
             .locals = try std.ArrayList(LocalVar).initCapacity(alloc, 8),
             .all_locals = try std.ArrayList(LocalVar).initCapacity(alloc, 8),
             .upvalues = try std.ArrayList(UpvalueSpec).initCapacity(alloc, 4),
-            .import_locals = try std.ArrayList(LocalVar).initCapacity(alloc, 2),
             .scope_starts = try std.ArrayList(usize).initCapacity(alloc, 8),
             .type_hints = try std.ArrayList(TypeHint).initCapacity(alloc, 8),
             .type_scope_starts = try std.ArrayList(usize).initCapacity(alloc, 8),
@@ -55,7 +53,6 @@ pub const FunctionState = struct {
         self.locals.deinit(alloc);
         self.all_locals.deinit(alloc);
         self.upvalues.deinit(alloc);
-        self.import_locals.deinit(alloc);
         self.scope_starts.deinit(alloc);
         self.type_hints.deinit(alloc);
         self.type_scope_starts.deinit(alloc);
@@ -299,13 +296,6 @@ pub fn resolveLocalVarIn(self: *Compiler, fn_idx: usize, name: []const u8) ?Loca
     while (i > 0) {
         i -= 1;
         if (std.mem.eql(u8, locals[i].name, name)) return locals[i];
-    }
-    // check bypasses scope pops from synthetic blocks
-    const import_locals = fn_state.import_locals.items;
-    i = import_locals.len;
-    while (i > 0) {
-        i -= 1;
-        if (std.mem.eql(u8, import_locals[i].name, name)) return import_locals[i];
     }
     return null;
 }

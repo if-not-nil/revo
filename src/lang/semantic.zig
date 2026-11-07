@@ -3,9 +3,10 @@ const std = @import("std");
 
 const cst = @import("./cst.zig");
 const diagnostic = @import("diagnostic.zig");
-const import_types = @import("import_types.zig");
+const hir = @import("hir.zig");
+const import_graph = @import("import_graph.zig");
 const Lexer = @import("Lexer.zig");
-const Parser = @import("Parser.zig");
+const pipeline = @import("pipeline.zig");
 const resmap = @import("resmap.zig");
 const revo = @import("revo");
 const type_syntax = @import("type_syntax.zig");
@@ -17,13 +18,47 @@ pub const Kind = enum {
 
 pub const Failure = diagnostic.Diagnostic(Kind);
 
+/// finds the file an import names, from the file that wrote it
+/// , the build asks the disk, the lsp asks its open buffers
 pub const ModuleResolver = struct {
     ptr: *anyopaque,
-    resolveFn: *const fn (ptr: *anyopaque, path: []const u8, alloc: std.mem.Allocator) ?[]const u8,
+    resolveFn: *const fn (ptr: *anyopaque, importer: []const u8, raw: []const u8, alloc: std.mem.Allocator) Resolved,
 
-    pub fn resolve(self: ModuleResolver, path: []const u8, alloc: std.mem.Allocator) ?[]const u8 {
-        return self.resolveFn(self.ptr, path, alloc);
+    pub const Resolved = union(enum) {
+        ok: struct {
+            /// canonical, one per file
+            path: []const u8,
+            source: []const u8,
+        },
+        /// `revo.import_path.message` explains it
+        err: anyerror,
+    };
+
+    pub fn resolve(self: ModuleResolver, importer: []const u8, raw: []const u8, alloc: std.mem.Allocator) Resolved {
+        return self.resolveFn(self.ptr, importer, raw, alloc);
     }
+};
+
+/// every module one analysis touched. the nested dep checkers share it
+const ModuleGraph = struct {
+    /// path -> checked type, a dep is checked once per analysis
+    types: std.StringHashMapUnmanaged(ModuleType) = .empty,
+    /// deps being checked, innermost last
+    stack: std.ArrayList(Edge) = .empty,
+    /// what the caller gets back
+    out: ?*import_graph.Graph = null,
+
+    const Edge = struct {
+        path: []const u8,
+        /// imported at the top of its importer, not inside a fn
+        top_level: bool,
+    };
+};
+
+const ModuleType = struct {
+    record: types_mod.TypeInfo,
+    /// pub type aliases, `m.T`
+    aliases: *std.StringHashMap(types_mod.TypeInfo),
 };
 
 /// known_globals are names that exist at runtime (builtins)
@@ -42,14 +77,19 @@ pub fn analyze(
     annotations: ?types_mod.Annotations,
     docs: ?*std.StringHashMap([]const u8),
     module_resolver: ModuleResolver,
+    /// filled with every import the analysis resolved, see `import_graph`
+    imports: ?*import_graph.Graph,
     warnings: *?diagnostic.Report,
 ) !?Failure {
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, annotations, docs, module_resolver);
+    var graph: ModuleGraph = .{ .out = imports };
+    try graph.stack.append(arena_alloc, .{ .path = source_name, .top_level = true });
+    var checker = try SemanticChecker.init(arena_alloc, source_name, source, known_globals, type_map, annotations, docs, module_resolver, &graph);
     defer checker.deinit();
+    checker.is_root = true;
 
     if (warnings.*) |w| {
         if (w.parts.len > 0) try checker.warn_parts.appendSlice(arena_alloc, w.parts);
@@ -245,10 +285,17 @@ const SemanticChecker = struct {
     /// > 0 while inside a fn body; gates type_map/docs exports
     fn_nesting: usize = 0,
     resolver: ModuleResolver,
-    /// module name -> pub type aliases, for `a.T` annotations
-    import_aliases: std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)),
-    /// import path -> parsed dep CST, filled on first use
-    dep_csts: std.StringHashMapUnmanaged(*const cst.CstNode) = .empty,
+    graph: *ModuleGraph,
+    known_global_names: []const []const u8,
+    /// baselib module name -> its type aliases (`uri.Hi`)
+    /// , imported modules carry theirs on their record type instead
+    base_aliases: std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)),
+    /// `.import` node -> its module's type, for inference after analysis
+    import_types: std.AutoHashMapUnmanaged(*const cst.CstNode, types_mod.TypeInfo) = .empty,
+    /// first `return` at the top of the file, a module's value when present
+    top_return: ?types_mod.TypeInfo = null,
+    /// the file being analyzed, not one of its deps
+    is_root: bool = false,
 
     fn init(
         alloc: std.mem.Allocator,
@@ -259,6 +306,7 @@ const SemanticChecker = struct {
         annotations: ?types_mod.Annotations,
         docs: ?*std.StringHashMap([]const u8),
         resolver: ModuleResolver,
+        graph: *ModuleGraph,
     ) !SemanticChecker {
         var checker: SemanticChecker = .{
             .alloc = alloc,
@@ -279,8 +327,9 @@ const SemanticChecker = struct {
             .known_globals = .init(alloc),
             .shadowed_globals = .init(alloc),
             .resolver = resolver,
-            .import_aliases = .init(alloc),
-            .dep_csts = .empty,
+            .graph = graph,
+            .known_global_names = known_globals,
+            .base_aliases = .init(alloc),
         };
 
         try checker.scopes.append(checker.alloc, Scope.init(checker.alloc));
@@ -310,11 +359,11 @@ const SemanticChecker = struct {
             for (group) |*s| {
                 if (!s.is_type) continue;
                 const t = checker.evalCheckedTypeExpr(s.type) catch types_mod.TypeInfo{ .tag = .any };
+
                 // aliases live where values live
-                // : module heads seed the per-module table
-                //   (`uri.Hi`, docs ride on the spec), bare names seed globals
+                // , a module head (`uri.Hi`) seeds that module's table, a bare name seeds globals
                 if (s.head.kind == .namespaced) {
-                    const gop = try checker.import_aliases.getOrPut(s.head.module.?);
+                    const gop = try checker.base_aliases.getOrPut(s.head.module.?);
                     if (!gop.found_existing) gop.value_ptr.* = std.StringHashMap(types_mod.TypeInfo).init(checker.alloc);
                     try gop.value_ptr.put(s.name, t);
                 } else {
@@ -331,7 +380,7 @@ const SemanticChecker = struct {
         for (self.scopes.items) |*scope| scope.deinit();
         self.scopes.deinit(self.alloc);
         self.predeclared.deinit(self.alloc);
-        self.dep_csts.deinit(self.alloc);
+        self.import_types.deinit(self.alloc);
     }
 
     /// collect top-level fn names so forward references between them don't
@@ -343,22 +392,6 @@ const SemanticChecker = struct {
             const pre = resmap.predeclFn(item) orelse continue;
             try self.predeclared.put(self.alloc, pre.name, {});
         }
-    }
-
-    /// dep file cst for an import path, null when unresolvable
-    ///
-    /// import arm builds a record type from it on demand
-    /// ; parsed once per path, reused for later references
-    fn resolveDepCst(self: *SemanticChecker, path: []const u8) ?*const cst.CstNode {
-        if (self.dep_csts.get(path)) |root| return root;
-
-        const source_alloc = self.resolver.resolve(path, self.alloc) orelse return null;
-        defer self.alloc.free(source_alloc);
-
-        const source = self.alloc.dupe(u8, source_alloc) catch return null;
-        const root = Parser.parseSource(self.alloc, source, .{}) catch return null;
-        self.dep_csts.put(self.alloc, path, root) catch return root;
-        return root;
     }
 
     fn finishReport(self: *SemanticChecker) !diagnostic.Report {
@@ -496,8 +529,26 @@ const SemanticChecker = struct {
             .alloc = self.alloc,
             .type_params = self.current_type_params,
             .aliases = &self.type_aliases,
-            .imports = &self.import_aliases,
+            .imports = &self.base_aliases,
+            .modules = .{ .ptr = self, .lookupFn = lookupModuleAliases },
         };
+    }
+
+    /// pub type aliases of the module bound to `name`, through its type
+    fn moduleAliases(self: *SemanticChecker, name: []const u8) ?*const std.StringHashMap(types_mod.TypeInfo) {
+        if (self.base_aliases.getPtr(name)) |base| return base;
+        const t = self.lookup(name) orelse return null;
+        if (t.tag != .table) return null;
+        return t.tag.table.aliases;
+    }
+
+    fn lookupModuleAliases(ptr: *anyopaque, name: []const u8) ?*const std.StringHashMap(types_mod.TypeInfo) {
+        const self: *SemanticChecker = @ptrCast(@alignCast(ptr));
+        return self.moduleAliases(name);
+    }
+
+    pub fn inferImportType(self: *SemanticChecker, node: *const cst.CstNode) types_mod.TypeInfo {
+        return self.import_types.get(node) orelse .{ .tag = .any };
     }
 
     pub fn inferIdentType(self: *SemanticChecker, name: []const u8) types_mod.TypeInfo {
@@ -576,7 +627,7 @@ const SemanticChecker = struct {
     fn checkQualifiedTypes(self: *SemanticChecker, te: *const cst.CstType) !void {
         switch (te.kind) {
             .qualified => |q| {
-                if (self.import_aliases.get(q.mod_tok.text)) |aliases| {
+                if (self.moduleAliases(q.mod_tok.text)) |aliases| {
                     if (aliases.get(q.name_tok.text) == null) {
                         const msg = try self.alloc.print("unknown type `{s}` for module `{s}`", .{ q.name_tok.text, q.mod_tok.text });
                         try self.appendError(msg, te.span, "unknown type");
@@ -587,7 +638,7 @@ const SemanticChecker = struct {
                 // strip trailing `?` like lowering does
                 const nm = q.name_tok.text;
                 const bare = if (std.mem.endsWith(u8, nm, "?")) nm[0 .. nm.len - 1] else nm;
-                if (self.import_aliases.get(q.mod_tok.text)) |aliases| {
+                if (self.moduleAliases(q.mod_tok.text)) |aliases| {
                     if (aliases.get(bare) == null) {
                         const msg = try self.alloc.print("unknown type `{s}` for module `{s}`", .{ bare, q.mod_tok.text });
                         try self.appendError(msg, te.span, "unknown type");
@@ -839,30 +890,126 @@ const SemanticChecker = struct {
         return std.mem.trim(u8, tok.text, " \t\n\r");
     }
 
-    /// one import item: dep interface becomes the binding's record type
-    /// , member access, calls, and completions flow through the regular
-    /// , table paths; unresolvable deps stay untyped. returns the declared type
-    fn analyzeImportItem(self: *SemanticChecker, item: cst.CstImportItem) !types_mod.TypeInfo {
-        return self.analyzeImportItemNamed(item, if (item.name_tok) |nt| nt.text else std.Io.Dir.path.stem(item.path.text));
+    /// `import("x")`: the dep, checked for real, gives the module's type
+    fn analyzeImport(self: *SemanticChecker, path: []const u8, node: *const cst.CstNode) !types_mod.TypeInfo {
+        const t = try self.importType(path, node);
+        try self.import_types.put(self.alloc, node, t);
+        return t;
     }
 
-    fn analyzeImportItemNamed(self: *SemanticChecker, item: cst.CstImportItem, nm: []const u8) !types_mod.TypeInfo {
-        if (self.resolveDepCst(item.path.text)) |dep| {
-            const items: []const *const cst.CstNode = cst.blockStmts(dep) orelse &[_]*const cst.CstNode{dep};
+    fn importType(self: *SemanticChecker, raw: []const u8, node: *const cst.CstNode) !types_mod.TypeInfo {
+        const any: types_mod.TypeInfo = .{ .tag = .any };
+        const dep = switch (self.resolver.resolve(self.source_name, raw, self.alloc)) {
+            .ok => |d| d,
+            .err => |err| {
+                if (err == error.OutOfMemory) return err;
+                try self.appendError(revo.import_path.message(err), node.span, raw);
+                return any;
+            },
+        };
 
-            if (import_types.moduleInterface(self.alloc, items)) |iface| {
-                var aliases = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
-                for (iface.aliases) |a| try aliases.put(a.name, a.info);
-                try self.import_aliases.put(nm, aliases);
-
-                if (iface.record) |record| {
-                    try self.declare(nm, record, null);
-                    return record;
-                }
-            } else |_| {}
+        if (self.graph.out) |out| {
+            try out.addEdge(self.source_name, raw, dep.path);
+            if (self.is_root) try out.addSite(node, dep.path);
         }
-        try self.declare(nm, .{ .tag = .any }, null);
-        return .{ .tag = .any };
+
+        // a cycle settles as `any`, unless it's all top-level imports
+        // ; those could never finish loading
+        const top_level = self.fn_nesting == 0;
+        for (self.graph.stack.items, 0..) |edge, i| {
+            if (!std.mem.eql(u8, edge.path, dep.path)) continue;
+            var stuck = top_level;
+            for (self.graph.stack.items[i + 1 ..]) |e| stuck = stuck and e.top_level;
+            if (!stuck) return any;
+
+            var msg: std.Io.Writer.Allocating = .init(self.alloc);
+            try msg.writer.writeAll("import cycle: ");
+            for (self.graph.stack.items[i..]) |e| try msg.writer.print("{s} -> ", .{std.Io.Dir.path.basename(e.path)});
+            try msg.writer.writeAll(std.Io.Dir.path.basename(dep.path));
+            try self.appendError(msg.written(), node.span, "never finishes loading");
+            return any;
+        }
+
+        if (self.graph.types.get(dep.path)) |mt| return mt.record;
+
+        const mt = try self.checkDep(dep.path, dep.source, top_level, node.span);
+        try self.graph.types.put(self.alloc, dep.path, mt);
+        return mt.record;
+    }
+
+    /// the dep, built the same way its load builds it, with its own checker
+    fn checkDep(self: *SemanticChecker, path: []const u8, source: []const u8, top_level: bool, span: Lexer.Span) !ModuleType {
+        const aliases = try self.alloc.create(std.StringHashMap(types_mod.TypeInfo));
+        aliases.* = .init(self.alloc);
+        var mt: ModuleType = .{ .record = .{ .tag = .any }, .aliases = aliases };
+
+        var parse_warn: ?diagnostic.Report = null;
+        const parsed = switch (try pipeline.parseWithWarnings(self.alloc, .{ .text = source, .name = path }, .{}, &parse_warn)) {
+            .ok => |p| p.root,
+            .err => |failure| {
+                const msg = try self.alloc.print("`{s}` doesn't parse: {s}", .{ std.Io.Dir.path.basename(path), failure.report.message });
+                try self.appendError(msg, span, "in this import");
+                return mt;
+            },
+        };
+        const wrapped = try pipeline.scope_wiring.wrapPubFunctions(self.alloc, try pipeline.scope_wiring.wrapModule(self.alloc, parsed));
+        const root = try hir.lower(self.alloc, wrapped);
+
+        try self.graph.stack.append(self.alloc, .{ .path = path, .top_level = top_level });
+        defer _ = self.graph.stack.pop();
+
+        var dep = try SemanticChecker.init(self.alloc, path, source, self.known_global_names, null, null, null, self.resolver, self.graph);
+        try dep.collectPredeclared(root);
+        const body = try dep.analyzeNode(root);
+
+        // after its own deps, so the list stays deps-first
+        if (self.graph.out) |out| try out.addFile(path, source);
+
+        if (dep.errors.items.len > 0) {
+            const first = for (dep.errors.items) |part| {
+                if (part == .@"error") break part.@"error";
+            } else "";
+            const msg = try self.alloc.print("`{s}` has errors: {s}", .{ std.Io.Dir.path.basename(path), first });
+            try self.appendError(msg, span, "in this import");
+            return mt;
+        }
+
+        var has_record = false;
+        for (cst.blockStmts(parsed) orelse &.{}) |item| {
+            if (item.kind != .decl or !item.kind.decl.pub_) continue;
+            switch (item.kind.decl.inner.kind) {
+                .binding => has_record = true,
+                .type_alias => |ta| {
+                    const name = cst.aliasName(ta);
+                    if (dep.type_aliases.get(name)) |a| try aliases.put(name, a.info);
+                },
+                else => {},
+            }
+        }
+
+        // the dep's warnings count as ours, just pointed at the dep
+        if (parse_warn) |w| try self.adoptWarnings(w.parts, w.code, path, source);
+        try self.adoptWarnings(dep.warn_parts.items, dep.first_warn_code, path, source);
+
+        mt.record = dep.top_return orelse body;
+        if (mt.record.tag == .table) {
+            mt.record.tag.table.aliases = aliases;
+            mt.record.tag.table.read_only = has_record and dep.top_return == null;
+        }
+
+        return mt;
+    }
+
+    fn adoptWarnings(self: *SemanticChecker, parts: []const diagnostic.Part, code: ?[]const u8, path: []const u8, source: []const u8) !void {
+        for (parts) |part| {
+            var p = part;
+            if (p == .span and p.span.source_name == null) {
+                p.span.source_name = path;
+                p.span.source = source;
+            }
+            try self.warn_parts.append(self.alloc, p);
+        }
+        if (parts.len > 0 and self.first_warn_code == null) self.first_warn_code = code;
     }
 
     fn analyzeNode(self: *SemanticChecker, node: *const cst.CstNode) anyerror!types_mod.TypeInfo {
@@ -872,6 +1019,12 @@ const SemanticChecker = struct {
             .type_alias => |alias| try self.analyzeTypeAliasCst(alias, null, node.span),
             .fn_def => |f| try self.analyzeFnDef(f.params, f.return_type, f.type_params, f.body, nodeDoc(node)),
             .fn_method => unreachable, // desugared by hir.lower
+            .import => |im| try self.analyzeImport(im.path.text, node),
+            // hir.lower only desugars a `use` that stands as a statement
+            .use => blk: {
+                try self.appendError("`use` is a statement, use `import` inside an expression", node.span, "inside an expression");
+                break :blk .{ .tag = .any };
+            },
             .block => |b| try self.analyzeBlock(b.stmts, node.span),
             .root => |r| blk: {
                 // the file body is its own scope (init holds the module
@@ -897,12 +1050,12 @@ const SemanticChecker = struct {
             .assign => |a| try self.analyzeAssignCst(a.target, a.value, node.span),
             .compound => |c| try self.analyzeCompound(c.target, c.op, c.value, node.span),
             .return_expr => |r| try self.analyzeReturn(r.value, node.span),
-            .call => |c| try self.analyzeCallCst(c.callee, c.args, &.{}, false, node.span),
-            .bare_call => |b| try self.analyzeCallCst(b.callee, &[_]*const cst.CstNode{b.arg}, &.{}, false, node.span),
+            .call => |c| try self.analyzeCallCst(c.callee, c.args, &.{}, false),
+            .bare_call => |b| try self.analyzeCallCst(b.callee, &[_]*const cst.CstNode{b.arg}, &.{}, false),
             .generic_call => |g| blk: {
                 const targs = try cst.tokenTexts(self.alloc, g.type_args);
                 defer self.alloc.free(targs);
-                break :blk try self.analyzeCallCst(g.receiver, g.args, targs, false, node.span);
+                break :blk try self.analyzeCallCst(g.receiver, g.args, targs, false);
             },
             .method_call => |m| try self.analyzeMethodCall(m),
             .if_expr => |c| try self.analyzeBranch(c.cond, c.then, c.else_),
@@ -1231,17 +1384,6 @@ const SemanticChecker = struct {
                 self.popScope();
                 break :blk types_mod.inferExprType(self.check(), node);
             },
-            .import => |im| blk: {
-                // the dep interface becomes the binding's record type, so
-                // member access, calls, and completions flow through the
-                // regular table paths; unresolvable deps stay untyped
-                // block-like: the value is the last item's type
-                var last: types_mod.TypeInfo = .{ .tag = .any };
-                for (im.items) |item| {
-                    last = try self.analyzeImportItem(item);
-                }
-                break :blk last;
-            },
             .number, .string, .atom, .err, .interpolated, .test_block, .test_suite => blk: {
                 if (node.kind == .interpolated) {
                     for (node.kind.interpolated.parts) |part| {
@@ -1550,6 +1692,10 @@ const SemanticChecker = struct {
         }
 
         const value_type = try self.analyzeNode(binding.value);
+
+        if (self.is_root and binding.value.kind == .import) if (self.graph.out) |out| {
+            if (out.sites.get(binding.value)) |path| try out.addBinding(name, path);
+        };
         if (binding.type) |type_expr| {
             try self.typed_names.put(name, {});
             const expected = try self.evalCheckedTypeExpr(type_expr);
@@ -1815,6 +1961,19 @@ const SemanticChecker = struct {
             }
         }
 
+        // a module's pub record is frozen
+        const object = switch (target.kind) {
+            .field => |f| f.object,
+            .index => |i| i.object,
+            else => null,
+        };
+
+        if (object) |obj| {
+            const t = types_mod.inferExprType(self.check(), obj);
+            if (t.tag == .table and t.tag.table.read_only)
+                try self.appendError("pub records are read-only", target.span, "a module's field");
+        }
+
         const value_type = try self.analyzeNode(value);
         try self.trackAssignTarget(target, value_type, value.span);
         try self.annotatePatternTargets(target, value_type);
@@ -1823,8 +1982,7 @@ const SemanticChecker = struct {
     }
 
     /// annotate pat identifiers with the element type they store
-    /// ; the compiler lowers `{a, b} = v` by reading each targets
-    ///   annotation to refresh its local type hint
+    /// ; the compiler reads each target's annotation to refresh its local type hint
     fn annotatePatternTargets(self: *SemanticChecker, pattern: *const cst.CstNode, context: types_mod.TypeInfo) !void {
         const entries = cst.patternBareEntries(pattern) orelse return;
         for (entries, 0..) |entry, i| {
@@ -2037,6 +2195,7 @@ const SemanticChecker = struct {
     fn analyzeReturn(self: *SemanticChecker, val: ?*const cst.CstNode, span: Lexer.Span) !types_mod.TypeInfo {
         const expr = val orelse return .{ .tag = .any };
         const actual = try self.analyzeNode(expr);
+        if (self.fn_nesting == 0 and self.top_return == null) self.top_return = actual;
         const expected = if (self.return_types.items.len != 0) self.return_types.items[self.return_types.items.len - 1] else types_mod.TypeInfo{ .tag = .any };
         if (expected.tag != .any and !types_mod.canCoerce(actual, expected)) {
             try self.appendReturnMismatch(span, expected, actual);
@@ -2050,8 +2209,7 @@ const SemanticChecker = struct {
     }
 
     /// `any` and implicit `type_var` params are both optimistic
-    /// : skip strict operand errors
-    ///   , same as untyped code we had b4 generics
+    /// ; skip strict operand errors, same as untyped code we had b4 generics
     fn isOptimisticOperand(t: types_mod.TypeInfo) bool {
         return t.tag == .any or t.tag == .type_var;
     }
@@ -2073,7 +2231,7 @@ const SemanticChecker = struct {
             .name_tok = cst.syntheticToken(name, span),
         } });
 
-        return try self.analyzeCallCst(callee, m.args, &.{}, true, span);
+        return try self.analyzeCallCst(callee, m.args, &.{}, true);
     }
 
     fn analyzeCallCst(
@@ -2082,10 +2240,9 @@ const SemanticChecker = struct {
         args: []const *const cst.CstNode,
         type_args: []const []const u8,
         implicit_self: bool,
-        span: Lexer.Span,
     ) !types_mod.TypeInfo {
-        _ = span;
         const callee_u = cst.unwrapParen(callee) orelse return .{ .tag = .any };
+
         // bare ident callees get the same unknown-name check as plain idents -
         // inferExprType would silently fall back to .any
         if (callee_u.kind == .ident) {
@@ -2095,6 +2252,7 @@ const SemanticChecker = struct {
             if (std.mem.endsWith(u8, cname, "!")) {
                 return .{ .tag = .any };
             }
+
             _ = try self.analyzeIdent(cname, callee.span);
         }
         if (callee_u.kind == .field) {

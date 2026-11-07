@@ -3,7 +3,7 @@ provides an undo-tree structure
 
 usage example:
 ```revo
-const ut = import "undotree"
+const ut = import("./undotree")
 
 let hist = ut.start("")
 hist:add("1234")

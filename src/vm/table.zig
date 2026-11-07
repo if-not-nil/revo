@@ -69,6 +69,7 @@ pub const TablePool = struct {
         if (self.dead.pop()) |id| {
             const t = self.tables.items[id].?;
             t.metatable = null;
+            t.frozen = false;
             self.marks.unset(id);
             alloc_pool.relink(&self.first, &self.last, &self.next, id);
             return id;
@@ -168,6 +169,7 @@ fn freeTable(t: *Table, alloc: std.mem.Allocator) void {
     }
     t.hash.deinit(alloc);
     t.metatable = null;
+    t.frozen = false;
 }
 
 pub const Table = struct {
@@ -394,6 +396,8 @@ pub const Table = struct {
     array: SmallArray,
     hash: HashPart,
     metatable: ?memory.TableID = null,
+    /// a pub record: assignment through `put` fails
+    frozen: bool = false,
 
     pub fn init() Table {
         return .{
@@ -502,6 +506,12 @@ pub const Table = struct {
     }
 
     pub fn put(self: *Table, table_id: memory.TableID, vm: *revo.VM, key: Value, val: Value) !void {
+        if (self.frozen) {
+            @branchHint(.unlikely);
+            try vm.setRuntimeMessage("pub records are read-only");
+            return error.TypeError;
+        }
+
         if (self.metatable == null) {
             try self.putRaw(key, val, vm);
         } else {

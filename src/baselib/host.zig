@@ -183,8 +183,8 @@ pub const HostErrPayload = union(enum) {
     type_error: struct { arg: ?usize, expected: []const u8, got: []const u8 },
     host_error: revo.vm.RunError,
     parked: void,
-    module_not_found: void,
-    cyclic_import: void,
+    /// chain, `a.rv -> b.rv -> a.rv`
+    cyclic_import: []const u8,
     import_failed: []const u8,
     assertion_failed: []const u8,
     io_error: []const u8,
@@ -238,12 +238,8 @@ pub const HostResult = union(enum) {
         return .{ .err = .{ .other = "panic" } };
     }
 
-    pub fn errModuleNotFound() HostResult {
-        return .{ .err = .{ .module_not_found = {} } };
-    }
-
-    pub fn errCyclicImport() HostResult {
-        return .{ .err = .{ .cyclic_import = {} } };
+    pub fn errCyclicImport(chain: []const u8) HostResult {
+        return .{ .err = .{ .cyclic_import = chain } };
     }
 
     pub fn errImportFailed(msg: []const u8) HostResult {

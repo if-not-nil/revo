@@ -35,7 +35,7 @@ pub fn runReport(self: *VM) !@TypeOf(self.*).RunResult {
         self.sched.requestShutdown();
     }
 
-    if (self.run_depth == 1 and revo.can_async and self.sched.thread_count > 1) {
+    if (self.run_depth == 1 and self.runtime.caps.threads and self.sched.thread_count > 1) {
         while (true) {
             self.mt_failed.store(false, .release);
             self.mt_failure = null;
@@ -146,7 +146,7 @@ fn workerMain(vm: *VM) void {
         } else if (spins < 100) {
             spins += 1;
             std.atomic.spinLoopHint();
-        } else if (revo.can_async and vm.sched.wakeup_r >= 0) {
+        } else if (vm.runtime.caps.threads and vm.sched.wakeup_r >= 0) {
             // park on the wakeup pipe; timed so a byte stolen by the main
             // , loop's own drain still ends in exit, just 20ms later
             var pfd = [_]std.posix.pollfd{.{
@@ -194,11 +194,11 @@ fn waitForActivity(self: *VM) VM.RunError!bool {
     const has_io_waiters = self.sched.io_waiters.items.len > 0;
     const has_waiting = self.sched.waiting_cnt > 0;
 
-    if (has_io_waiters or (revo.can_async and has_waiting)) {
+    if (has_io_waiters or (self.runtime.caps.threads and has_waiting)) {
         @branchHint(.likely);
         const timeout_ms = pollTimeoutMs(self, has_io_waiters);
 
-        if (comptime !revo.is_freestanding) {
+        if (comptime self.runtime.caps.io) {
             _ = revo.baselib_net.pollIoWaiters(self, timeout_ms) catch
                 return error.Panic;
         }
@@ -213,7 +213,7 @@ fn waitForActivity(self: *VM) VM.RunError!bool {
         if (self.sched.nextSleepDelayNs(now_ns)) |diff_ns| {
             if (diff_ns > 0) {
                 const depth = gilDropForBlocking(self);
-                if (revo.can_async and self.sched.wakeup_r >= 0) {
+                if (self.runtime.caps.threads and self.sched.wakeup_r >= 0) {
                     // poll the wakeup pipe instead of sleeping blind
                     // ; a newly parked shorter sleeper wakes us early
                     var pfd = [_]std.posix.pollfd{.{

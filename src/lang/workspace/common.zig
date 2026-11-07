@@ -18,6 +18,15 @@ const Workspace = W.Workspace;
 const Symbol = W.Symbol;
 const FnSig = W.FnSig;
 
+pub fn freeImports(alloc: std.mem.Allocator, imports: *std.StringHashMapUnmanaged([]const u8)) void {
+    var it = imports.iterator();
+    while (it.next()) |e| {
+        alloc.free(e.key_ptr.*);
+        alloc.free(e.value_ptr.*);
+    }
+    imports.deinit(alloc);
+}
+
 pub fn sameOpts(a: pipeline.BuildOptions, b: pipeline.BuildOptions) bool {
     return std.meta.eql(a, b);
 }

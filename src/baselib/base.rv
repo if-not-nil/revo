@@ -98,8 +98,8 @@ pub declare exit = fn(status: number) -> never
 #* runs a subprocess and returns (stdout, stderr) *#
 pub declare system = fn(args: table<string>) -> !{string, string}
 
-#* imports a revo module by path *#
-pub declare import = fn(path: string) -> any
+#* internal, do not use. the runtime half of `import`, takes a realpath *#
+pub declare __internal_import = fn(path: string) -> any
 
 #* internal, do not use unless you know what you're doing. runs a test *#
 pub declare __internal_dotest = fn(name: string, body: function) -> :ok
@@ -278,6 +278,8 @@ pub declare table = {
   rawset: fn(self: table, key: any, value: any) -> table,
   #* sets the metatable of the table, `:undef` clears it *#
   set_meta: fn(self: table, meta: :undef|table) -> table,
+  #* makes the table read-only. you probably won't need it, it's mostly for pub records *#
+  freeze: fn<T>(self: T) -> T,
   #* returns metatable of value or :undef *#
   get_meta: fn(self: table) -> table | :undef,
   #* unwraps result, panics if not :ok *#
@@ -887,12 +889,24 @@ pub declare revo = {
   *#
   eval: fn(code: string) -> !any/revo.EvalError,
   #*
-  reads the file and evaluates it as a module, gives you back its return value
-  like eval but the source comes from a file, relative paths resolve
-  against the current module's directory like import, then cwd
-  failures (including missing files) come back as {:err, revo.EvalError}
+  dynamic `import`!
+  loads the module at `path` and gives you back its value
+  the path is data, so it resolves from the cwd
+
+  `name:x` collections work
+  shares the module table with `import`, `{fresh = true}` reruns it
   *#
-  dofile: fn(path: string) -> !any/revo.EvalError,
+  load: fn(path: string, opts: table?) -> !any/revo.EvalError,
+  #*
+  opens a dll and gives you back its functions in a table
+  `./x` and `../x` resolve from the calling file, anything else goes to the os
+
+  you're meant to type it with a binding
+  ```revo
+  const lib: {add: fn(number, number) -> number} = revo.dload("./lib.so")
+  ```
+  *#
+  dload: fn(path: string) -> table,
   #*
   builds it as a module, gives you back its bytecode in a string
   the string is only useful for writing to a file or executing

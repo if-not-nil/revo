@@ -1,0 +1,2 @@
+# revo std collection root!!!
+# `import("std:x")` loads `x.rv` from this dir

@@ -13,7 +13,7 @@ or just
 ```
 !#
 
-const rl = import "raylib.rv"
+const rl = import("./raylib.rv")
 
 let WINDOW_HEIGHT = 300
 let WINDOW_WIDTH = 400

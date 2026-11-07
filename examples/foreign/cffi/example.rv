@@ -2,11 +2,11 @@
 also see ./readme.md, ./inline.rv
 
 perfectly wrappable in a module, see:
-const rl = import "./raylib"
+const rl = import("./raylib")
 !#
 
 # this could all be a let rl = do...end block, if you want some scoping
-const cffi = import "./cffi.rv"
+const cffi = import("./cffi.rv")
 let lib = cffi.load("./libraylib.so")
 print(lib)
 

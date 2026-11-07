@@ -16,6 +16,7 @@ pub const buildParsedWithWarnings = pipeline.buildParsedWithWarnings;
 
 pub const compiler = @import("compiler/root.zig");
 
+pub const import_graph = @import("import_graph.zig");
 pub const CompileErrorKind = compiler.CompileErrorKind;
 pub const CompileFailure = compiler.CompileFailure;
 pub const CompileResult = pipeline.CompileResult;
@@ -45,7 +46,6 @@ pub const Error = pipeline.Error;
 pub const ParseOptions = pipeline.ParseOptions;
 pub const CompileOptions = pipeline.CompileOptions;
 pub const BuildOptions = pipeline.BuildOptions;
-pub const ProjectMode = pipeline.ProjectMode;
 pub const ParseResult = pipeline.ParseResult;
 pub const BuildResult = pipeline.BuildResult;
 pub const ParseFailure = pipeline.ParseFailure;
@@ -78,7 +78,6 @@ pub const Token = Lexer.Token;
 pub const TokenType = Lexer.TokenType;
 pub const LexError = Lexer.LexError;
 pub const LexOutput = Lexer.LexOutput;
-pub const Project = @import("Project.zig").Project;
 pub const TokenClass = Lexer.TokenClass;
 pub const identIsFunction = Lexer.identIsFunction;
 
@@ -94,9 +93,7 @@ test {
     _ = @import("semantic.zig");
     _ = @import("pipeline.zig");
     _ = @import("std").testing.refAllDecls(@import("Workspace.zig"));
-    _ = @import("Project.zig");
     _ = @import("hir.zig");
-    _ = @import("import_types.zig");
     _ = @import("resmap.zig");
     _ = @import("compiler/root.zig");
     _ = @import("compiler/types.zig");

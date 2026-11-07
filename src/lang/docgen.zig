@@ -4,7 +4,6 @@ const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
 const revo = @import("revo");
 const std = @import("std");
-const Project = @import("Project.zig").Project;
 const specs_mod = revo.baselib.specs;
 const Writer = std.Io.Writer;
 const term = revo.term;
@@ -595,6 +594,8 @@ pub const Cli = struct {
         path: ?[]const u8,
         html: bool,
         force_splice: bool,
+        /// resolves a file's imports, so its deps get documented too
+        vm: *revo.VM,
     ) !void {
         const stdin_tty = try revo.stdin().isTty(init.io);
         const splice = force_splice and !stdin_tty;
@@ -610,13 +611,10 @@ pub const Cli = struct {
                 try collectAll(init, gpa, arena, p, &owned, &flat);
             } else {
                 module_doc = try addDocsFromPath(init, gpa, arena, p, &owned, &flat);
+                try addDocsFromImports(init, gpa, arena, vm, p, &owned, &flat);
             }
         } else if (splice or stdin_tty) {
-            var project = Project.detectFromCwd(init.io, gpa);
-            defer project.deinit(gpa);
-            const root_dir: []const u8 = if (project.root.len > 0) project.root else ".";
-            const t = try arena.dupe(u8, root_dir);
-            try collectAll(init, gpa, arena, t, &owned, &flat);
+            try collectAll(init, gpa, arena, ".", &owned, &flat);
         } else {
             module_doc = try addDocsFromPath(init, gpa, arena, "/dev/stdin", &owned, &flat);
         }
@@ -662,6 +660,30 @@ pub const Cli = struct {
                     for (file_specs) |*spec| spec.module_doc = mod_doc;
                 }
             }
+        }
+    }
+
+    /// every module the checker's graph says `path` reaches, deps first
+    fn addDocsFromImports(
+        init: std.process.Init,
+        gpa: std.mem.Allocator,
+        arena: std.mem.Allocator,
+        vm: *revo.VM,
+        path: []const u8,
+        owned: *std.ArrayList([]FnSpec),
+        flat: *std.ArrayList(*const FnSpec),
+    ) !void {
+        const source = try std.Io.Dir.cwd().readFileAlloc(init.io, path, arena, std.Io.Limit.unlimited);
+        var graph = revo.lang.import_graph.Graph.init(gpa);
+        defer graph.deinit();
+        try revo.lang.pipeline.importGraph(vm, .{ .name = path, .text = source }, &graph);
+
+        for (graph.files.keys(), graph.files.values()) |dep, text| {
+            _ = addDocsFromSource(gpa, arena, try arena.dupe(u8, text), owned, flat) catch |err| {
+                if (specs_mod.skippableForDocs(err)) continue;
+                printError(init, "cannot document {s}: {s}", .{ dep, @errorName(err) });
+                return error.CompilationError;
+            };
         }
     }
 

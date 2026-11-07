@@ -19,6 +19,6 @@ const extension: {
   total_add: fn(handle: resource, amount: number) -> number,
   #* frees the counter handle *#
   total_free: fn(handle: any),
-} = import "./extension.so"
+} = revo.dload("./extension.so")
 
 extension

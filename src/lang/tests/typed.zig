@@ -15,12 +15,12 @@ test "import typed function reports arg type mismatch" {
     defer m.deinit();
     // correct types work
     try t.topNumberInDir(m.dir,
-        \\ import "./adder"
+        \\ const adder = import("./adder")
         \\ adder.add(1, 2)
     , 3);
     // wrong type should fail at compile time
     try t.expectCompileErrorInDir(m.dir,
-        \\ import "./adder"
+        \\ const adder = import("./adder")
         \\ adder.add("hi", 2)
     );
 }
@@ -33,7 +33,7 @@ test "import typed function with string param passes type check" {
     });
     defer m.deinit();
     try t.topStringInDir(m.dir,
-        \\ import "./echo"
+        \\ const echo = import("./echo")
         \\ echo.echo("ok")
     , "ok");
 }
@@ -46,7 +46,7 @@ test "import typed function with no type annotations falls through" {
     });
     defer m.deinit();
     try t.topNumberInDir(m.dir,
-        \\ import "./plain"
+        \\ const plain = import("./plain")
         \\ plain.double(21)
     , 42);
 }

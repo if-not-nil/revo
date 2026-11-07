@@ -13,7 +13,7 @@ or just
 ```
 !#
 
-const rl = import './raylib.rv'
+const rl = import("./raylib.rv")
 
 rl.init_window(800, 450, "revo + raylib")
 rl.set_target_fps(60)

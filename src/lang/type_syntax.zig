@@ -133,7 +133,7 @@ fn StreamParser(comptime S: type) type {
         fn parseAtom(self: *@This()) !*cst.CstType {
             const tok = self.peek();
             switch (tok.type) {
-                .ident, .kw_type, .kw_import => {
+                .ident, .kw_type => {
                     const start = self.advance();
                     const text = start.text;
                     if (std.mem.endsWith(u8, text, "?")) {

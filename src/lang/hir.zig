@@ -30,6 +30,15 @@ const Lower = struct {
                 return walk(.{}, allocator, desugared, .{});
             },
             .fn_method => return walk(.{}, allocator, try cst.desugarMethod(allocator, node), .{}),
+            // `use` is a statement, so only block stmts desugar
+            // ; the walk built fresh stmt slices, so rewriting them is safe
+            .root, .block, .do_block => {
+                const out = try cst.walkCstExpr(allocator, node, Lower, .{});
+                for (cst.blockStmtsMut(out).?) |*stmt| {
+                    stmt.* = try cst.desugarUse(allocator, stmt.*) orelse continue;
+                }
+                return out;
+            },
             else => return cst.walkCstExpr(allocator, node, Lower, .{}),
         }
     }
@@ -103,4 +112,26 @@ test "lower is idempotent and preserves tokens" {
         if (t.type == Lexer.TokenType.doc_comment) found_doc = true;
     }
     try std.testing.expect(found_doc);
+}
+
+test "lower desugars a `use` stmt into a const import binding" {
+    const Parser = @import("Parser.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const root = try Parser.parseSource(alloc, "use(\"std:net/http\")\nuse(\"./x\").y", .{});
+    const out = try lower(alloc, root);
+    const stmts = out.kind.root.stmts;
+
+    const b = stmts[0].kind.decl.inner.kind.binding;
+    try std.testing.expectEqualStrings("http", b.target.kind.ident.tok.text);
+    try std.testing.expect(b.kind == .@"const");
+    try std.testing.expectEqualStrings("std:net/http", b.value.kind.import.path.text);
+
+    // inside an expression it stays a `use`, for the checker to reject
+    try std.testing.expect(stmts[1].kind == .field);
+
+    // the source tree is untouched
+    try std.testing.expect(root.kind.root.stmts[0].kind == .use);
 }

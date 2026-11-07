@@ -25,7 +25,7 @@ if you don't want to do so, just change the cmd field to wherever it is
 vim.lsp.config('revolt', {
   cmd = { 'revo', 'lsp' },
   filetypes = { 'rv' },
-  root_markers = { 'lib.json', 'exe.json', '.git' },
+  root_markers = { '.git' },
 })
 
 vim.lsp.enable('revolt')

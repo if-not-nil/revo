@@ -36,7 +36,7 @@ pub const Impl = struct {
     }
 
     pub fn inspect(vm: *VM, val: host.ArgTypes.any) !host.HostResult {
-        if (comptime !revo.is_freestanding)
+        if (comptime revo.default_caps.io)
             _ = try print(&[_]Value{val}, vm);
         return .data(val);
     }
@@ -84,16 +84,27 @@ pub const root_impls: []const specs.Impl = host.impls(Impl).val ++ &[_]specs.Imp
     .{ .name = "print", .f = host.defineVariadic(&[_]host.ParamType{}, print) },
 };
 
+/// `define` when `on`
+/// else a stub of the same arity
+fn gated(comptime on: bool, comptime types: []const host.ParamType, impl: host.HostFn) host.HostFunc {
+    return if (on) host.define(types, impl) else host.defineStub(types);
+}
+
+/// `gated` for variadic impls
+fn gatedVariadic(comptime on: bool, comptime types: []const host.ParamType, impl: host.HostFn) host.HostFunc {
+    return if (on) host.defineVariadic(types, impl) else host.defineStubVariadic(types);
+}
+
 pub const os_impls: []const specs.Impl = &.{
-    .{ .name = "input", .f = if (revo.is_freestanding) host.defineStubVariadic(&[_]host.ParamType{}) else host.defineVariadic(&[_]host.ParamType{}, input) },
-    .{ .name = "cwd", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{}) else host.define(&[_]host.ParamType{}, cwd) },
-    .{ .name = "exit", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{.number}) else host.define(&[_]host.ParamType{.number}, exit) },
-    .{ .name = "system", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{.table}) else host.define(&[_]host.ParamType{.table}, system_) },
-    .{ .name = "import", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{.string}) else host.define(&[_]host.ParamType{.string}, import) },
-    .{ .name = "__internal_dotest", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{ .string, .function }) else host.define(&[_]host.ParamType{ .string, .function }, dotest) },
-    .{ .name = "__internal_dosuite", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{ .string, .function }) else host.define(&[_]host.ParamType{ .string, .function }, dosuite) },
-    .{ .name = "getenv", .f = if (revo.is_freestanding) host.defineStub(&[_]host.ParamType{.string}) else host.define(&[_]host.ParamType{.string}, getenv_) },
-    .{ .name = "setenv", .f = if (revo.is_freestanding or builtin.os.tag == .windows) host.defineStub(&[_]host.ParamType{ .string, .string }) else host.define(&[_]host.ParamType{ .string, .string }, setenv_) },
+    .{ .name = "input", .f = gatedVariadic(revo.default_caps.io, &[_]host.ParamType{}, input) },
+    .{ .name = "cwd", .f = gated(revo.default_caps.io, &[_]host.ParamType{}, cwd) },
+    .{ .name = "exit", .f = gated(revo.default_caps.io, &[_]host.ParamType{.number}, exit) },
+    .{ .name = "system", .f = gated(revo.default_caps.io, &[_]host.ParamType{.table}, system_) },
+    .{ .name = "__internal_import", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, internal_import) },
+    .{ .name = "__internal_dotest", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dotest) },
+    .{ .name = "__internal_dosuite", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dosuite) },
+    .{ .name = "getenv", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, getenv_) },
+    .{ .name = "setenv", .f = gated(revo.default_caps.setenv, &[_]host.ParamType{ .string, .string }, setenv_) },
 };
 
 pub fn register_baselib(vm: *revo.VM) !void {
@@ -754,97 +765,74 @@ pub fn setenv_(args: []const Value, vm: *VM) !host.HostResult {
 extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
 const libc_setenv = setenv;
 
-/// resolve + cache + run; `.so` loads native
-pub fn import(args: []const Value, vm: *VM) !host.HostResult {
-    if (args.len != 1) return .errArity(args.len, 1);
+/// the runtime half of `import`, takes a realpath
+pub fn internal_import(args: []const Value, vm: *VM) !host.HostResult {
+    const path = args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm));
+    return awaitModule(vm, vm.stringValue(path), try revo.run.startModule(vm, vm.stringValue(path), .{}));
+}
 
-    const raw_path = args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm));
-    const raw_path_s = vm.stringValue(raw_path);
-
-    const resolved_path = try revo.resolveImportFile(
-        vm.runtime.io,
-        vm.runtime.alloc,
-        raw_path_s,
-        vm.import_dir,
-        vm.project_root,
-        vm.package_path.items,
-    ) orelse return .errModuleNotFound();
-
-    defer vm.runtime.alloc.free(resolved_path);
-    if (std.mem.endsWith(u8, resolved_path, ".so") or std.mem.endsWith(u8, resolved_path, ".dylib")) {
-        const can_dlopen = switch (builtin.target.os.tag) {
-            .wasi, .freestanding, .windows => false,
-            else => true,
-        };
-        if (!can_dlopen) {
-            return .errImportFailed("dynamic library loading not supported on this platform");
-        }
-        // `revo.extension` path first
-        // get full arity/type checking
-        if (revo.ffi.loadHost(vm, resolved_path)) |native_mods| {
-            defer vm.runtime.alloc.free(native_mods);
-            const t_id = try vm.tables.create();
-            for (native_mods) |host_fn| {
-                const fn_id = try vm.callable.create(.{ .host = host_fn });
-                try vm.putField(t_id, host_fn.name, Value.new.function(fn_id));
-            }
-            return .data(Value.new.table(t_id));
-        } else |err| switch (err) {
-            error.NoBindings => {},
-            else => return .errImportFailed(@errorName(err)),
-        }
-
-        const mods = revo.ffi.loadC(vm, resolved_path) catch |err| switch (err) {
-            error.NoBindings => {
-                return .errImportFailed("extension has no revo_native_bindings_ex or revo_bindings export");
-            },
-            else => return .errImportFailed(@errorName(err)),
-        };
-        defer vm.runtime.alloc.free(mods);
-        const t_id = try vm.tables.create();
-
-        for (mods) |c_fn| {
-            const fn_id = try vm.callable.create(.{ .c_function = c_fn });
-            try vm.putField(t_id, c_fn.name, Value.new.function(fn_id));
-        }
-        return .data(Value.new.table(t_id));
-    }
-
-    const current_stamp = try vm.importStamp(resolved_path);
-    if (vm.import_cache.get(resolved_path)) |cached| {
-        if (std.meta.eql(cached.stamp, current_stamp)) {
-            return .data(cached.result);
-        }
-        _ = vm.invalidateImportCache(resolved_path);
-    }
-    for (vm.loading_stack.items) |loading| {
-        if (std.mem.eql(u8, loading, resolved_path)) return .errCyclicImport();
-    }
-
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        vm.runtime.io,
-        resolved_path,
-        vm.runtime.alloc,
-        std.Io.Limit.unlimited,
-    );
-    defer vm.runtime.alloc.free(source);
-
-    const cache_key = try vm.runtime.alloc.dupe(u8, resolved_path);
-    errdefer vm.runtime.alloc.free(cache_key);
-
-    try vm.loading_stack.append(vm.runtime.alloc, cache_key);
-    const result = vm.runImportedModule(resolved_path, source) catch |err| {
-        _ = vm.loading_stack.pop();
-        if (err != error.OutOfMemory) vm.runtime.alloc.free(cache_key);
-        return switch (err) {
-            error.OutOfMemory => error.OutOfMemory,
-            else => host.HostResult.errImportFailed(@errorName(err)),
-        };
+/// the module's value, parking on its loading fiber when it's still running
+pub fn awaitModule(vm: *VM, path: []const u8, start: revo.run.ModuleStart) !host.HostResult {
+    const fid = switch (start) {
+        .loaded => |v| return .data(v),
+        .failed => |f| return .errImportFailed(f.reason),
+        .loading => |fid| fid,
     };
-    _ = vm.loading_stack.pop();
 
-    try vm.import_cache.put(cache_key, .{ .result = result, .stamp = current_stamp });
-    return .data(result);
+    if (try importCycle(vm, fid)) |chain| return .errCyclicImport(chain);
+
+    if (vm.host_call_depth > 0) {
+        if (try revo.vm.dispatch.pumpUntilDone(vm, fid)) |failure| {
+            if (revo.lang.diagnostic.primarySpan(failure.report)) |span| vm.panic_span = span.span;
+            return host.HostResult.errAssertionFailed(failure.report.message);
+        }
+
+        return switch (vm.modules.get(path).?) {
+            .loaded => |v| .data(v),
+            .loading => .errImportFailed("module did not finish loading"),
+        };
+    }
+
+    try vm.sched.fibers.items[fid].waiters.append(vm.runtime.alloc, vm.sched.currentID());
+    vm.sched.parkCurrent(.{ .join = fid });
+    return .parked();
+}
+
+/// `a.rv -> b.rv -> a.rv` when joining fid would wait on itself
+/// ; follows the join chain from the loading fiber
+pub fn importCycle(vm: *VM, fid: VM.FiberID) !?[]const u8 {
+    const me = vm.sched.currentID();
+    var cur = fid;
+    var steps: usize = 0;
+    while (cur != me) : (steps += 1) {
+        if (steps > vm.sched.fibers.items.len) return null;
+        cur = switch (vm.sched.fibers.items[cur].wait) {
+            .join => |next| next,
+            else => return null,
+        };
+    }
+
+    var out: std.Io.Writer.Allocating = .init(vm.runtime.diagAlloc());
+    const w = &out.writer;
+
+    if (fid == me) {
+        const p = vm.module_fibers.get(me) orelse "?";
+        try w.print("import cycle: `{s}` imports itself while its still loading", .{std.Io.Dir.path.basename(p)});
+        return out.written();
+    }
+
+    try w.writeAll("import cycle: ");
+    if (vm.module_fibers.get(me)) |p| try w.print("{s} -> ", .{std.Io.Dir.path.basename(p)});
+    cur = fid;
+    while (true) {
+        const p = vm.module_fibers.get(cur) orelse "?";
+        try w.writeAll(std.Io.Dir.path.basename(p));
+        if (cur == me) break;
+        try w.writeAll(" -> ");
+        cur = vm.sched.fibers.items[cur].wait.join;
+    }
+
+    return out.written();
 }
 
 fn append_data(writer: *std.Io.Writer, val: Value, vm: *VM, mode: Value.PrintMode, color: bool) !void {

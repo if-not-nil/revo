@@ -281,7 +281,10 @@ pub const TmpMod = struct {
     pub fn init(files: []const struct { path: []const u8, data: []const u8 }) !TmpMod {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
-        for (files) |f| try tmp.dir.writeFile(io, .{ .sub_path = f.path, .data = f.data });
+        for (files) |f| {
+            if (std.Io.Dir.path.dirname(f.path)) |d| try tmp.dir.createDirPath(io, d);
+            try tmp.dir.writeFile(io, .{ .sub_path = f.path, .data = f.data });
+        }
         const dir = try tmp.dir.realPathFileAlloc(io, ".", alloc);
         return .{ .tmp = tmp, .dir = dir };
     }
@@ -406,6 +409,19 @@ pub fn expectSemanticError(source: []const u8) !void {
     switch (err) {
         .semantic => {},
         else => return error.ExpectedSemanticFailure,
+    }
+}
+
+pub fn expectParseError(source: []const u8) !void {
+    var vm = try revo.VM.init(runtime());
+    defer vm.deinit();
+
+    const err = try buildExpectingFailure(source, &vm);
+    defer pipeline.deinitError(err);
+    defer vm.runtime.resetDiagArena();
+    switch (err) {
+        .parse => {},
+        else => return error.ExpectedParseFailure,
     }
 }
 

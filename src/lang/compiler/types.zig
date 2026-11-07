@@ -48,6 +48,10 @@ pub const TypeInfo = struct {
             value: *const TypeInfo,
             // per-field types for `{ name: string }`; null = untyped map
             fields: ?[]const RecordField = null,
+            /// a module's pub type aliases, `m.T`. never compared
+            aliases: ?*const std.StringHashMap(TypeInfo) = null,
+            /// a frozen pub record, assigning into it is an error
+            read_only: bool = false,
         },
         function: *const FunctionSignature,
         any,
@@ -313,6 +317,7 @@ pub const CheckCtx = struct {
         inferCallReturnType: *const fn (ptr: *anyopaque, callee: *const cst.CstNode, args: []const *const cst.CstNode, type_args: []const []const u8, implicit_self: bool) TypeInfo,
         inferFieldType: *const fn (ptr: *anyopaque, object: *const cst.CstNode, name: []const u8) TypeInfo,
         inferFnType: *const fn (ptr: *anyopaque, params: []const cst.CstParam, return_type: ?*const cst.CstType, type_params: []const []const u8, doc: ?[]const u8) TypeInfo,
+        inferImportType: *const fn (ptr: *anyopaque, node: *const cst.CstNode) TypeInfo,
     };
 
     /// wrap any scope implementing the four vtable methods
@@ -335,11 +340,18 @@ pub const CheckCtx = struct {
                 const s: S = @ptrCast(@alignCast(p));
                 return s.inferFnType(params, return_type, type_params, doc);
             }
+            // only the checker types imports, the rest read its annotations
+            fn vtInferImportType(p: *anyopaque, node: *const cst.CstNode) TypeInfo {
+                const s: S = @ptrCast(@alignCast(p));
+                if (comptime !@hasDecl(@typeInfo(S).pointer.child, "inferImportType")) return .{ .tag = .any };
+                return s.inferImportType(node);
+            }
             const vtable: VTable = .{
                 .inferIdentType = vtInferIdentType,
                 .inferCallReturnType = vtInferCallReturnType,
                 .inferFieldType = vtInferFieldType,
                 .inferFnType = vtInferFnType,
+                .inferImportType = vtInferImportType,
             };
         };
         return .{
@@ -364,6 +376,10 @@ pub const CheckCtx = struct {
 
     pub fn inferFnType(self: CheckCtx, params: []const cst.CstParam, return_type: ?*const cst.CstType, type_params: []const []const u8, doc: ?[]const u8) TypeInfo {
         return self.vtable.inferFnType(self.ptr, params, return_type, type_params, doc);
+    }
+
+    pub fn inferImportType(self: CheckCtx, node: *const cst.CstNode) TypeInfo {
+        return self.vtable.inferImportType(self.ptr, node);
     }
 };
 
@@ -507,6 +523,8 @@ pub const TypeId = u32;
 pub const Annotations = struct {
     map: *std.AutoHashMap(*const cst.CstNode, TypeId),
     table: *TypeTable,
+    /// where each `.import` resolved, filled by the checker
+    imports: ?*const @import("../import_graph.zig").Graph = null,
 };
 
 pub const Alias = struct {
@@ -521,6 +539,13 @@ pub const AliasScope = struct {
     type_params: []const []const u8 = &.{},
     aliases: ?*const std.StringHashMap(Alias) = null,
     imports: ?*const std.StringHashMap(std.StringHashMap(TypeInfo)) = null,
+    /// a bound name's module aliases, through its type
+    modules: ?ModuleLookup = null,
+
+    pub const ModuleLookup = struct {
+        ptr: *anyopaque,
+        lookupFn: *const fn (ptr: *anyopaque, name: []const u8) ?*const std.StringHashMap(TypeInfo),
+    };
 
     pub fn isTypeParam(self: AliasScope, name: []const u8) bool {
         for (self.type_params) |tp| if (std.mem.eql(u8, tp, name)) return true;
@@ -534,8 +559,10 @@ pub const AliasScope = struct {
     }
 
     pub fn resolveImportAlias(self: AliasScope, module: []const u8, name: []const u8) ?TypeInfo {
-        const imports = self.imports orelse return null;
-        const aliases = imports.get(module) orelse return null;
+        if (self.imports) |imports| if (imports.get(module)) |aliases| return aliases.get(name);
+
+        const m = self.modules orelse return null;
+        const aliases = m.lookupFn(m.ptr, module) orelse return null;
         return aliases.get(name);
     }
 };
@@ -1028,7 +1055,8 @@ pub fn inferExprType(ctx: CheckCtx, node: *const cst.CstNode) TypeInfo {
         .fn_method => .{ .tag = .any },
         .binding => |b| inferExprType(ctx, b.value),
         .decl => |d| inferExprType(ctx, d.inner),
-        .import => .{ .tag = .any },
+        .import => ctx.inferImportType(node),
+        .use => |u| inferExprType(ctx, u.import),
         .test_block, .test_suite => .{ .tag = .any },
         .type_alias => .{ .tag = .any },
         .for_loop => |v| if (v.label_tok == null) .{ .tag = .{ .atom = "loop" } } else .{ .tag = .any },

@@ -1,13 +1,51 @@
 pub const is_freestanding = @import("build_options").is_freestanding;
 
-// threads + nbio is only available on posix with libc
-// wasi is single-threaded, and windows has no backend yet
-pub const can_async = switch (builtin.target.os.tag) {
-    .windows, .wasi, .freestanding => false,
-    else => builtin.link_libc,
+/// what a target can do, and some of it depends on the os
+pub const Caps = struct {
+    /// a real os underneath?
+    /// files, dlls, the std dir
+    host_os: bool,
+    /// baselib io?
+    /// net, fs, http, tty, stdio
+    io: bool,
+    /// threads + nbio?
+    /// posix with libc, wasi is single-threaded, windows has no backend yet
+    threads: bool,
+    /// libs are `revo.dload`-able
+    dlopen: bool,
+    /// loaded libs get closed at teardown, and windows skips it
+    dlclose: bool,
+    /// libc `setenv` is an extern, windows has none here
+    setenv: bool,
+    /// posix socket calls: send, recv, accept
+    sockets: bool,
+
+    /// `true` doesn't mean it's been tested or will work
+    pub fn forTarget() Caps {
+        const os = builtin.target.os.tag;
+        const host_os = !is_freestanding and os != .wasi;
+
+        return .{
+            .host_os = host_os,
+            .io = !is_freestanding,
+            .threads = switch (os) {
+                .windows, .wasi, .freestanding => false,
+                else => builtin.link_libc,
+            },
+            .dlopen = host_os,
+            .dlclose = host_os and os != .windows,
+            .setenv = host_os and os != .windows,
+            .sockets = host_os and os != .windows,
+        };
+    }
 };
 
+/// for when no runtime is in scope
+pub const default_caps: Caps = .forTarget();
+
 pub const Runtime = struct {
+    /// TODO: make it not fixed per type
+    comptime caps: Caps = default_caps,
     alloc: std.mem.Allocator,
     io: std.Io,
     argv: []const [:0]const u8 = &.{},
@@ -176,104 +214,7 @@ pub fn resolve(raw_path: []const u8, base_dir: ?[]const u8, io: std.Io, alloc: s
     return std.Io.Dir.path.resolveAlloc(alloc, &.{ root_dir, raw_path }) catch return error.OutOfMemory;
 }
 
-/// resolve an import path the same way compile-time preload and the runtime
-/// `import` native agree on the canonical file; null when nothing matches
-pub fn resolveImportFile(
-    io: std.Io,
-    alloc: std.mem.Allocator,
-    raw_path: []const u8,
-    import_dir: ?[]const u8,
-    project_root: []const u8,
-    package_path: []const []const u8,
-) !?[]const u8 {
-    // relative paths (./ or ../): only the importing module's directory
-    if (raw_path.len > 0 and raw_path[0] == '.') {
-        if (import_dir) |dir| {
-            if (try probeImportFile(io, alloc, dir, raw_path)) |p| return p;
-            const with_ext = try alloc.print("{s}.rv", .{raw_path});
-            defer alloc.free(with_ext);
-            if (try probeImportFile(io, alloc, dir, with_ext)) |p| return p;
-            const init = try alloc.print("{s}/init.rv", .{raw_path});
-            defer alloc.free(init);
-            if (try probeImportFile(io, alloc, dir, init)) |p| return p;
-        }
-        return null;
-    }
-
-    // absolute paths
-    if (std.Io.Dir.path.isAbsolute(raw_path)) {
-        return probeImportFile(io, alloc, null, raw_path);
-    }
-
-    // bare module names resolve adjacent to the importing module, then the
-    // project root, then package paths
-    if (import_dir) |dir| {
-        if (try probeImportFile(io, alloc, dir, raw_path)) |p| return p;
-        const with_ext = try alloc.print("{s}.rv", .{raw_path});
-        defer alloc.free(with_ext);
-        if (try probeImportFile(io, alloc, dir, with_ext)) |p| return p;
-        const init = try alloc.print("{s}/init.rv", .{raw_path});
-        defer alloc.free(init);
-        if (try probeImportFile(io, alloc, dir, init)) |p| return p;
-    }
-
-    if (project_root.len > 0) {
-        if (try probeImportFile(io, alloc, project_root, raw_path)) |p| return p;
-        const pr_ext = try alloc.print("{s}.rv", .{raw_path});
-        defer alloc.free(pr_ext);
-        if (try probeImportFile(io, alloc, project_root, pr_ext)) |p| return p;
-        const pr_init = try alloc.print("{s}/init.rv", .{raw_path});
-        defer alloc.free(pr_init);
-        if (try probeImportFile(io, alloc, project_root, pr_init)) |p| return p;
-    }
-
-    for (package_path) |tmpl| {
-        const sub = if (std.mem.findScalar(u8, tmpl, '?')) |pos|
-            try alloc.print("{s}{s}{s}", .{ tmpl[0..pos], raw_path, tmpl[pos + 1 ..] })
-        else
-            try alloc.dupe(u8, tmpl);
-        defer alloc.free(sub);
-        if (try probeImportFile(io, alloc, null, sub)) |p| return p;
-        const sub_ext = try alloc.print("{s}.rv", .{sub});
-        defer alloc.free(sub_ext);
-        if (try probeImportFile(io, alloc, null, sub_ext)) |p| return p;
-        const sub_init = try alloc.print("{s}/init.rv", .{sub});
-        defer alloc.free(sub_init);
-        if (try probeImportFile(io, alloc, null, sub_init)) |p| return p;
-    }
-
-    return null;
-}
-
-/// does dir/name exist as a regular file? returns its canonical path if so
-fn probeImportFile(
-    io: std.Io,
-    alloc: std.mem.Allocator,
-    dir: ?[]const u8,
-    name: []const u8,
-) !?[]const u8 {
-    const joined = if (dir) |d|
-        std.Io.Dir.path.resolveAlloc(alloc, &.{ d, name }) catch |err| switch (err) {
-            error.OutOfMemory => |e| return e,
-        }
-    else
-        std.Io.Dir.path.resolveAlloc(alloc, &.{name}) catch |err| switch (err) {
-            error.OutOfMemory => |e| return e,
-        };
-    defer alloc.free(joined);
-    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const n = std.Io.Dir.cwd().realPathFile(io, joined, &buf) catch |err| switch (err) {
-        error.FileNotFound, error.IsDir => return null,
-        else => |e| return e,
-    };
-    // realPathFile returns the dir path instead of IsDir on macos
-    const stat = std.Io.Dir.cwd().statFile(io, buf[0..n], .{}) catch |err| switch (err) {
-        error.FileNotFound => return null,
-        else => |e| return e,
-    };
-    if (stat.kind == .directory) return null;
-    return try alloc.dupe(u8, buf[0..n]);
-}
+pub const import_path = @import("import_path.zig");
 
 /// guaranteed IDs
 pub const CoreAtoms = vm.CoreAtoms;
@@ -347,6 +288,7 @@ pub fn stderr() std.Io.File {
 test {
     // lang suite runs split under test-lang instead, one binary per area
     _ = @import("./extension.zig");
+    _ = @import("./import_path.zig");
     _ = @import("./baselib/ffi.zig");
     _ = @import("./baselib/host.zig");
     _ = @import("./baselib/specs.zig");

@@ -445,6 +445,15 @@ pub fn build(b: *Build) !void {
         b.getInstallStep().dependOn(&exe_install.step);
         lib_install.step.dependOn(&header_install.step);
 
+        // `std:` imports find this by walking up from the exe
+        // , see src/import_path.zig
+        const std_install = b.addInstallDirectory(.{
+            .source_dir = b.path("lib/std"),
+            .install_subdir = "revo/std",
+            .install_dir = .lib,
+        });
+        b.getInstallStep().dependOn(&std_install.step);
+
         const lib_step = b.step("lib", "build the erevo library");
         lib_step.dependOn(&lib_install.step);
 
