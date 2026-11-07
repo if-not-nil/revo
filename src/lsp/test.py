@@ -985,61 +985,56 @@ async def test_rename(client: LanguageClient):
     assert result.changes is not None, "expected changes in workspace edit"
 
 
-FMT_URI = "file:///test/fmt.rv"
-FMT_TEXT = "let x=1\nlet y = 2\nlet z = 3\nlet w=4\n"
+async def open_doc(client: LanguageClient, uri: str, text: str):
+    client.text_document_did_open(
+        params=DidOpenTextDocumentParams(
+            text_document=TextDocumentItem(uri=uri, language_id="revo", version=1, text=text)
+        )
+    )
+    await client.wait_for_notification("textDocument/publishDiagnostics")
+
+
+def edit_rows(edits):
+    """each edit as (start line, start char, end line, end char, new text)"""
+    return [(e.range.start.line, e.range.start.character,
+             e.range.end.line, e.range.end.character, e.new_text) for e in edits]
+
+
+FMT_OPTS = FormattingOptions(tab_size=2, insert_spaces=True)
 
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_formatting_edits_changed_lines(client: LanguageClient):
     """formatting edits only the lines that change, so the cursor stays put"""
-    client.text_document_did_open(
-        params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(
-                uri=FMT_URI, language_id="revo", version=1, text=FMT_TEXT,
-            )
-        )
-    )
-    await client.wait_for_notification("textDocument/publishDiagnostics")
+    uri = "file:///test/fmt.rv"
+    await open_doc(client, uri, "let x=1\nlet y = 2\nif (x) do\nprint(y)\nend\n")
 
     edits = await client.text_document_formatting_async(
-        params=DocumentFormattingParams(
-            text_document=TextDocumentIdentifier(uri=FMT_URI),
-            options=FormattingOptions(tab_size=2, insert_spaces=True),
-        ),
+        params=DocumentFormattingParams(text_document=TextDocumentIdentifier(uri=uri), options=FMT_OPTS),
     )
-    got = [(e.range.start.line, e.range.start.character,
-            e.range.end.line, e.range.end.character, e.new_text) for e in edits]
-    assert got == [(0, 0, 1, 0, "let x = 1\n"), (3, 0, 4, 0, "let w = 4\n")]
-
-
-RANGE_URI = "file:///test/range.rv"
-RANGE_TEXT = "let a=1\nlet b=2\nlet c=3\n"
+    # `let y` and `end` are already fine, and the reindented line is its own edit
+    assert edit_rows(edits) == [
+        (0, 0, 1, 0, "let x = 1\n"),
+        (2, 0, 3, 0, "if x do\n"),
+        (3, 0, 4, 0, "  print(y)\n"),
+    ]
 
 
 @pytest.mark.asyncio(loop_scope="module")
 async def test_range_formatting(client: LanguageClient):
     """range formatting edits only the selected lines"""
-    client.text_document_did_open(
-        params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(
-                uri=RANGE_URI, language_id="revo", version=1, text=RANGE_TEXT,
-            )
-        )
-    )
-    await client.wait_for_notification("textDocument/publishDiagnostics")
+    uri = "file:///test/range.rv"
+    await open_doc(client, uri, "let a=1\nlet b=2\nlet c=3\n")
 
-    # the selection ends at the start of the third line, which stays out
+    # the selection ends at the start of the third line, so that one stays out
     edits = await client.text_document_range_formatting_async(
         params=DocumentRangeFormattingParams(
-            text_document=TextDocumentIdentifier(uri=RANGE_URI),
-            range=Range(start=Position(line=1, character=3),
-                        end=Position(line=2, character=0)),
-            options=FormattingOptions(tab_size=2, insert_spaces=True),
+            text_document=TextDocumentIdentifier(uri=uri),
+            range=Range(start=Position(line=1, character=3), end=Position(line=2, character=0)),
+            options=FMT_OPTS,
         ),
     )
-    got = [(e.range.start.line, e.range.start.character,
-            e.range.end.line, e.range.end.character, e.new_text) for e in edits]
-    assert got == [(1, 0, 2, 0, "let b = 2\n")]
+    assert edit_rows(edits) == [(1, 0, 2, 0, "let b = 2\n")]
 
 
 @pytest.mark.skip(reason="TODO")

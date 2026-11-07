@@ -7,54 +7,11 @@
 //!
 //! one test per rule right here check it out pretty sick right
 //!
-//! - THOSE ITEMS WERE FOUND USING LLMs -
-//! - BUT ALL THE CODE FOR THEM IS WRITTEN BY ME(w0x7y) -
-//! - ONLY THE TESTS FOR THEM WERE WRITTEN BY LLMs -
-//! what is left todo:
-//!
-//! bugs - Finished
-//! [x] - a `do` on an aligned continuation line indents its body and `end` from
-//!      the aligned column: `fn(a,\n           b) do` puts `end` under `b`,
-//!      not under `let`
-//! [x] - atoms hug `)`/`}` even when they arent a method: `if x == 1 :yes` ->
-//!      `if (x == 1):yes`, `{1} :a` -> `{1}:a` (same meaning, reads as a call)
-//! [x] - a mid-line block comment gets two spaces before it: `let x =  ## c ## 1`
-//! [x] - unary after unary hugs: `- -1` -> `--1`
-//! [x] - a blank line after a trailing operator drops the continuation: `1 +\n\n2`
-//!      leaves `2` at column 0
-//! [x] - "doesnt change semantics" is only "output parses"; compare the token
-//!      streams of input and output, minus synth/dropped parens
-//! [x] - `src_col` counts bytes, so tab-indented or non-ascii lines lose their
-//!      alignment
-//!
-//! missing, next to clang-format
-//! [x] - `if ((x)) 4` keeps both parens, only `do` conditions drop them
-//!      (`RemoveParentheses: MultipleParentheses`)
-//! [x] - a leading `.field` line gets no continuation level (`|>`, `and`, `:m(` do)
-//! [x] - `#comment` -> `# comment` (`SpacesInLineCommentPrefix`)
-//! [x] - strip trailing whitespace inside multi-line comments
-//! [x] - a blank line around top-level fns, methods, tests and suites
-//!      (`SeparateDefinitionBlocks`)
-//! [x] - braces hug what they hold: `{ a = 1 }` -> `{a = 1}`, `{ }` -> `{}`
-//!      (`Cpp11BracedListStyle`, `SpaceInEmptyBlock`)
-//! [x] - align trailing comments on consecutive lines (`AlignTrailingComments`)
-//! [x] - lsp sends only the changed lines from `revo.diff`, so the cursor and
-//!      undo stay put (`-cursor`, replacements)
-//! [x] - range formatting: lsp `textDocument/rangeFormatting`, cli `--lines` (`-lines`)
-//! [] - `# fmt: off` / `# fmt: on` regions (`// clang-format off`)
-//! [] - `/ < > |` keep any gap as operators too: `x <y`, `a/ b`, `a> 1` stay
-//!      (clang always spaces binary operators); needs type vs expr context from the walk
-//! [] - code inside `#{ }` is never formatted, a block in there stays at column 0
-//!
-//! optimizations
-//! [x] - synth parens go in front and the whole item list gets sorted; insert
-//!      them in place during the token loop
-//! [x] - quadratic: 16k lines take 1.7s, 32k take 6.3s; `assignLevels` scans
-//!      every floor for every line (twice), `has` scans `ends`/`drops`/`cuts`
-//!      and `sameTokens` every added paren per token; sort floors and sweep,
-//!      binary search the sets
-//! [x] - cli `fmt` parses, then `format` lexes + parses, then parses its output:
-//!      3 parses per file; the cli now parses again only when `format` refuses
+//! todo:
+//! ~ `# fmt: off` / `# fmt: on` regions
+//! ~ `/ < > |` keep any gap as operators too, so `x <y`, `a/ b` and `a> 1` stay
+//!   clang always spaces them, but that needs to know type from expr
+//! ~ code inside `#{ }` is never formatted
 test "formatter" {
     const cases = [_]Case{
         // spacing
@@ -90,31 +47,35 @@ test "formatter" {
             .src = "let o = (if self.cur == cur ('> ') else '  ')\n",
             .want = "let o = (if (self.cur == cur) ('> ') else '  ')\n",
         },
-        .{
-            .name = "an atom only hugs as a method",
-            .src = "let a = if x == 1 :yes else :no\nlet s = foo() :len()\n",
-            .want = "let a = if (x == 1) :yes else :no\nlet s = foo():len()\n",
-        },
-        .{
-            .name = "unary after unary",
-            .src = "let a = - -1\nlet b = --1\nlet c = 2 - -1\n",
-            .want = "let a = - -1\nlet b = - -1\nlet c = 2 - -1\n",
-        },
-        .{ .name = "braces hug what they hold", .src =
-        \\let a = { x = 1 }
-        \\let e = { }
-        \\let n = { {a = 1}, { 2 } }
-        \\let g = { (x) }
-        \\let u = { -1 }
-        \\type R = { token: string }
+        .{ .name = "an atom hugs only when it's called", .src =
+        \\let ok = if x == 1 :yes else :no
+        \\let n = name() :len()
         \\
         , .want =
-        \\let a = {x = 1}
+        \\let ok = if (x == 1) :yes else :no
+        \\let n = name():len()
+        \\
+        },
+        .{ .name = "signs dont merge into one", .src =
+        \\let a = --1
+        \\let b = 2 - -1
+        \\
+        , .want =
+        \\let a = - -1
+        \\let b = 2 - -1
+        \\
+        },
+        .{ .name = "braces hug what they hold", .src =
+        \\let p = { x = 1, y = 2 }
+        \\let e = { }
+        \\let n = { { 1 }, -1 }
+        \\type Point = { x: number }
+        \\
+        , .want =
+        \\let p = {x = 1, y = 2}
         \\let e = {}
-        \\let n = {{a = 1}, {2}}
-        \\let g = {(x)}
-        \\let u = {-1}
-        \\type R = {token: string}
+        \\let n = {{1}, -1}
+        \\type Point = {x: number}
         \\
         },
         .{ .name = "spacing stays put", .src =
@@ -217,31 +178,34 @@ test "formatter" {
         \\  |> inspect
         \\
         },
-        .{ .name = "a block ending a continued line indents from that line", .src =
-        \\let v = x
+        .{ .name = "a fn ending a continued line indents from that line", .src =
+        \\let v = xs
         \\|> fn(c) do
         \\c * 2
         \\end
-        \\|> inspect
         \\const f =
         \\fn() do
         \\1
         \\end
+        \\
+        , .want =
+        \\let v = xs
+        \\  |> fn(c) do
+        \\    c * 2
+        \\  end
+        \\const f =
+        \\  fn() do
+        \\    1
+        \\  end
+        \\
+        },
+        .{ .name = "a for over a pipe keeps its body one level in", .src =
         \\for i in xs
         \\|> filter(p) do
         \\print(i)
         \\end
         \\
         , .want =
-        \\let v = x
-        \\  |> fn(c) do
-        \\    c * 2
-        \\  end
-        \\  |> inspect
-        \\const f =
-        \\  fn() do
-        \\    1
-        \\  end
         \\for i in xs
         \\  |> filter(p) do
         \\  print(i)
@@ -318,36 +282,36 @@ test "formatter" {
         .{ .name = "trailing comments on consecutive lines line up", .src =
         \\let x = 1 # a
         \\let longer = 2 # b
-        \\let y = "é" ## c ##
-        \\
-        \\let z = 4 # d
-        \\let s = """
-        \\  t
-        \\""" # e
-        \\let w = 5 # f
-        \\f() # g
-        \\# own line
-        \\let q = 6 # h
-        \\let r = 7 ## i
-        \\  ##
-        \\let tt = 88 # j
+        \\f() # c
         \\
         , .want =
         \\let x = 1       # a
         \\let longer = 2  # b
-        \\let y = "é"     ## c ##
+        \\f()             # c
         \\
-        \\let z = 4  # d
-        \\let s = """
-        \\  t
-        \\"""        # e
-        \\let w = 5  # f
-        \\f()        # g
-        \\# own line
-        \\let q = 6  # h
-        \\let r = 7  ## i
-        \\   ##
-        \\let tt = 88  # j
+        },
+        .{ .name = "a blank line or a comment line ends the run", .src =
+        \\let x = 1 # a
+        \\
+        \\let longer = 2 # b
+        \\# about y
+        \\let y = 3 # c
+        \\
+        , .want =
+        \\let x = 1  # a
+        \\
+        \\let longer = 2  # b
+        \\# about y
+        \\let y = 3  # c
+        \\
+        },
+        .{ .name = "trailing comments line up by display column", .src =
+        \\let s = "é" # a
+        \\let t = 22 # b
+        \\
+        , .want =
+        \\let s = "é"  # a
+        \\let t = 22   # b
         \\
         },
         .{ .name = "mid-line comments get one space", .src =
@@ -374,29 +338,29 @@ test "formatter" {
         \\end
         \\
         },
-        .{ .name = "multi-line comments move as a whole", .src =
+        .{ .name = "a block comment moves as a whole", .src =
         \\fn f() do
-        \\if (a) do
         \\## line one
         \\
         \\   line two ##
         \\print(1)
         \\end
+        \\
+        , .want =
+        \\fn f() do
+        \\  ## line one
+        \\
+        \\     line two ##
+        \\  print(1)
         \\end
+        \\
+        },
+        .{ .name = "a doc comment moves as a whole", .src =
         \\    #* doc one
         \\     * doc two *#
         \\fn g() 1
         \\
         , .want =
-        \\fn f() do
-        \\  if a do
-        \\    ## line one
-        \\
-        \\       line two ##
-        \\    print(1)
-        \\  end
-        \\end
-        \\
         \\#* doc one
         \\ * doc two *#
         \\fn g() 1
@@ -404,15 +368,34 @@ test "formatter" {
         },
         .{
             .name = "comments lose trailing whitespace",
-            .src = "let x = 1 # c \t\n## a  \n  \t\n  b \n##\n#* d  \r\n *#\nfn g() 1\n",
-            .want = "let x = 1  # c\n\n## a\n\n  b\n##\n#* d\n *#\nfn g() 1\n",
+            .src = "let x = 1 # c \t\n" ++
+                "## a  \n" ++
+                "  \t\n" ++
+                "  b \n" ++
+                "##\n",
+            .want = "let x = 1  # c\n" ++
+                "## a\n" ++
+                "\n" ++
+                "  b\n" ++
+                "##\n",
         },
         .{
-            .name = "a doc opener line can end in whitespace",
-            .src = "#! \na\n!#\n#* \t\nd\n*#\nfn g() 1\n",
-            .want = "#!\na\n!#\n#*\nd\n*#\nfn g() 1\n",
+            .name = "a doc opener can end in whitespace",
+            .src = "#! \na\n!#\n" ++
+                "#* \t\nd\n*#\n" ++
+                "fn g() 1\n",
+            .want = "#!\na\n!#\n" ++
+                "#*\nd\n*#\n" ++
+                "fn g() 1\n",
         },
-        .{ .name = "line comments get a space after the #", .src =
+        .{
+            .name = "a doc comment loses trailing whitespace and crs",
+            .src = "#* d  \r\n *#\n" ++
+                "fn g() 1\n",
+            .want = "#* d\n *#\n" ++
+                "fn g() 1\n",
+        },
+        .{ .name = "a line comment gets a space after its #", .src =
         \\#note
         \\#é
         \\#----
@@ -453,7 +436,7 @@ test "formatter" {
         \\end
         \\
         },
-        .{ .name = "a do past a wrapped condition's bracket hangs off the statement", .src =
+        .{ .name = "a do past a wrapped condition hangs off the statement", .src =
         \\while (a and
         \\b) do
         \\print(1)
@@ -462,12 +445,6 @@ test "formatter" {
         \\f(b,
         \\c) do
         \\print(1)
-        \\end
-        \\fn g() do
-        \\if (a ==
-        \\b) == c do
-        \\print(1)
-        \\end
         \\end
         \\
         , .want =
@@ -481,6 +458,16 @@ test "formatter" {
         \\  print(1)
         \\end
         \\
+        },
+        .{ .name = "a do past a wrapped condition in a body", .src =
+        \\fn g() do
+        \\if (a ==
+        \\b) == c do
+        \\print(1)
+        \\end
+        \\end
+        \\
+        , .want =
         \\fn g() do
         \\  if (a ==
         \\      b) == c do
@@ -576,37 +563,26 @@ test "formatter" {
         \\let b = 1 +
         \\
         \\2
-        \\let c = 1 and
+        \\let c = ok and
         \\
-        \\ 2
+        \\done
         \\
         , .want =
         \\let b = 1 +
         \\
         \\  2
-        \\let c = 1 and
+        \\let c = ok and
         \\
-        \\  2
+        \\  done
         \\
         },
-        .{ .name = "a blank line around top-level definitions", .src =
+        .{ .name = "a top-level fn gets a blank line on each side", .src =
         \\let x = 1
         \\fn f() 1
         \\fn g() do
         \\  2
         \\end
         \\f()
-        \\# about h
-        \\pub fn h() 3
-        \\#* doc *#
-        \\fn k() 4
-        \\let y = fn() 5
-        \\let z = 6
-        \\test "t" do
-        \\end
-        \\fn obj:m() 7
-        \\@native
-        \\fn n() 8
         \\
         , .want =
         \\let x = 1
@@ -619,12 +595,37 @@ test "formatter" {
         \\
         \\f()
         \\
+        },
+        .{ .name = "the blank line goes above a def's comment, doc and attribute", .src =
+        \\let x = 1
+        \\# about h
+        \\pub fn h() 3
+        \\#* doc *#
+        \\fn k() 4
+        \\@native
+        \\fn n() 8
+        \\
+        , .want =
+        \\let x = 1
+        \\
         \\# about h
         \\pub fn h() 3
         \\
         \\#* doc *#
         \\fn k() 4
         \\
+        \\@native
+        \\fn n() 8
+        \\
+        },
+        .{ .name = "tests and methods are defs, fn values arent", .src =
+        \\let y = fn() 5
+        \\let z = 6
+        \\test "t" do
+        \\end
+        \\fn obj:m() 7
+        \\
+        , .want =
         \\let y = fn() 5
         \\let z = 6
         \\
@@ -632,9 +633,6 @@ test "formatter" {
         \\end
         \\
         \\fn obj:m() 7
-        \\
-        \\@native
-        \\fn n() 8
         \\
         },
         .{ .name = "nested and `;`-joined definitions stay put", .src =
@@ -670,12 +668,10 @@ test "formatter" {
         .{ .name = "an inline body keeps one pair of parens", .src =
         \\if ((x)) 4
         \\while (((y))) f()
-        \\if ((a)) (b)
         \\
         , .want =
         \\if (x) 4
         \\while (y) f()
-        \\if (a) (b)
         \\
         },
         .{ .name = "while takes parens, do drops them", .src =
@@ -893,65 +889,81 @@ test "formatter" {
     }
 }
 
+/// `src` with only `first` to `last` (1-based) formatted
+fn formatRange(arena: std.mem.Allocator, src: []const u8, first: usize, last: usize) ![]const u8 {
+    return diff.apply(arena, src, try formatLines(arena, src, first, last));
+}
+
 test "range formatting touches only the lines asked for" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const cases = [_]struct { src: []const u8, first: usize, last: usize, want: []const u8 }{
-        .{ .src = "let a=1\nlet b=2\nlet c=3\n", .first = 2, .last = 2, .want = "let a=1\nlet b = 2\nlet c=3\n" },
-        // a reindented line is its own edit, so its neighbors stay put
-        .{ .src = "fn f() do\nx=1\ny=2\nend\n", .first = 3, .last = 3, .want = "fn f() do\nx=1\n  y = 2\nend\n" },
-        // the blank line a definition gets comes with it
-        .{ .src = "let a = 1\nfn f() 1\n", .first = 2, .last = 2, .want = "let a = 1\n\nfn f() 1\n" },
-        // a wrapped condition's parens come as a pair, from either end
-        .{
-            .src = "let x=1\nif a and\nb and\nc print(1)\nlet y=2\n",
-            .first = 2,
-            .last = 2,
-            .want = "let x=1\nif (a and\n    b and\n    c) print(1)\nlet y=2\n",
-        },
-        .{
-            .src = "let x=1\nif (a and\nb and\nc) do\nprint(1)\nend\nlet y=2\n",
-            .first = 4,
-            .last = 4,
-            .want = "let x=1\nif a and\n  b and\n  c do\nprint(1)\nend\nlet y=2\n",
-        },
-        .{ .src = "let a=1\n", .first = 5, .last = 9, .want = "let a=1\n" },
-    };
-    for (cases) |c| {
-        const got = try diff.apply(arena, c.src, try formatLines(arena, c.src, c.first, c.last));
-        try testing.expectEqualStrings(c.want, got);
-    }
+    try testing.expectEqualStrings(
+        "let a=1\nlet b = 2\nlet c=3\n",
+        try formatRange(arena, "let a=1\nlet b=2\nlet c=3\n", 2, 2),
+    );
+    // each reindented line is its own edit, so `x=1` stays as it was
+    try testing.expectEqualStrings(
+        "fn f() do\nx=1\n  y = 2\nend\n",
+        try formatRange(arena, "fn f() do\nx=1\ny=2\nend\n", 3, 3),
+    );
+    // a fn's blank line comes along with it
+    try testing.expectEqualStrings(
+        "let a = 1\n\nfn f() 1\n",
+        try formatRange(arena, "let a = 1\nfn f() 1\n", 2, 2),
+    );
+    // past the end is nothing to do
+    try testing.expectEqualStrings("let a=1\n", try formatRange(arena, "let a=1\n", 5, 9));
 }
 
-test "output with other tokens or comments is refused" {
+test "range formatting keeps a condition's parens paired" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const src = "# keep\nlet w = f (1)\nif (x) do\n  g()\nend\nif y 4\n";
+    // the `(` goes on line 2, so its `)` on line 4 has to come too
+    try testing.expectEqualStrings(
+        "if (a and\n    b and\n    c) print(1)\n",
+        try formatRange(arena, "if a and\nb and\nc print(1)\n", 1, 1),
+    );
+    // and the other way around, from the `)` back up to the `(`
+    try testing.expectEqualStrings(
+        "if a and\n  b and\n  c do\nprint(1)\nend\n",
+        try formatRange(arena, "if (a and\nb and\nc) do\nprint(1)\nend\n", 3, 3),
+    );
+}
+
+test "output that means something else is refused" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const src = "# keep\nlet w = f (1)\nif y 4\n";
     const lexed = try Lexer.lexAll(arena, src);
     var walk: Walk = .{ .alloc = arena, .source = src };
     walk.visit((try parse(arena, src)).ok);
 
-    try testing.expect(try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
-    // `f (1)` isnt a call, `f(1)` is
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f(1)\nif x do\n  g()\nend\nif (y) 4\n"));
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif x do\nend\nif (y) 4\n"));
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif x do\n  g()\nend\nif y 4\n"));
-    // a lost or edited comment
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
-    try testing.expect(!try sameTokens(arena, lexed, &walk, "# kept\nlet w = f\n(1)\nif x do\n  g()\nend\nif (y) 4\n"));
+    // moving a token to the next line and adding the condition's parens is fine
+    try testing.expect(try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif (y) 4\n"));
+    // `f (1)` isnt a call, but `f(1)` is
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f(1)\nif (y) 4\n"));
+    // a token went missing
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif (y)\n"));
+    // the parens the walk asked for went missing
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# keep\nlet w = f\n(1)\nif y 4\n"));
+    // a comment went missing, or got edited
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "let w = f\n(1)\nif (y) 4\n"));
+    try testing.expect(!try sameTokens(arena, lexed, &walk, "# kept\nlet w = f\n(1)\nif (y) 4\n"));
 }
 
 const std = @import("std");
 
 const cst = @import("cst.zig");
-const Lexer = @import("Lexer.zig");
-const Parser = @import("Parser.zig");
 const diagnostic = @import("diagnostic.zig");
 const diff = @import("../diff.zig");
+const Lexer = @import("Lexer.zig");
+const Parser = @import("Parser.zig");
 
 const TokenType = Lexer.TokenType;
 

@@ -1386,11 +1386,17 @@ test "unterminated comment spans reach eof" {
     try std.testing.expectEqual(@as(usize, 15), e.span.end);
 }
 
-test "a blank rest of the opener line is not doc text" {
-    const out = try lexAll(std.testing.allocator, "#! \t\na\n!#\n#* \r\nb\n*#\nlet x = 1");
+test "a doc opener's line can end in whitespace" {
+    // `#* ` and `#*` read the same, so stripping the space doesnt change the doc
+    const out = try lexAll(std.testing.allocator, "#* \t\r\nhi\n*#\nlet x = 1");
     defer freeLexOutput(std.testing.allocator, out);
-    try std.testing.expectEqualStrings("a\n", out.trivia[0].text);
-    try std.testing.expectEqualStrings("b\n", out.tokens[0].text);
+    try std.testing.expectEqualStrings("hi\n", out.tokens[0].text);
+}
+
+test "a module doc opener's line can end in whitespace" {
+    const out = try lexAll(std.testing.allocator, "#! \nhi\n!#\nlet x = 1");
+    defer freeLexOutput(std.testing.allocator, out);
+    try std.testing.expectEqualStrings("hi\n", out.trivia[0].text);
 }
 
 test "span merge keeps earliest start regardless argument order" {

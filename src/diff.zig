@@ -247,25 +247,45 @@ test "diff" {
     );
 }
 
-test "edits" {
+/// `edits` from `old` to `new`
+fn checkEdits(arena: std.mem.Allocator, old: []const u8, new: []const u8, want: []const Edit) !void {
+    const got = try edits(arena, old, new);
+    try testing.expectEqual(want.len, got.len);
+    for (want, got) |w, g| {
+        try testing.expectEqual(.{ w.start, w.end }, .{ g.start, g.end });
+        try testing.expectEqualStrings(w.text, g.text);
+    }
+    try testing.expectEqualStrings(new, try apply(arena, old, got));
+}
+
+test "edits cover only the changed lines" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const Want = struct { usize, usize, []const u8 };
-    const cases = [_]struct { old: []const u8, new: []const u8, want: []const Want }{
-        .{ .old = "a\nb\nc\nd\ne", .new = "a\nB\nc\nd\ne\nf\n", .want = &.{ .{ 2, 4, "B\n" }, .{ 8, 9, "e\n" }, .{ 9, 9, "f\n" } } },
-        // a reindented line pairs with its old self, so each is its own edit
-        .{ .old = "f do\nb\nc\nend\n", .new = "f do\n  b\n  c\nend\n", .want = &.{ .{ 5, 7, "  b\n" }, .{ 7, 9, "  c\n" } } },
-        .{ .old = "a\n", .new = "a\n", .want = &.{} },
-    };
-    for (cases) |c| {
-        const got = try edits(arena, c.old, c.new);
-        try testing.expectEqual(c.want.len, got.len);
-        for (c.want, got) |w, g| {
-            try testing.expectEqual(.{ w[0], w[1] }, .{ g.start, g.end });
-            try testing.expectEqualStrings(w[2], g.text);
-        }
-        try testing.expectEqualStrings(c.new, try apply(arena, c.old, got));
-    }
+    try checkEdits(arena, "a\nb\nc\n", "a\nB\nc\n", &.{.{ .start = 2, .end = 4, .text = "B\n" }});
+    try checkEdits(arena, "a\n", "a\n", &.{});
+}
+
+test "edits keep a reindented line apart from its neighbors" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // two edits, not one big one, so a cursor on `c` is still on `c`
+    try checkEdits(arena, "f do\nb\nc\nend\n", "f do\n  b\n  c\nend\n", &.{
+        .{ .start = 5, .end = 7, .text = "  b\n" },
+        .{ .start = 7, .end = 9, .text = "  c\n" },
+    });
+}
+
+test "edits add a missing last newline" {
+    var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    try checkEdits(arena, "a\nb", "a\nb\nc\n", &.{
+        .{ .start = 2, .end = 3, .text = "b\n" },
+        .{ .start = 3, .end = 3, .text = "c\n" },
+    });
 }
