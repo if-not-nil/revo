@@ -781,6 +781,13 @@ test "formatter" {
         \\  print(i)
         \\
         },
+        .{ .name = "a gap after `..` ends an open range", .src =
+        \\for i in 0.. do break i end
+        \\for i in..3 do break i end
+        \\for i in 0..2.. do break i end
+        \\for i in 0.. 3
+        \\
+        },
         .{ .name = "a body on its own line gets a level", .src =
         \\for i in 0..3
         \\f(i)
@@ -1902,7 +1909,8 @@ fn separator(prev2: ?Item, p: Item, c: Item, next: ?Item) []const u8 {
         oneOf(c.kind, &.{ .slash, .lt, .gt, .bar })) return gap;
 
     if (oneOf(c.kind, &.{ .comma, .semicolon, .rparen, .rbracket, .dot, .dotdot, .colon })) return "";
-    if (oneOf(p.kind, &.{ .lparen, .lbracket, .dot, .dotdot, .huh, .bang })) return "";
+    if (p.kind == .dotdot) return gap;
+    if (oneOf(p.kind, &.{ .lparen, .lbracket, .dot, .huh, .bang })) return "";
     // `f[0]` hugs, `if (` doesnt: a call target is anything that can end an
     // expression, plus the `fn` keyword, but not `end`
     if (c.kind == .lbracket and (p.kind == .kw_fn or (p.kind != .kw_end and endsExpr(p.kind)))) return "";
