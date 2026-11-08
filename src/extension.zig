@@ -48,7 +48,7 @@ pub const impls = base.host.impls;
 /// checked float-to-int conversion, null when not a finite integral value
 pub const numToInt = base.host.numToInt;
 
-fn abiSafe(comptime f: HostFn) HostFn {
+pub fn abiSafe(comptime f: HostFn) HostFn {
     return struct {
         fn call(args: []const Value, vm: *VM) anyerror!HostResult {
             return f(args, vm) catch |err| {
