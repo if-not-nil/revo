@@ -788,6 +788,15 @@ test "formatter" {
         \\for i in 0.. 3
         \\
         },
+        .{ .name = "a slice's `..` hugs both sides", .src =
+        \\let xs = {1, 2, 3}
+        \\print(xs[ 1 .. 2 ], xs[1.. ], xs[ ..2 ], xs[ 0 .. 1 .. 3 ])
+        \\
+        , .want =
+        \\let xs = {1, 2, 3}
+        \\print(xs[1..2], xs[1..], xs[..2], xs[0..1..3])
+        \\
+        },
         .{ .name = "a body on its own line gets a level", .src =
         \\for i in 0..3
         \\f(i)
@@ -1029,6 +1038,7 @@ const Item = struct {
     trivia: bool = false,
     /// a paren the formatter adds
     synth: bool = false,
+    in_slice: bool = false,
 };
 
 /// items from one source line, plus the indent and blank lines it gets
@@ -1107,7 +1117,7 @@ pub fn format(allocator: std.mem.Allocator, source: []const u8) FormatError![]u8
     walk.visit(root);
     if (walk.failed) return error.OutOfMemory;
     // sorted, so `has` can binary search them
-    for ([_][]usize{ walk.drops.items, walk.ends.items, walk.cuts.items, walk.seps.items, walk.cond_dos.items }) |set|
+    for ([_][]usize{ walk.drops.items, walk.ends.items, walk.cuts.items, walk.seps.items, walk.cond_dos.items, walk.slice_dots.items }) |set|
         std.mem.sort(usize, set, {}, std.sort.asc(usize));
 
     const items = try collectItems(arena, source, lexed, &walk);
@@ -1265,6 +1275,7 @@ const Walk = struct {
     cond_dos: std.ArrayList(usize) = .empty,
     /// offsets of the top-level statements that get a blank line before them
     seps: std.ArrayList(usize) = .empty,
+    slice_dots: std.ArrayList(usize) = .empty,
 
     /// append and flag oom so the walk stops
     fn push(self: *Walk, list: anytype, item: std.meta.Child(@TypeOf(list.items))) void {
@@ -1326,6 +1337,7 @@ const Walk = struct {
             // arms line up with the `match` keyword itself
             .match => |m| for (m.bars) |bar| self.pin(at, bar.start),
             .root => |r| self.separateDefs(r.stmts),
+            .slice => |sl| for (sl.dots) |d| self.push(&self.slice_dots, d.start),
             else => {},
         }
 
@@ -1494,6 +1506,7 @@ fn collectItems(arena: std.mem.Allocator, source: []const u8, lexed: Lexer.LexOu
             .start = tok.start,
             .src_col = srcCol(source, tok.start),
             .space_before = tok.space_before or dropped_gap,
+            .in_slice = kind == .dotdot and has(w.slice_dots.items, tok.start),
         });
         dropped_gap = false;
     }
@@ -1909,7 +1922,7 @@ fn separator(prev2: ?Item, p: Item, c: Item, next: ?Item) []const u8 {
         oneOf(c.kind, &.{ .slash, .lt, .gt, .bar })) return gap;
 
     if (oneOf(c.kind, &.{ .comma, .semicolon, .rparen, .rbracket, .dot, .dotdot, .colon })) return "";
-    if (p.kind == .dotdot) return gap;
+    if (p.kind == .dotdot) return if (p.in_slice) "" else gap;
     if (oneOf(p.kind, &.{ .lparen, .lbracket, .dot, .huh, .bang })) return "";
     // `f[0]` hugs, `if (` doesnt: a call target is anything that can end an
     // expression, plus the `fn` keyword, but not `end`
