@@ -1,0 +1,37 @@
+#! base64, with padding by default or url safe without it !#
+
+const native: {
+  encode: fn(data: string) -> string,
+  decode: fn(data: string) -> !string,
+  url_encode: fn(data: string) -> string,
+  url_decode: fn(data: string) -> !string,
+} = __internal_native("base64")
+
+#*
+encode as base64
+`{url = :true}` is the url-safe one, with no padding
+
+```repl
+rεvo > const base64 = import("std:base64")
+rεvo > base64.encode("hi?")
+"aGk/"
+rεvo > base64.encode("hi?", {url = :true})
+"aGk_"
+```
+*#
+pub fn encode(data: string, ?opts: {?url: bool}) -> string do
+  if (opts and opts.url) native.url_encode(data) else native.encode(data)
+end
+
+#*
+decode base64
+
+```repl
+rεvo > const base64 = import("std:base64")
+rεvo > base64.decode("aGk/")
+{:ok, "hi?"}
+```
+*#
+pub fn decode(data: string, ?opts: {?url: bool}) -> !string do
+  if (opts and opts.url) native.url_decode(data) else native.decode(data)
+end

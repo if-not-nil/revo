@@ -1,11 +1,11 @@
-const revo = @import("../root.zig");
-const root = @import("root.zig");
+const revo = @import("revo");
 const std = @import("std");
 
-const Value = revo.Value;
+const extension = revo.extension;
+const Value = extension.Value;
 const testing = revo.lang.test_helpers;
-const VM = revo.VM;
-const HostResult = root.host.HostResult;
+const VM = extension.VM;
+const HostResult = extension.HostResult;
 
 const csv = @import("./vendor/csv.zig");
 const Reader = csv.Reader;
@@ -13,7 +13,7 @@ const Writer = csv.Writer;
 const Record = csv.Record;
 const Dialect = csv.Dialect;
 
-const Args = root.host.ArgTypes;
+const Args = extension.ArgTypes;
 
 pub const Impl = struct {
     pub fn encode(vm: *VM, data: Args.any, raw_opts: Args.table_sentinel) !HostResult {
@@ -56,8 +56,6 @@ pub const Impl = struct {
         return .data(try vm.tableOfSlice(rows.items));
     }
 };
-
-pub const impls = root.host.impls(Impl).val;
 
 fn recordToValue(record: Record, vm: *VM) anyerror!Value {
     var fields = try std.ArrayList(Value).initCapacity(vm.runtime.alloc, record.len());
@@ -120,10 +118,19 @@ fn writeNum(data: Value, vm: *VM, writer: *Writer) anyerror!void {
 }
 
 test "csv encode" {
-    // will fail until stt have default values, it's ok
-    try testing.topString(
-        \\ csv.encode({{"a", :b, 3}, {1.2, 0.3, "1.2"}, {1,2,3}}, {}):unwrap()
-    , "a,b,3\r\n1.2,0.3,1.2\r\n1,2,3\r\n");
+    var res = try testing.topResult(
+        \\ {{"a", :b, 3}, {1.2, 0.3, "1.2"}, {1,2,3}}
+    , null);
+    defer res.deinit();
+
+    // the dylib can't be loaded from here, so call the impl on the built table
+    const opts: Args.table_sentinel = .{ .value = @fromBackingInt(try res.vm.tables.create()) };
+    const out = try Impl.encode(&res.vm, res.value, opts);
+    var it = (try res.vm.tables.get(out.ok.asTable().?)).cursor();
+    try std.testing.expectEqual(Value.new.core(.ok), it.nextValue().?);
+
+    const s = it.nextValue().?.asString().?;
+    try std.testing.expectEqualStrings("a,b,3\r\n1.2,0.3,1.2\r\n1,2,3\r\n", res.vm.stringValue(s));
 }
 
 fn buildOpts(raw_opts: Args.table, vm: *VM) !HostErrOr(Dialect) {

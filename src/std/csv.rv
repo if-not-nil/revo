@@ -1,0 +1,39 @@
+#! encode values as csv and decode csvs back into revo values !#
+
+#* csv encoding and decoding options *#
+pub type Opts = {
+  ?delimiter: string,
+  ?terminator: string,
+  ?quote: string | :nil,
+  ?bom: bool,
+}
+
+const native: {
+  encode: fn(value: any, ?opts: Opts) -> !string,
+  decode: fn(source: string, ?opts: Opts) -> !any/string,
+} = __internal_native("csv")
+
+#*
+encodes a revo value as a csv string
+
+```repl
+rεvo > const csv = import("std:csv")
+rεvo > global dialect = { delimiter = ";", terminator = "~", quote = "*", bom = :false }
+rεvo > csv.encode({{"hi", "wow"}, {'yay; so cool!', "aaa"}}, dialect)
+{:ok, "hi;wow~*yay; so cool!*;aaa~"}
+rεvo > csv.encode({{"hi", "wow"}, {'yay; so cool!', "aaa"}})
+{:ok, "hi,wow\r\nyay; so cool!,aaa\r\n"}
+```
+*#
+pub const encode = native.encode
+
+#*
+decodes a csv string into a table of rows, with the same options as encode
+
+```repl
+rεvo > const csv = import("std:csv")
+rεvo > "hi;wow~*yay; so cool!*;aaa~" |> csv.decode({ delimiter = ";", terminator = "~", quote = "*" })
+{ { "hi", "wow" }, { "yay; so cool!", "aaa" } }
+```
+*#
+pub const decode = native.decode
