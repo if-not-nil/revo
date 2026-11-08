@@ -1,0 +1,45 @@
+#! compress and decompress stuff !#
+
+const native: {
+  gzip_compress: fn(data: string) -> !string,
+  gzip_decompress: fn(data: string) -> !string,
+  zlib_compress: fn(data: string) -> !string,
+  zlib_decompress: fn(data: string) -> !string,
+  deflate: fn(data: string) -> !string,
+  inflate: fn(data: string) -> !string,
+  zstd_decompress: fn(data: string) -> !string,
+  lzma_decompress: fn(data: string) -> !string,
+  xz_decompress: fn(data: string) -> !string,
+} = __internal_native("compress")
+
+#* `:deflate` has no header *#
+pub type Format = :gzip | :zlib | :deflate | :zstd | :lzma | :xz
+
+#*
+compresses data in a format
+
+```repl
+rεvo > const compress = import("std:compress")
+rεvo > "hi" |> compress.encode(:gzip) |> unwrap() |> compress.decode(:gzip)
+{:ok, "hi"}
+```
+*#
+pub fn encode(data: string, format: Format) -> !string do
+  match format
+  | :gzip => native.gzip_compress(data)
+  | :zlib => native.zlib_compress(data)
+  | :deflate => native.deflate(data)
+  # | _ => {:err, :Unsupported}
+  | _ => panic("format #{format} is unsupported for encoding")
+end
+
+#* decompresses data in a format *#
+pub fn decode(data: string, format: Format) -> !string do
+  match format
+  | :gzip => native.gzip_decompress(data)
+  | :zlib => native.zlib_decompress(data)
+  | :deflate => native.inflate(data)
+  | :zstd => native.zstd_decompress(data)
+  | :lzma => native.lzma_decompress(data)
+  | :xz => native.xz_decompress(data)
+end

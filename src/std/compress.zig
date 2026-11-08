@@ -1,62 +1,18 @@
-const revo = @import("../root.zig");
-const root = @import("root.zig");
+const revo = @import("revo");
 const std = @import("std");
 
-const VM = revo.VM;
-const HostResult = root.host.HostResult;
+const extension = revo.extension;
+const VM = extension.VM;
+const HostResult = extension.HostResult;
 
 const flate = std.compress.flate;
 const zstd = std.compress.zstd;
 const lzma = std.compress.lzma;
 const xz = std.compress.xz;
 
-const Args = root.host.ArgTypes;
+const Args = extension.ArgTypes;
 
 pub const Impl = struct {
-    pub fn base64_encode(vm: *VM, input: Args.string) !HostResult {
-        const str = vm.stringValue(@backingInt(input));
-        var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-        defer out.deinit();
-        try std.base64.standard.Encoder.encodeWriter(&out.writer, str);
-        return .data(try vm.adoptValueString(try out.toOwnedSlice()));
-    }
-
-    pub fn base64_decode(vm: *VM, input: Args.string) !HostResult {
-        const str = vm.stringValue(@backingInt(input));
-        const decoder = std.base64.standard.Decoder;
-        const decoded_len = decoder.calcSizeForSlice(str) catch |err| {
-            return HostResult.Err(vm, @errorName(err));
-        };
-        const buf = try vm.runtime.alloc.alloc(u8, decoded_len);
-        defer vm.runtime.alloc.free(buf);
-        decoder.decode(buf, str) catch |err| {
-            return HostResult.Err(vm, @errorName(err));
-        };
-        return HostResult.Ok(vm, try vm.ownValueString(buf));
-    }
-
-    pub fn base64url_encode(vm: *VM, input: Args.string) !HostResult {
-        const str = vm.stringValue(@backingInt(input));
-        var out = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-        defer out.deinit();
-        try std.base64.url_safe_no_pad.Encoder.encodeWriter(&out.writer, str);
-        return .data(try vm.adoptValueString(try out.toOwnedSlice()));
-    }
-
-    pub fn base64url_decode(vm: *VM, input: Args.string) !HostResult {
-        const str = vm.stringValue(@backingInt(input));
-        const decoder = std.base64.url_safe_no_pad.Decoder;
-        const decoded_len = decoder.calcSizeForSlice(str) catch |err| {
-            return HostResult.Err(vm, @errorName(err));
-        };
-        const buf = try vm.runtime.alloc.alloc(u8, decoded_len);
-        defer vm.runtime.alloc.free(buf);
-        decoder.decode(buf, str) catch |err| {
-            return HostResult.Err(vm, @errorName(err));
-        };
-        return HostResult.Ok(vm, try vm.ownValueString(buf));
-    }
-
     pub fn gzip_compress(vm: *VM, input: Args.string) !HostResult {
         const str = vm.stringValue(@backingInt(input));
         const result = flateCompress(str, .gzip, vm.runtime.alloc) catch |err| {
@@ -143,8 +99,6 @@ pub const Impl = struct {
         return HostResult.Ok(vm, try vm.adoptValueString(result));
     }
 };
-
-pub const impls = root.host.impls(Impl).val;
 
 const max_decompressed: usize = 512 * 1024 * 1024;
 

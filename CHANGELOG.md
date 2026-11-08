@@ -54,9 +54,6 @@ most breaking change yet
     so `import = 1` and `fn f(import)` are parse errors now
 
   - `name:path` imports from a collection dir, like odin
-      - `revo --collection name=dir[,name=dir]` adds import collections
-        the lsp takes `{"collections": {"name": "dir"}}` as init options
-
       - `std:` is built in
         looks, relatively to the `revo` executable, for
         - `lib/revo/std`, `lib/std`
