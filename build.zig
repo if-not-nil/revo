@@ -42,8 +42,6 @@ const Features = packed struct {
     isocline: bool = false,
     /// ~  available everywhere except freestanding
     lsp: bool = false,
-    /// ~  available everywhere
-    regex: bool = false,
     /// ~  available everywhere except freestanding
     mimalloc: bool = false,
     /// ~ dynamic c calls need dlopen; posix only
@@ -129,7 +127,6 @@ fn buildOptionsMod(
         mimalloc: bool,
         ffi: bool,
         isocline: bool,
-        regex: bool,
         lsp_enabled: bool,
     },
 ) *Module {
@@ -138,7 +135,6 @@ fn buildOptionsMod(
     opts.addOption(bool, "mimalloc", o.mimalloc);
     opts.addOption(bool, "ffi", o.ffi);
     opts.addOption(bool, "isocline", o.isocline);
-    opts.addOption(bool, "regex", o.regex);
     opts.addOption([]const u8, "version", VERSION);
     opts.addOption([]const u8, "git_commit", git_commit);
     opts.addOption(bool, "lsp_enabled", o.lsp_enabled);
@@ -303,9 +299,9 @@ pub fn build(b: *Build) !void {
     if (optimize != effective_optimize)
         logger.warn("Debug mode crashes wasm64 builds; forcing ReleaseSmall for all modules", .{});
 
-    const features_str = b.option([]const u8, "features", "available: isocline, lsp, regex, mimalloc, ffi") orelse
+    const features_str = b.option([]const u8, "features", "available: isocline, lsp, mimalloc, ffi") orelse
         // async is disabled on windows/wasi/freestanding (handled in src/root.zig)
-        if (is_freestanding) "" else if (is_wasm) "regex" else "lsp,isocline,regex,mimalloc,ffi";
+        if (is_freestanding or is_wasm) "" else "lsp,isocline,mimalloc,ffi";
 
     // windows can't do ffi (no dlopen); isocline/async degrade at use sites
     const test_filters = b.option([]const []const u8, "test-filter", "only run tests within the arr") orelse &.{};
@@ -341,7 +337,6 @@ pub fn build(b: *Build) !void {
         .mimalloc = mimalloc_enabled,
         .ffi = ffi_enabled,
         .isocline = features.isocline,
-        .regex = features.regex,
         .lsp_enabled = features.lsp,
     });
 
@@ -612,13 +607,11 @@ pub fn build(b: *Build) !void {
                 !release_is_wasm and
                 release_target.result.os.tag != .windows;
 
-            // TODO: regex compiles for freestanding, it isn't the issue here
             const rel_options_mod = buildOptionsMod(b, dev_version, perf, .{
                 .is_freestanding = release_is_fs,
                 .mimalloc = !release_is_fs and mimalloc_enabled,
                 .ffi = release_ffi_enabled,
                 .isocline = release_isocline_enabled,
-                .regex = release_target.result.os.tag != .freestanding and features.regex,
                 .lsp_enabled = release_lsp_enabled,
             });
 

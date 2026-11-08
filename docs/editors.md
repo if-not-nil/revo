@@ -212,7 +212,7 @@ code --install-extension ~/Downloads/revo-lsp-<the version you've dowloaded>.vsi
 
 - make sure the revo binary is in your path
 
-- if you built it from source, you must do so with the `lsp` feature enabled (`-Dfeatures=lsp,isocline,regex`)
+- if you built it from source, you must do so with the `lsp` feature enabled (`-Dfeatures=lsp,isocline`)
 
 - if you need the binary to be in a different path, modify the `serverOptions` variable [(github search link)](https://github.com/search?q=repo%3APizzaLvr49%2Frevo-lsp+const+serverOptions&type=code) in the extension's source code, then rebuild manually
 

@@ -1,0 +1,39 @@
+#!
+regular expressions! `re("a+")` compiles a pattern into a handle you can
+reuse, and every fn also takes the pattern as a string for a one-shot
+!#
+
+#* a compiled pattern *#
+pub type Regex = table
+
+const native: {
+  compile: fn(pattern: string) -> Regex | :nil,
+  is_match: fn(regex: Regex | string, haystack: string) -> bool,
+  find: fn(regex: Regex | string, haystack: string) -> string | :nil,
+  find_all: fn(regex: Regex | string, haystack: string) -> function,
+  free: fn(regex: Regex) -> :nil,
+} = __internal_native("re")
+
+#*
+compiles a pattern, or gives you :nil when it can't
+
+```repl
+rεvo > const re = import("std:re")
+rεvo > const digits = re("[0-9]+")
+rεvo > re.find(digits, "abc 123")
+"123"
+```
+*#
+pub fn __call(self, pattern: string) -> Regex | :nil native.compile(pattern)
+
+#* checks if the pattern matches anywhere in the haystack *#
+pub const match? = native.is_match
+
+#* the first match, or :nil *#
+pub const find = native.find
+
+#* an iter over every match, as `{start, end, match}` *#
+pub const find_all = native.find_all
+
+#* frees a compiled pattern now, instead of when the gc gets to it *#
+pub const free = native.free

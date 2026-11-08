@@ -13,7 +13,6 @@ const root = @import("root.zig");
 const ParamType = root.host.ParamType;
 const HostFunc = root.host.HostFunc;
 
-pub const regex_on = @import("build_options").regex;
 pub const ffi_on = @import("build_options").ffi;
 pub const http_on = revo.default_caps.io;
 pub const fs_on = revo.default_caps.io;
@@ -38,12 +37,8 @@ pub const Group = struct {
 };
 
 /// one group per `.rv` next to its zig, in surface order
-/// , `find` is first match wins, so the globals stay first
-/// , `re`/`ffi`/`http` specs are dropped at load when they're off, so the
-///   mvzr/io chain never reaches targets like freestanding wasm
 pub const groups: []const Group = &.{
     Group.init("top", @embedFile("top.rv"), &.{ @import("root.zig").root_impls, @import("root.zig").os_impls }),
-    Group.init("re", @embedFile("re.rv"), &.{if (regex_on) @import("regex.zig").impls else &.{}}),
     Group.init("ffi", @embedFile("ffi.rv"), &.{if (ffi_on) @import("ffi_lib.zig").impls else &.{}}),
     Group.init("number", @embedFile("number.rv"), &.{@import("number.zig").impls}),
     Group.init("string", @embedFile("string.rv"), &.{@import("string.zig").impls}),
@@ -228,15 +223,15 @@ fn checkImplSig(spec: FnSpec) !void {
     }
 }
 
-/// drop specs of compiled-out modules; `re`/`ffi` declare no globals or
-/// methods, so a namespaced-module match is exact
+/// drop specs of compiled-out modules
+/// ; ffi declares no globals or methods
+/// , so a namespaced-module match is exact
 fn dropDisabledModules(alloc: std.mem.Allocator, specs: []FnSpec) ![]FnSpec {
     var kept = std.ArrayList(FnSpec).empty;
     errdefer kept.deinit(alloc);
     for (specs) |s| {
         const disabled = s.head.kind == .namespaced and s.head.module != null and
-            ((std.mem.eql(u8, s.head.module.?, "re") and !regex_on) or
-                (std.mem.eql(u8, s.head.module.?, "ffi") and !ffi_on) or
+            ((std.mem.eql(u8, s.head.module.?, "ffi") and !ffi_on) or
                 (std.mem.eql(u8, s.head.module.?, "http") and !http_on) or
                 (std.mem.eql(u8, s.head.module.?, "fs") and !fs_on) or
                 (std.mem.eql(u8, s.head.module.?, "file") and !fs_on) or
@@ -1263,8 +1258,8 @@ test "moduleDoc finds table docs in the single file" {
     _ = try loadAllSpecs(testing.allocator);
     try testing.expectEqualStrings("filesystem access & ops", moduleDoc("fs"));
     try testing.expectEqualStrings("filesystem access & ops", moduleDoc("file"));
-    // `re` must not match the `revo` table
-    try testing.expectEqualStrings("regular expressions!", moduleDoc("re"));
+    // `re` is std now, and it must not match the `revo` table
+    try testing.expectEqualStrings("", moduleDoc("re"));
     try testing.expect(moduleDoc("revo").len > 0);
     try testing.expectEqualStrings("numeric math", moduleDoc("math"));
     try testing.expectEqualStrings("command-line arguments parsing", moduleDoc("argparse"));

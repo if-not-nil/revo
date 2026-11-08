@@ -1,18 +1,16 @@
 const mvzr = @import("vendor/mvzr.zig");
 
-const revo = @import("../root.zig");
-const Value = revo.Value;
-const VM = revo.VM;
-const root = @import("root.zig");
-const HostResult = root.host.HostResult;
+const revo = @import("revo");
+const std = @import("std");
 
-const Args = root.host.ArgTypes;
+const extension = revo.extension;
+const Value = extension.Value;
+const VM = extension.VM;
+const HostResult = extension.HostResult;
+
+const Args = extension.ArgTypes;
 
 pub const Impl = struct {
-    pub fn __call(vm: *VM, self: Args.any, pattern: Args.string) !HostResult {
-        _ = self;
-        return compile(vm, pattern);
-    }
     pub fn compile(vm: *VM, pattern: Args.string) !HostResult {
         const pattern_str = try vm.runtime.alloc.dupe(u8, vm.stringValue(@backingInt(pattern)));
         defer vm.runtime.alloc.free(pattern_str);
@@ -31,7 +29,7 @@ pub const Impl = struct {
         const gc_fn_id = try vm.installHost("__regex_gc", .{
             .arity = 1,
             .param_types = &.{.table},
-            .func = gcFn,
+            .func = extension.abiSafe(gcFn),
             .variadic = false,
             .ret_type = .any,
         });
@@ -73,7 +71,7 @@ pub const Impl = struct {
             const gc_fn_id = try vm.installHost("__regex_it_gc", .{
                 .arity = 1,
                 .param_types = &.{.table},
-                .func = itGcFn,
+                .func = extension.abiSafe(itGcFn),
                 .variadic = false,
                 .ret_type = .any,
             });
@@ -83,7 +81,7 @@ pub const Impl = struct {
         const next_fn_id = try vm.installHost("__regex_next", .{
             .arity = 1,
             .param_types = &.{.table},
-            .func = nextFn,
+            .func = extension.abiSafe(nextFn),
             .variadic = false,
             .ret_type = .any,
         });
@@ -107,8 +105,6 @@ pub const Impl = struct {
     }
 };
 
-pub const impls = root.host.impls(Impl).val;
-
 fn getRegexFromTable(val: Value, vm: *VM) !*mvzr.Regex {
     const ptr_val = vm.getField(val, "_ptr") orelse
         return error.InvalidRegex;
@@ -131,32 +127,38 @@ const ResolvedRegex = struct {
 };
 
 fn resolveRegex(val: Value, vm: *VM) !ResolvedRegex {
-    if (val.isTable()) {
+    if (val.isTable())
         return .{ .regex = try getRegexFromTable(val, vm), .owned = false };
-    }
-    if (val.isString()) {
+
+    if (val.isString())
         return .{ .regex = try compileFromString(val, vm), .owned = true };
-    }
+
     return error.InvalidRegex;
 }
 
 fn itGcFn(args: []const Value, vm: *VM) !HostResult {
     const ptr_val = vm.getField(args[0], "_ptr") orelse
         return .data(Value.new.nil());
+
     const regex_ptr = ptr_val.asOpaque().?;
     const regex: *mvzr.Regex = @ptrCast(@alignCast(regex_ptr));
+
     _ = vm.removeField(args[0], "_ptr");
     vm.runtime.alloc.destroy(regex);
+
     return .data(Value.new.nil());
 }
 
 fn gcFn(args: []const Value, vm: *VM) !HostResult {
     const ptr_val = vm.getField(args[0], "_ptr") orelse
         return .data(Value.new.nil());
+
     const regex_ptr = ptr_val.asOpaque().?;
     const regex: *mvzr.Regex = @ptrCast(@alignCast(regex_ptr));
+
     _ = vm.removeField(args[0], "_ptr");
     vm.runtime.alloc.destroy(regex);
+
     return .data(Value.new.nil());
 }
 
@@ -166,14 +168,16 @@ fn nextFn(args: []const Value, vm: *VM) !HostResult {
 
     const ptr_val = vm.getField(args[0], "_ptr") orelse
         return .data(Value.new.core(.done));
+
     const haystack_val = vm.getField(args[0], "haystack") orelse
         return .data(Value.new.core(.done));
+
     const pos_val = vm.getField(args[0], "pos") orelse
         return .data(Value.new.core(.done));
 
     const regex: *mvzr.Regex = @ptrCast(@alignCast(ptr_val.asOpaque().?));
     const haystack = vm.stringValue(haystack_val.asString().?);
-    const pos: usize = root.host.numToInt(usize, pos_val.asNumOpt().?) orelse
+    const pos: usize = extension.numToInt(usize, pos_val.asNumOpt().?) orelse
         return .data(Value.new.core(.done));
 
     if (pos > haystack.len) return .data(Value.new.core(.done));
