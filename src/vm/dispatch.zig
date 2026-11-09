@@ -673,19 +673,28 @@ inline fn execFiberDispatch(
             const rhs_val = regRead(regs, base, instr.c);
             // f64 compare is the language's number equality for all values,
             // including +-inf and NaN (unordered -> false), so no conversion
-            const lhs: f64 = @bitCast(lhs_val.bits);
-            const rhs: f64 = @bitCast(rhs_val.bits);
 
-            const result = switch (op) {
-                .eq_int => lhs == rhs,
-                .neq_int => lhs != rhs,
-                .lt_int => lhs < rhs,
-                .gt_int => lhs > rhs,
-                .lte_int => lhs <= rhs,
-                .gte_int => lhs >= rhs,
-                else => unreachable,
+            if (lhs_val.asNumOpt()) |lhs| if (rhs_val.asNumOpt()) |rhs| {
+                const result = switch (op) {
+                    .eq_int => lhs == rhs,
+                    .neq_int => lhs != rhs,
+                    .lt_int => lhs < rhs,
+                    .gt_int => lhs > rhs,
+                    .lte_int => lhs <= rhs,
+                    .gte_int => lhs >= rhs,
+                    else => unreachable,
+                };
+                regWrite(regs, base, instr.a, Value.new.boolean(result));
+
+                fetchNext(self, fiber, &instr);
+                continue :dispatch instr.op;
             };
-            regWrite(regs, base, instr.a, Value.new.boolean(result));
+
+            // the checkers `number` picks this op
+            // , but it doesnt prove the operands
+            //   , anything else just gets the generic compare
+            const generic: opcode.Opcode = comptime @field(opcode.Opcode, @tagName(op)[0 .. @tagName(op).len - "_int".len]);
+            try compare_impl.evalCachedFast(regs, base, self, instr, generic);
 
             fetchNext(self, fiber, &instr);
             continue :dispatch instr.op;
@@ -1084,9 +1093,13 @@ inline fn execFiberDispatch(
         },
         inline .add_imm, .sub_imm, .mul_imm => |op| {
             const lhs_val = regRead(regs, base, instr.b);
-            if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
-            const lhs: f64 = @bitCast(lhs_val.bits);
             const rhs: f64 = @floatFromInt(@as(i64, @intCast(instr.bx)));
+            const lhs = lhs_val.asNumOpt() orelse {
+                if (try execImmSlow(self, regs, base, instr, op, lhs_val, Value.new.num(rhs), alloc)) |failure| return failure;
+
+                fetchNext(self, fiber, &instr);
+                continue :dispatch instr.op;
+            };
             const result: f64 = switch (op) {
                 .add_imm => lhs + rhs,
                 .sub_imm => lhs - rhs,
@@ -1100,7 +1113,6 @@ inline fn execFiberDispatch(
         },
         .band_imm => {
             const lhs_val = regRead(regs, base, instr.b);
-            if (debug_assert_types) std.debug.assert(lhs_val.isNumber());
             const li: i64 = revo.memory.numToI64(@as(f64, @bitCast(lhs_val.bits))) orelse
                 return self.fail(error.TypeError, "expected integer, got {s}", .{revo.base.typeof(lhs_val, self)});
             const ri: i64 = @intCast(instr.bx);
@@ -1111,9 +1123,14 @@ inline fn execFiberDispatch(
         },
         .lt_int_imm => {
             const lhs_val = regRead(regs, base, instr.b);
-            const lhs: f64 = @bitCast(lhs_val.bits);
-            const rhs: i64 = @intCast(instr.bx);
-            regWrite(regs, base, instr.a, Value.new.boolean(lhs < @as(f64, @floatFromInt(rhs))));
+            const rhs: f64 = @floatFromInt(@as(i64, @intCast(instr.bx)));
+            const lhs = lhs_val.asNumOpt() orelse {
+                if (try execImmSlow(self, regs, base, instr, .lt_int_imm, lhs_val, Value.new.num(rhs), alloc)) |failure| return failure;
+
+                fetchNext(self, fiber, &instr);
+                continue :dispatch instr.op;
+            };
+            regWrite(regs, base, instr.a, Value.new.boolean(lhs < rhs));
 
             fetchNext(self, fiber, &instr);
             continue :dispatch instr.op;
@@ -1554,6 +1571,40 @@ noinline fn execPow(self: *VM, regs: []Value, base: usize, instr: Instruction) V
     );
 }
 
+/// a non number reached an `_imm` op!
+/// the checked picked it thru a `number` hint
+///   , same result or error the generic op would give
+noinline fn execImmSlow(
+    self: *VM,
+    regs: []Value,
+    base: usize,
+    instr: Instruction,
+    comptime op: opcode.Opcode,
+    lhs: Value,
+    rhs: Value,
+    alloc: std.mem.Allocator,
+) VM.RunError!?VM.RunFailure {
+    return switch (op) {
+        .add_imm => self.fail(
+            error.IncompatibleTypes,
+            "cannot add {s} and {s}",
+            .{ revo.base.typeof(lhs, self), revo.base.typeof(rhs, self) },
+        ),
+        .sub_imm => self.fail(
+            error.IncompatibleTypes,
+            "cannot subtract {s} from {s}",
+            .{ revo.base.typeof(rhs, self), revo.base.typeof(lhs, self) },
+        ),
+        .mul_imm => execStringRepeat(self, regs, base, instr, lhs, rhs, alloc),
+        // lhs isn't a number and rhs is, so the tags differ, same as `compare.zig`
+        .lt_int_imm => {
+            try self.setRuntimeMessageFmt("cannot compare {s} with {s}", .{ @tagName(lhs.tag()), @tagName(rhs.tag()) });
+            return error.TypeError;
+        },
+        else => unreachable,
+    };
+}
+
 /// string * n fallback for .mul (numeric fast path stays inline)
 noinline fn execStringRepeat(
     self: *VM,
@@ -1605,7 +1656,6 @@ const opcode = @import("opcode.zig");
 const Instruction = opcode.Instruction;
 const VM = @import("VM.zig");
 const Value = VM.memory.Value;
-const debug_assert_types = VM.debug_assert_types;
 const regRead = VM.regRead;
 const regWrite = VM.regWrite;
 const lookup = VM.lookup;
