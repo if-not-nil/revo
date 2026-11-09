@@ -138,15 +138,21 @@ pub fn stripPub(line: []const u8) []const u8 {
 pub fn moduleMemberAt(src: []const u8, pos: Position) ?[]const u8 {
     const offset = positionToOffset(src, pos) orelse return null;
     var start = offset;
+
     while (start > 0 and isWordChar(src[start - 1])) start -= 1;
-    if (start >= offset) return null;
+    // the cursor can be on the words first char too
+    if (start == offset and (offset >= src.len or !isWordChar(src[offset]))) return null;
+
     var i = start;
     while (i > 0 and (src[i - 1] == ' ' or src[i - 1] == '\t')) i -= 1;
+
     if (i == 0 or src[i - 1] != '.') return null;
     i -= 1;
     while (i > 0 and (src[i - 1] == ' ' or src[i - 1] == '\t')) i -= 1;
+
     var mod_start = i;
     while (mod_start > 0 and isWordChar(src[mod_start - 1])) mod_start -= 1;
+
     if (mod_start >= i) return null;
     return src[mod_start..i];
 }

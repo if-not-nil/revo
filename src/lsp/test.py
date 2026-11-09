@@ -988,7 +988,8 @@ async def test_rename(client: LanguageClient):
 async def open_doc(client: LanguageClient, uri: str, text: str):
     client.text_document_did_open(
         params=DidOpenTextDocumentParams(
-            text_document=TextDocumentItem(uri=uri, language_id="revo", version=1, text=text)
+            text_document=TextDocumentItem(
+                uri=uri, language_id="revo", version=1, text=text)
         )
     )
     await client.wait_for_notification("textDocument/publishDiagnostics")
@@ -1010,7 +1011,8 @@ async def test_formatting_edits_changed_lines(client: LanguageClient):
     await open_doc(client, uri, "let x=1\nlet y = 2\nif (x) do\nprint(y)\nend\n")
 
     edits = await client.text_document_formatting_async(
-        params=DocumentFormattingParams(text_document=TextDocumentIdentifier(uri=uri), options=FMT_OPTS),
+        params=DocumentFormattingParams(
+            text_document=TextDocumentIdentifier(uri=uri), options=FMT_OPTS),
     )
     # `let y` and `end` are already fine, and the reindented line is its own edit
     assert edit_rows(edits) == [
@@ -1030,7 +1032,8 @@ async def test_range_formatting(client: LanguageClient):
     edits = await client.text_document_range_formatting_async(
         params=DocumentRangeFormattingParams(
             text_document=TextDocumentIdentifier(uri=uri),
-            range=Range(start=Position(line=1, character=3), end=Position(line=2, character=0)),
+            range=Range(start=Position(line=1, character=3),
+                        end=Position(line=2, character=0)),
             options=FMT_OPTS,
         ),
     )

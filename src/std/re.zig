@@ -1,7 +1,6 @@
 const mvzr = @import("vendor/mvzr.zig");
 
 const revo = @import("revo");
-const std = @import("std");
 
 const extension = revo.extension;
 const Value = extension.Value;

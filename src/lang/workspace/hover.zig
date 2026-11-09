@@ -44,8 +44,11 @@ pub fn hover(
                 }
             }
         }
-        if (common.baselibSig(name)) |spec| {
-            return try renderSpecHover(alloc, spec, snap.text, pos, name);
+        // base name (`x.encode` is x's and not `json.encode`)
+        if (txt.moduleMemberAt(snap.text, pos) == null) {
+            if (common.baselibSig(name)) |spec| {
+                return try renderSpecHover(alloc, spec, snap.text, pos, name);
+            }
         }
         //
         // member off an imported module, `mod.member` shows its def

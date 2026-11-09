@@ -89,6 +89,20 @@ const Handler = struct {
         try h.file_to_uri.put(h.alloc, file_id, u);
     }
 
+    /// the uri of a file whether its opened or not
+    /// deps the workspace read from disk
+    ///   (std: modules, an import you didnt open) are go by their realpath
+    fn uriOf(
+        h: *Handler,
+        arena: std.mem.Allocator,
+        file_id: Workspace.FileId,
+    ) ?[]const u8 {
+        if (h.file_to_uri.get(file_id)) |uri| return uri;
+        const snap = h.ws.snapshot(file_id) orelse return null;
+        if (!std.Io.Dir.path.isAbsolute(snap.name)) return null;
+        return std.fmt.allocPrint(arena, "file://{s}", .{snap.name}) catch null;
+    }
+
     /// remove uri from both maps and free key string
     fn unregisterDoc(h: *Handler, uri: []const u8) void {
         const kv = h.uri_to_file.fetchRemove(uri) orelse return;
@@ -256,10 +270,13 @@ const Handler = struct {
     ) !?T.Definition.Result {
         const file_id = h.uri_to_file.get(params.textDocument.uri) orelse return null;
         const snap = h.ws.snapshot(file_id) orelse return null;
+
         const ws_pos = clientToWs(snap.text, params.position, h.enc);
         const loc = try h.ws.definition(arena, file_id, ws_pos, .{}) orelse return null;
-        const uri = h.file_to_uri.get(loc.file_id) orelse return null;
+
+        const uri = h.uriOf(arena, loc.file_id) orelse return null;
         const loc_text = (h.ws.snapshot(loc.file_id) orelse snap).text;
+
         return T.Definition.Result{ .definition = .{ .location = .{
             .uri = uri,
             .range = .{ .start = wsToClient(loc_text, loc.range.start, h.enc), .end = wsToClient(loc_text, loc.range.end, h.enc) },
@@ -368,7 +385,8 @@ const Handler = struct {
         // map workspace file ids back to uris
         var out = try std.ArrayList(T.Location).initCapacity(arena, refs.len);
         for (refs) |ref| {
-            const uri = h.file_to_uri.get(ref.file_id) orelse continue;
+            const uri = h.uriOf(arena, ref.file_id) orelse continue;
+
             const ref_text = (h.ws.snapshot(ref.file_id) orelse snap).text;
             out.appendAssumeCapacity(.{
                 .uri = uri,

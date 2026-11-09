@@ -114,23 +114,57 @@ pub fn collectSigsFromParsed(
     root: *const cst.CstNode,
     sig_map: *std.StringHashMapUnmanaged(FnSig),
 ) void {
+    var arena = std.heap.ArenaAllocator.init(self.alloc);
+    defer arena.deinit();
+    var aliases = std.StringHashMap(types.Alias).init(arena.allocator());
+    var alias_visitor = AliasVisitor{ .aliases = &aliases };
+    alias_visitor.visit(root);
+
     var visitor = SigVisitor{
         .ws = self,
         .sig_map = sig_map,
         .alloc = self.alloc,
+        .aliases = &aliases,
     };
     visitor.visit(root);
 }
+
+/// non generic aliases in source order, so that a later one can use an earliwr one
+const AliasVisitor = struct {
+    aliases: *std.StringHashMap(types.Alias),
+
+    pub fn visit(self: *@This(), node: *const cst.CstNode) void {
+        const u = cst.unwrapParen(node) orelse return;
+        if (u.kind == .type_alias) {
+            const t = u.kind.type_alias;
+            if (t.segs.len == 1 and t.tps.len == 0) {
+                const alloc = self.aliases.allocator;
+                if (types.evalTypeExpr(
+                    .{ .alloc = alloc, .aliases = self.aliases },
+                    t.type,
+                )) |info| {
+                    self.aliases.put(t.segs[0].text, .{ .info = info }) catch {};
+                } else |_| {}
+            }
+        }
+        cst.walkCst(@This(), self, node);
+    }
+};
 
 const SigVisitor = struct {
     ws: *Workspace,
     sig_map: *std.StringHashMapUnmanaged(FnSig),
     alloc: std.mem.Allocator,
+    aliases: *const std.StringHashMap(types.Alias),
 
     /// evalTypeExpr can return shared comptime sentinels or types borrowing cst
     /// sig_map can outlive both so we need deepcopy
     fn ownedType(self: *@This(), te: *const cst.CstType) ?types.TypeInfo {
-        const t = types.evalBare(self.alloc, te) catch return null;
+        const t = types.evalTypeExpr(.{
+            .alloc = self.alloc,
+            .aliases = self.aliases,
+        }, te) catch return null;
+
         return types.clone(t, self.alloc) catch null;
     }
 
