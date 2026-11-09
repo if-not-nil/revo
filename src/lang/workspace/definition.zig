@@ -23,7 +23,31 @@ pub fn definition(
 ) !?Location {
     const snap = self.snapshot(id) orelse return null;
     const name = txt.wordAtPosition(snap.text, pos) orelse return null;
+
+    if (txt.moduleMemberAt(snap.text, pos)) |mod_name| {
+        if (self.resolveDepId(alloc, id, mod_name)) |dep_id| {
+            return memberLocation(self, alloc, dep_id, name, opts);
+        }
+    }
     return bestLocation(self, alloc, name, id, pos, opts);
+}
+
+fn memberLocation(
+    self: *Workspace,
+    alloc: std.mem.Allocator,
+    dep_id: FileId,
+    name: []const u8,
+    opts: pipeline.BuildOptions,
+) !?Location {
+    const snap = self.snapshot(dep_id) orelse return null;
+    const entry = try self.ensureInspect(alloc, dep_id, opts);
+
+    for (entry.symbols) |sym| {
+        if (!std.mem.eql(u8, sym.name, name)) continue;
+        return .{ .file_id = dep_id, .name = snap.name, .range = sym.range };
+    }
+
+    return null;
 }
 
 /// every reference to a name, here plus all deps
