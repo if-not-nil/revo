@@ -1,4 +1,3 @@
-// zlint-disable line-length
 const std = @import("std");
 
 const cst = @import("./cst.zig");

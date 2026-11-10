@@ -681,10 +681,40 @@ pub fn build(b: *Build) !void {
         // ref:
         // https://github.com/KurtWagner/zlinter/blob/master/RULES.md
         var builder = zlinter.builder(b, .{});
-        builder.addRule(.{ .builtin = .field_naming }, .{});
-        builder.addRule(.{ .builtin = .declaration_naming }, .{});
-        builder.addRule(.{ .builtin = .function_naming }, .{});
-        builder.addRule(.{ .builtin = .file_naming }, .{});
+
+        // ~ short names (vm, op, t) are ok
+        // ~ host fns are snake_case since the zig name is the revo name (ends_with?)
+        // ~ error kind enums mirror zig error names, and SCREAMING_SNAKE_CASE consts are fine (i dont care about what the zig style guide says)
+        // ~ fn-typed fields and args go both ways
+        builder.addRule(.{ .builtin = .field_naming }, .{
+            .enum_field = .off,
+            .enum_field_min_len = .off,
+            .struct_field_min_len = .off,
+            .union_field_min_len = .off,
+            .error_field = .{ .warning = .title_case },
+            .struct_field_that_is_fn = .off,
+        });
+        builder.addRule(.{ .builtin = .declaration_naming }, .{
+            .exclude_export = true,
+            .var_decl = .{ .warning = .snake_case },
+            .const_decl = .off,
+            .decl_that_is_type = .{ .warning = .title_case },
+            .decl_that_is_namespace = .off,
+            .decl_that_is_fn = .off,
+            .decl_name_min_len = .off,
+        });
+        builder.addRule(.{ .builtin = .function_naming }, .{
+            .exclude_export = true,
+            .function = .off,
+            .function_that_returns_type = .{ .warning = .title_case },
+            .function_arg = .{ .warning = .snake_case },
+            .function_arg_that_is_fn = .off,
+        });
+        builder.addRule(.{ .builtin = .file_naming }, .{
+            .file_struct = .{ .warning = .title_case },
+            .file_namespace = .{ .warning = .snake_case },
+        });
+
         builder.addRule(.{ .builtin = .switch_case_ordering }, .{});
         builder.addRule(.{ .builtin = .no_deprecated }, .{});
         builder.addRule(.{ .builtin = .no_orelse_unreachable }, .{});
@@ -694,6 +724,13 @@ pub fn build(b: *Build) !void {
         // builder.addRule(.{ .builtin = .field_ordering }, .{});
         builder.addRule(.{ .builtin = .import_ordering }, .{});
         builder.setCompileUnits(&.{.@"test"});
+        // stuff that isnt part of the build (todo this is a botch find a way to use the actual gitignore)
+        builder.addPaths(.{ .exclude_dirs = &.{
+            b.path(".priv"),
+            b.path("notes"),
+            b.path("examples"),
+            b.path("src/std/vendor"),
+        } });
         break :step builder.build();
     });
     //
