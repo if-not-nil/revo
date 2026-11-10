@@ -1,4 +1,3 @@
-// zlint-disable line-length -- yeah
 const std = @import("std");
 
 const revo = @import("revo");

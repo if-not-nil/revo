@@ -366,7 +366,6 @@ test "vm gc stress test allocates many objects" {
     try vm.push(try vm.ownValueString("root"));
     try vm.push(Value.new.table(table_ids.items[0]));
     try vm.push(try vm.ownValueString(vm.stringValue(string_ids.items[0])));
-    // SAFETY: shut up zlint
     defer {
         _ = vm.pop() catch {};
         _ = vm.pop() catch {};

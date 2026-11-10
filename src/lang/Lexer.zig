@@ -1,5 +1,3 @@
-//! zlint-disable line-length
-//!
 //! lexer? i hardly know her
 //!   one pass over source, significant tokens plus trivia plus errors
 //!
