@@ -114,7 +114,6 @@ pub fn register_base(vm: *revo.VM) !void {
     const argv_atom = try vm.internAtom("argv");
     const all = specs.full_specs;
     try specs.registerAll(vm, all, mtPrototype);
-    try attachMathPi(vm);
     try registerTypePredicates(vm);
 
     const argv_id = try vm.tables.create();
@@ -132,14 +131,6 @@ pub fn populateArgv(vm: *revo.VM) !void {
     const argv = try vm.tables.get(argv_id);
     for (vm.runtime.argv) |arg| {
         try argv.push(vm.runtime.alloc, try vm.ownValueString(arg));
-    }
-}
-
-fn attachMathPi(vm: *revo.VM) !void {
-    if (vm.user_globals.get(try vm.internAtom("math"))) |t| {
-        if (t.asTable()) |table_id| {
-            try vm.putField(table_id, "pi", Value.new.num(std.math.pi));
-        }
     }
 }
 

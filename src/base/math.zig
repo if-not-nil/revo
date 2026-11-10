@@ -95,6 +95,10 @@ pub const Impl = struct {
         const result = std.math.approxEqAbs(f64, x, y, tolerance);
         return .data(Value.new.boolean(result));
     }
+    pub fn pi(vm: *VM) !HostResult {
+        _ = vm;
+        return .data(Value.new.num(std.math.pi));
+    }
 };
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Impl{
@@ -122,6 +126,7 @@ fn maxFn(args: []const Value, _: *VM) !HostResult {
 
 test "math library" {
     try testing.topNumber("math.abs(-5)", 5);
+    try testing.topNumber("math.pi()", std.math.pi);
     try testing.topNumber("math.abs(5)", 5);
     try testing.topNumber("math.floor(3.7)", 3);
     try testing.topNumber("math.ceil(3.2)", 4);
