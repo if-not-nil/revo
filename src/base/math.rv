@@ -50,4 +50,6 @@ pub declare math = {
   sign: fn(value: number) -> number,
   #* test whether two values are close within the given number of decimal places *#
   close?: fn(x: number, y: number, places: number) -> bool,
+  #* pi, 3.141592653589793 *#
+  pi: fn() -> number,
 }

@@ -1101,10 +1101,19 @@ pub fn desugarMethod(alloc: std.mem.Allocator, node: *CstNode) std.mem.Allocator
     };
 
     var params = f.params;
+    var commas = f.commas;
     if (f.head == .method_colon) {
         params = try alloc.alloc(CstParam, f.params.len + 1);
         params[0] = .{ .name_tok = syntheticToken("self", node.span) };
         @memcpy(params[1..], f.params);
+
+        // `self` needs its own comma when anything follows it
+        if (f.params.len > 0) {
+            commas = try alloc.alloc(Token, f.commas.len + 1);
+            commas[0] = syntheticToken(",", node.span);
+            commas[0].type = .comma;
+            @memcpy(commas[1..], f.commas);
+        }
     }
 
     const value = try allocNode(alloc, node.span, .{ .fn_def = .{
@@ -1117,7 +1126,7 @@ pub fn desugarMethod(alloc: std.mem.Allocator, node: *CstNode) std.mem.Allocator
         .gt_tok = f.gt_tok,
         .lparen_tok = f.lparen_tok,
         .params = params,
-        .commas = f.commas,
+        .commas = commas,
         .rparen_tok = f.rparen_tok,
         .arrow_tok = f.arrow_tok,
         .return_type = f.return_type,

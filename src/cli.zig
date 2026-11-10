@@ -554,6 +554,11 @@ fn parseArgs(init: std.process.Init, args: []const [:0]const u8) !Config {
         config.script_path = ap.cliArg(&arg_list, "script").value; // script positional
     }
 
+    if (config.mode == .bench and config.script_path == null) {
+        printError(init, "bench needs a script, or `-` for stdin", .{});
+        return error.InsufficientArgs;
+    }
+
     if (ap.cliArg(&arg_list, "collection").value) |v| { // --collection
         var it = std.mem.splitScalar(u8, v, ',');
         while (it.next()) |pair| {
