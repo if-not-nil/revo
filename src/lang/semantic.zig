@@ -240,6 +240,13 @@ const Scope = struct {
 const Entry = struct {
     info: types_mod.TypeInfo,
     doc: ?[]const u8 = null,
+    fields: ?*std.StringHashMap(types_mod.TypeInfo) = null,
+    /// annotated so that later assignments have to coerce to info
+    typed: bool = false,
+    /// assigned from inside an fn body
+    /// , the closure can run anywhere
+    /// , so the shape isn't fully known anymore (wont ever be  cleared; could miss flags btu never false-flags)
+    escaped: bool = false,
 };
 
 const FnSig = types_mod.FunctionSignature;
@@ -267,12 +274,6 @@ const SemanticChecker = struct {
     return_types: std.ArrayList(types_mod.TypeInfo),
     type_map: ?*std.StringHashMap(types_mod.TypeInfo),
     annotations: ?types_mod.Annotations,
-    typed_names: std.StringHashMap(void),
-    table_field_map: std.StringHashMap(std.StringHashMap(types_mod.TypeInfo)),
-    /// idents assigned inside fn bodies
-    /// the closure may run anywhere, so their table shapes are no longer fully known
-    /// (never cleared; may miss flags, never false-flags)
-    escaped: std.StringHashMap(void),
     /// vm globals, module field resolution only applies to these so a
     /// local binding named `fs` shadows the baselib module
     known_globals: std.StringHashMap(void),
@@ -321,9 +322,6 @@ const SemanticChecker = struct {
             .return_types = try .initCapacity(alloc, 4),
             .type_map = type_map,
             .annotations = annotations,
-            .typed_names = .init(alloc),
-            .table_field_map = .init(alloc),
-            .escaped = .init(alloc),
             .known_globals = .init(alloc),
             .shadowed_globals = .init(alloc),
             .resolver = resolver,
@@ -508,13 +506,43 @@ const SemanticChecker = struct {
     }
 
     fn lookupEntry(self: *SemanticChecker, name: []const u8) ?Entry {
+        if (self.lookupEntryPtr(name)) |e| return e.*;
+        if (self.type_aliases.get(name)) |a| return .{ .info = a.info, .doc = a.doc };
+        return null;
+    }
+
+    /// the innermost binding of `name`, scopes only
+    fn lookupEntryPtr(self: *SemanticChecker, name: []const u8) ?*Entry {
         var i: usize = self.scopes.items.len;
         while (i > 0) {
             i -= 1;
-            if (self.scopes.items[i].values.get(name)) |v| return v;
+            if (self.scopes.items[i].values.getPtr(name)) |v| return v;
         }
-        if (self.type_aliases.get(name)) |a| return .{ .info = a.info, .doc = a.doc };
         return null;
+    }
+
+    fn trackedFields(self: *SemanticChecker, name: []const u8) ?*std.StringHashMap(types_mod.TypeInfo) {
+        const e = self.lookupEntryPtr(name) orelse return null;
+        return e.fields;
+    }
+
+    fn isTyped(self: *SemanticChecker, name: []const u8) bool {
+        const e = self.lookupEntryPtr(name) orelse return false;
+        return e.typed;
+    }
+
+    /// an assignment rebinds `name` in the current scope
+    /// its the same variable so it keeps the doc and the flow state of the binding it hit
+    fn redeclare(self: *SemanticChecker, name: []const u8, t: types_mod.TypeInfo) !void {
+        const prev = if (self.lookupEntryPtr(name)) |e| e.* else null;
+        try self.declare(name, t, if (prev) |e| e.doc else null);
+
+        const p = prev orelse return;
+        const now = self.lookupEntryPtr(name).?;
+
+        now.fields = p.fields;
+        now.typed = p.typed;
+        now.escaped = p.escaped;
     }
 
     // the CheckCtx scope for types.zig inference
@@ -591,25 +619,25 @@ const SemanticChecker = struct {
         if (self.fn_nesting == 0) return;
         if (self.scopes.items.len == 0) return;
         if (self.scopes.items[self.scopes.items.len - 1].values.contains(name)) return;
-        try self.escaped.put(name, {});
+        if (self.lookupEntryPtr(name)) |e| e.escaped = true;
     }
 
     /// unknown member access on a fully-known table shape
     /// so `t.a` where every field of t is known but lacks `a`
     /// ~ open tables with unknown shapes (fields == null) never flag
-    /// ~ assigned and imported fields count via table_field_map
+    /// ~ assigned and imported fields count via the entry's tracked fields
     /// ~ escaped tables (mutated through closures) never flag
     fn checkKnownField(self: *SemanticChecker, object: *const cst.CstNode, name: []const u8, span: Lexer.Span) !void {
         const object_type = types_mod.inferExprType(self.check(), object);
         switch (object_type.tag) {
             .table => |tbl| {
                 if (cst.identText(object)) |oname| {
-                    if (self.escaped.contains(oname)) return;
+                    if (self.lookupEntryPtr(oname)) |e| if (e.escaped) return;
                 }
                 if (tbl.fields) |fs| {
                     if (types_mod.findField(fs, name) != null) return;
                     if (cst.identText(object)) |oname| {
-                        if (self.table_field_map.get(oname)) |fields| {
+                        if (self.trackedFields(oname)) |fields| {
                             if (fields.get(name) != null) return;
                         }
                     }
@@ -677,7 +705,7 @@ const SemanticChecker = struct {
                 if (types_mod.findField(fs, name)) |f| return f.field_type;
             }
             if (cst.identText(object)) |oname| {
-                if (self.table_field_map.get(oname)) |fields| {
+                if (self.trackedFields(oname)) |fields| {
                     if (fields.get(name)) |ft| return ft;
                 }
             }
@@ -1430,7 +1458,7 @@ const SemanticChecker = struct {
         const unwrapped = cst.unwrapParen(node) orelse return declared;
         if (unwrapped.kind != .ident) return declared;
         if (declared.tag != .table) return declared;
-        const tracked = self.table_field_map.get(unwrapped.kind.ident.tok.text) orelse return declared;
+        const tracked = self.trackedFields(unwrapped.kind.ident.tok.text) orelse return declared;
         if (tracked.count() == 0) return declared;
 
         const base = declared.tag.table.fields orelse &.{};
@@ -1591,7 +1619,6 @@ const SemanticChecker = struct {
             const sig = try self.makeFnSig(f.params, f.return_type, tps, null);
             const fn_type: types_mod.TypeInfo = .{ .tag = .{ .function = sig } };
             if (binding.type) |type_expr| {
-                try self.typed_names.put(name, {});
                 const expected = try self.evalCheckedTypeExpr(type_expr);
                 if (!types_mod.canCoerce(fn_type, expected)) {
                     try self.appendTypeMismatch(
@@ -1602,6 +1629,7 @@ const SemanticChecker = struct {
                     );
                 }
                 try self.declare(name, expected, doc);
+                self.lookupEntryPtr(name).?.typed = true;
             } else {
                 try self.declare(name, fn_type, doc);
             }
@@ -1623,7 +1651,8 @@ const SemanticChecker = struct {
 
         // table literal -- analyze entries and record field types for method shadowing
         if (vu.kind == .table) {
-            var fields = std.StringHashMap(types_mod.TypeInfo).init(self.alloc);
+            const fields = try self.alloc.create(std.StringHashMap(types_mod.TypeInfo));
+            fields.* = .init(self.alloc);
             var implicit_idx: u32 = 0;
             for (vu.kind.table.entries) |entry| {
                 switch (entry) {
@@ -1662,12 +1691,10 @@ const SemanticChecker = struct {
                     },
                 }
             }
-            try self.table_field_map.put(name, fields);
             const table_type = types_mod.inferExprType(self.check(), binding.value);
             _ = self.annotate(vu, table_type);
 
             if (binding.type) |type_expr| {
-                try self.typed_names.put(name, {});
                 const expected = try self.evalCheckedTypeExpr(type_expr);
                 if (!types_mod.canCoerce(table_type, expected)) {
                     try self.appendTypeMismatch(
@@ -1678,16 +1705,21 @@ const SemanticChecker = struct {
                     );
                 }
                 try self.declare(name, expected, doc);
+                const e = self.lookupEntryPtr(name).?;
+                e.fields = fields;
+                e.typed = true;
                 return expected;
             }
             try self.declare(name, table_type, doc);
+            self.lookupEntryPtr(name).?.fields = fields;
             return table_type;
         }
         // propagate table fields through variable references
+        var copied: ?*std.StringHashMap(types_mod.TypeInfo) = null;
         if (vu.kind == .ident and !cst.isDiscardName(vu.kind.ident.tok.text)) {
-            if (self.table_field_map.get(vu.kind.ident.tok.text)) |src| {
-                const fields = try src.clone();
-                try self.table_field_map.put(name, fields);
+            if (self.trackedFields(vu.kind.ident.tok.text)) |src| {
+                copied = try self.alloc.create(std.StringHashMap(types_mod.TypeInfo));
+                copied.?.* = try src.clone();
             }
         }
 
@@ -1697,7 +1729,6 @@ const SemanticChecker = struct {
             if (out.sites.get(binding.value)) |path| try out.addBinding(name, path);
         };
         if (binding.type) |type_expr| {
-            try self.typed_names.put(name, {});
             const expected = try self.evalCheckedTypeExpr(type_expr);
             if (!types_mod.canCoerce(value_type, expected)) {
                 try self.appendTypeMismatch(
@@ -1708,10 +1739,14 @@ const SemanticChecker = struct {
                 );
             }
             try self.declare(name, expected, doc);
+            const e = self.lookupEntryPtr(name).?;
+            e.fields = copied;
+            e.typed = true;
             return expected;
         }
 
         try self.declare(name, value_type, doc);
+        self.lookupEntryPtr(name).?.fields = copied;
         return value_type;
     }
 
@@ -1859,7 +1894,7 @@ const SemanticChecker = struct {
                 i += 1;
                 continue;
             }
-            if (!self.typed_names.contains(name)) {
+            if (!self.isTyped(name)) {
                 i += 1;
                 continue;
             }
@@ -1957,7 +1992,7 @@ const SemanticChecker = struct {
         if (target.kind == .field and value.kind == .fn_def) {
             const fld = target.kind.field;
             if (cst.identText(fld.object)) |obj| {
-                if (self.table_field_map.getPtr(obj)) |fields| try fields.put(fld.name_tok.text, .{ .tag = .any });
+                if (self.trackedFields(obj)) |fields| try fields.put(fld.name_tok.text, .{ .tag = .any });
             }
         }
 
@@ -2095,7 +2130,7 @@ const SemanticChecker = struct {
         switch (tu.kind) {
             .ident => |n| {
                 const name = n.tok.text;
-                if (self.typed_names.contains(name)) {
+                if (self.isTyped(name)) {
                     if (self.lookup(name)) |expected| {
                         if (!types_mod.canCoerce(value_type, expected)) {
                             try self.appendTypeMismatch(
@@ -2107,16 +2142,14 @@ const SemanticChecker = struct {
                         }
                     }
                 }
-                // reassignment keeps the binding's doc
-                const prev_doc: ?[]const u8 = if (self.lookupEntry(name)) |e| e.doc else null;
-                try self.declare(name, value_type, prev_doc);
+                try self.redeclare(name, value_type);
             },
             .field => |field| {
                 const object_type = try self.analyzeNode(field.object);
 
                 if (object_type.tag == .table) {
                     if (cst.identText(field.object)) |oname| {
-                        if (self.table_field_map.getPtr(oname)) |fields| {
+                        if (self.trackedFields(oname)) |fields| {
                             try fields.put(field.name_tok.text, value_type);
                         }
                         try self.markEscaped(oname);
@@ -2147,7 +2180,7 @@ const SemanticChecker = struct {
                         else => null,
                     } else null;
                     if (key_name) |key| {
-                        if (self.table_field_map.getPtr(oname)) |fields| {
+                        if (self.trackedFields(oname)) |fields| {
                             try fields.put(key, value_type);
                         }
                     }
@@ -2159,15 +2192,14 @@ const SemanticChecker = struct {
                 // mark first: redeclaring below shadows name into current scope
                 // , which would defeat the outer-scope check
                 if (cst.identText(idx.object)) |oname| {
-                    if (actual_type.tag == .table and !self.typed_names.contains(oname)) {
+                    if (actual_type.tag == .table and !self.isTyped(oname)) {
                         try self.markEscaped(oname);
                         const ku = cst.unwrapParen(idx.key);
                         const static = if (ku) |k| k.kind == .atom or k.kind == .string else false;
                         if (!static and actual_type.tag.table.fields != null) {
                             var generic = actual_type;
                             generic.tag.table.fields = null;
-                            const prev_doc = if (self.lookupEntry(oname)) |e| e.doc else null;
-                            try self.declare(oname, generic, prev_doc);
+                            try self.redeclare(oname, generic);
                         }
                     }
                 }

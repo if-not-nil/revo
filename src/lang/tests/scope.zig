@@ -341,3 +341,43 @@ test "named call reports multiple bad parameters" {
         },
     }
 }
+
+test "a shadowing binding keeps its fields to itself" {
+    // fields assigned to the inner `T` don't land on the outer one
+    try t.expectSemanticError(
+        \\ const T = { b = 1 }
+        \\ const g = fn() do
+        \\   const T = {}
+        \\   T.a = 1
+        \\ end
+        \\ T.a
+    );
+    // and neither does the inner literal's shape
+    try t.expectSemanticError(
+        \\ const T = { b = 1 }
+        \\ const g = fn() do
+        \\   let T = { c = 1 }
+        \\ end
+        \\ T.c
+    );
+    // an inner `T` escaping through a closure doesn't hide the outer one's fields
+    try t.expectSemanticError(
+        \\ const f = fn() do
+        \\   let T = { a = 1 }
+        \\   const g = fn() do T.b = 1 end
+        \\ end
+        \\ const T = { a = 1 }
+        \\ T.z
+    );
+}
+
+test "an annotation only binds the binding it's on" {
+    try t.topString(
+        \\ let x = 1
+        \\ const g = fn() do
+        \\   let x: number = 2
+        \\ end
+        \\ x = "s"
+        \\ x
+    , "s");
+}
