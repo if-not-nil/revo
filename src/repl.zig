@@ -92,6 +92,21 @@ fn replCompletions(
     return ws.completions(alloc, fid, input, cursor);
 }
 
+/// isocline parses `[style]` tags in everything it displays
+/// `\\[` and `\\\\` are literal
+fn appendEscaped(alloc: Allocator, list: *std.ArrayList(u8), text: []const u8) !void {
+    for (text) |c| {
+        if (c == '[' or c == '\\') try list.append(alloc, '\\');
+        try list.append(alloc, c);
+    }
+}
+
+fn escapedZ(alloc: Allocator, text: []const u8) ![:0]const u8 {
+    var list = try std.ArrayList(u8).initCapacity(alloc, text.len + 8);
+    try appendEscaped(alloc, &list, text);
+    return list.toOwnedSliceSentinel(alloc, 0);
+}
+
 fn isoclineCompleter(cenv: ?*isocline_c.ic_completion_env_t, prefix: [*c]const u8) callconv(.c) void {
     if (cenv == null) return;
     const ctx = isocline_ctx orelse return;
@@ -126,8 +141,11 @@ fn isoclineCompleter(cenv: ?*isocline_c.ic_completion_env_t, prefix: [*c]const u
 
     for (completions) |item| {
         const rep_c = alloc.dupeSentinel(u8, item.label, 0) catch continue;
-        const disp_c = if (item.detail) |d| alloc.dupeSentinel(u8, d, 0) catch continue else rep_c;
-        const help_c: [*c]const u8 = if (item.documentation) |d| alloc.dupeSentinel(u8, d, 0) catch null else null;
+        const disp_c = if (item.detail) |d| escapedZ(alloc, d) catch continue else escapedZ(alloc, item.label) catch continue;
+        const help_c: [*c]const u8 = if (item.documentation) |d| blk: {
+            const z = escapedZ(alloc, d) catch break :blk null;
+            break :blk z.ptr;
+        } else null;
         _ = isocline_c.ic_add_completion_prim(cenv, rep_c.ptr, disp_c.ptr, help_c, delete_before, 0);
     }
 }
@@ -159,7 +177,7 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
         const tend = tok.end;
         if (tend <= tstart) continue;
 
-        if (tstart > last) fb.appendSlice(alloc, input_slice[last..tstart]) catch {};
+        if (tstart > last) appendEscaped(alloc, &fb, input_slice[last..tstart]) catch {};
 
         const role: ?u32 = if (cst_map) |m| m.get(tstart) else null;
 
@@ -184,16 +202,16 @@ fn isoclineHighlighter(henv: ?*isocline_c.ic_highlight_env_t, input: [*c]const u
             fb.appendSlice(alloc, "[") catch {};
             fb.appendSlice(alloc, s) catch {};
             fb.appendSlice(alloc, "]") catch {};
-            fb.appendSlice(alloc, input_slice[tstart..tend]) catch {};
+            appendEscaped(alloc, &fb, input_slice[tstart..tend]) catch {};
             fb.appendSlice(alloc, "[/]") catch {};
         } else {
-            fb.appendSlice(alloc, input_slice[tstart..tend]) catch {};
+            appendEscaped(alloc, &fb, input_slice[tstart..tend]) catch {};
         }
 
         last = tend;
     }
 
-    if (last < input_slice.len) fb.appendSlice(alloc, input_slice[last..]) catch {};
+    if (last < input_slice.len) appendEscaped(alloc, &fb, input_slice[last..]) catch {};
     fb.append(alloc, 0) catch {};
     isocline_c.ic_highlight_formatted(henv, input, fb.items.ptr);
 }
@@ -360,36 +378,37 @@ pub const Session = struct {
         return false;
     }
 
-    /// :h <module>
-    /// , group doc plus one signature per member
+    /// :h <module>, of `revo doc`
     fn helpModule(self: *Session, out: *std.Io.Writer, name: []const u8) !bool {
-        var found = false;
-        for (revo.base.specs.full_specs) |group| for (group) |*spec| {
-            const is_mod = spec.head.kind == .namespaced and spec.head.module != null and
-                std.mem.eql(u8, spec.head.module.?, name);
-            if (!is_mod) continue;
-            if (!found) {
-                found = true;
-                const doc = revo.base.specs.moduleDoc(name);
-                if (doc.len > 0) {
-                    try revo.term.style(out, "\x1b[2m", self.vm.runtime.supports_color);
-                    try out.writeAll(doc);
-                    try revo.term.style(out, "\x1b[0m", self.vm.runtime.supports_color);
-                    try out.writeAll("\n\n");
-                }
-            }
-            try revo.lang.docgen.renderFn(self.gpa, out, spec, .{
-                .leading_newline = false,
-                .qualified_type = true,
-                .show_doc = false,
-            });
-        };
-        return found;
+        if (!revo.base.specs.isModule(name)) return false;
+
+        var flat = std.ArrayList(*const revo.base.specs.FnSpec).empty;
+        defer flat.deinit(self.gpa);
+        for (revo.base.specs.full_specs) |group| for (group) |*spec| try flat.append(self.gpa, spec);
+
+        try revo.lang.docgen.renderModule(self.gpa, out, flat.items, name, .{ .color = self.vm.runtime.supports_color });
+        return true;
+    }
+
+    /// no idea whether we needed this
+    fn stripPrompt(line: []const u8) []const u8 {
+        const t = std.mem.trimStart(u8, line, " \t");
+        if (std.mem.startsWith(u8, t, "rεvo > ")) return t["rεvo > ".len..];
+        if (std.mem.startsWith(u8, t, "> ")) return t[2..];
+        return line;
     }
 
     pub fn evalLine(self: *Session, out: *std.Io.Writer, raw_line: []const u8) !bool {
-        const line = std.mem.trim(u8, raw_line, " \t\r\n");
         defer self.vm.runtime.resetDiagArena();
+
+        var cleaned = std.Io.Writer.Allocating.init(self.gpa);
+        defer cleaned.deinit();
+        var rows = std.mem.splitScalar(u8, raw_line, '\n');
+        while (rows.next()) |row| {
+            if (cleaned.written().len > 0) try cleaned.writer.writeByte('\n');
+            try cleaned.writer.writeAll(stripPrompt(row));
+        }
+        const line = std.mem.trim(u8, cleaned.written(), " \t\r\n");
 
         if (line.len == 0) return true;
         if (std.mem.eql(u8, line, ":q") or std.mem.eql(u8, line, ":quit")) {
@@ -534,6 +553,9 @@ pub fn run(vm: *VM, gpa: Allocator, init: std.process.Init) !void {
         _ = isocline_c.ic_enable_inline_help(true);
         _ = isocline_c.ic_enable_completion_preview(true);
         _ = isocline_c.ic_enable_hint(true);
+        // quotes are left out
+        // , isocline counts every `"` as an open brace and then doesnr close `{` inside strings
+        isocline_c.ic_set_insertion_braces("()[]{}");
         isocline_c.ic_set_default_completer(&isoclineCompleter, null);
         isocline_c.ic_set_default_highlighter(@ptrCast(&isoclineHighlighter), null);
 
