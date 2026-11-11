@@ -1,0 +1,12 @@
+#*
+  channels!
+  `chan(5)` makes one with a buffer of 5 and `chan()` makes an unbuffered one
+*#
+pub declare chan = {
+  #* creates a channel, an unbuffered one waits for a `recv` on every `send` *#
+  __call: fn(capacity: number?) -> resource,
+  #* sends value to the channel, parks when it's full *#
+  send: fn(self: resource, value: any) -> :ok,
+  #* receives a value from the channel, parks when it's empty *#
+  recv: fn(self: resource) -> any,
+}

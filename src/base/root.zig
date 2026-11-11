@@ -74,10 +74,6 @@ pub const root_impls: []const specs.Impl = host.impls(Impl).val ++ &[_]specs.Imp
     .{ .name = "set_meta", .f = host.define(&[_]host.ParamType{ .any, .any }, metatable.set_meta) },
     .{ .name = "set_debug", .f = host.define(&[_]host.ParamType{.table}, metatable.set_debug) },
     .{ .name = "debug_info", .f = host.define(&[_]host.ParamType{}, debug_info_) },
-    .{ .name = "chan", .f = host.defineVariadic(&[_]host.ParamType{}, chan_new) },
-    .{ .name = "send", .f = host.define(&[_]host.ParamType{ .table, .any }, chan_send) },
-    .{ .name = "recv", .f = host.define(&[_]host.ParamType{.table}, chan_recv) },
-    .{ .name = "join", .f = host.define(&[_]host.ParamType{.table}, join) },
     .{ .name = "assert", .f = host.define(&[_]host.ParamType{.any}, assert_) },
     .{ .name = "assert_eq", .f = host.define(&[_]host.ParamType{ .any, .any }, assert_eq) },
     .{ .name = "panic", .f = host.defineVariadic(&[_]host.ParamType{}, panic_) },
@@ -94,6 +90,16 @@ fn gated(comptime on: bool, comptime types: []const host.ParamType, impl: host.H
 fn gatedVariadic(comptime on: bool, comptime types: []const host.ParamType, impl: host.HostFn) host.HostFunc {
     return if (on) host.defineVariadic(types, impl) else host.defineStubVariadic(types);
 }
+
+pub const chan_impls: []const specs.Impl = &.{
+    .{ .name = "__call", .f = host.defineVariadic(&[_]host.ParamType{.any}, chan_new) },
+    .{ .name = "send", .f = host.define(&[_]host.ParamType{ .resource, .any }, chan_send) },
+    .{ .name = "recv", .f = host.define(&[_]host.ParamType{.resource}, chan_recv) },
+};
+
+pub const fiber_impls: []const specs.Impl = &.{
+    .{ .name = "join", .f = host.define(&[_]host.ParamType{.resource}, join) },
+};
 
 pub const os_impls: []const specs.Impl = &.{
     .{ .name = "input", .f = gatedVariadic(revo.default_caps.io, &[_]host.ParamType{}, input) },
@@ -372,96 +378,34 @@ fn asStackIndex(value: Value) ?usize {
     return revo.asIndex(num) catch null;
 }
 
-/// > chan(capacity?: number) -> table
-/// creates a new channel with optional buffer size
-///     chan()        # unbuffered
-///     chan(5)       # buffer of 5
 pub fn chan_new(args: []const Value, vm: *VM) !host.HostResult {
-    const cap: usize = if (args.len == 0)
+    const cap: usize = if (args.len == 1)
         0
-    else if (args.len == 1)
-        asStackIndex(args[0]) orelse return .errType(0, "number", typeof(args[0], vm))
+    else if (args.len == 2)
+        asStackIndex(args[1]) orelse return .errType(0, "number", typeof(args[1], vm))
     else
-        return .errArity(args.len, 0);
+        return .errArity(args.len - 1, 0);
 
     const channel_id = try vm.sched.channelCreate(&vm.tables, cap);
-    return .data(try vm.tableOfSlice(&[2]Value{
-        Value.new.atom(revo.CoreAtoms.chan.atomId()),
-        Value.new.num(channel_id),
-    }));
+    return .data(try vm.idHandle(.chan, channel_id));
 }
 
-/// validate `args[0]` as a `:chan, id` table and extract the channel id
-fn chanIdOf(args: []const Value, vm: *VM) host.HostResult {
-    const table_id = args[0].asTable() orelse return .errType(0, "table", typeof(args[0], vm));
-    const t = vm.tables.get(table_id) catch return .errType(0, "chan table", "table");
-    if (t.array.items.len < 2) return .errType(0, "chan table", "table");
-    const chan_atom = revo.CoreAtoms.chan.atomId();
-    if (t.array.items[0].asAtom() != chan_atom)
-        return .errType(0, "chan table", "table");
-    const chan_id = t.array.items[1].asNumOpt() orelse return .errType(0, "chan table", "table");
-    return .data(Value.new.num(@as(revo.vm.ChannelID, @intFromFloat(chan_id))));
-}
-
-/// > send(chan: table, value: any) -> atom
-/// sends value to channel
 pub fn chan_send(args: []const Value, vm: *VM) !host.HostResult {
-    const cid = switch (chanIdOf(args, vm)) {
-        .ok => |d| @as(revo.vm.ChannelID, @intFromFloat(d.asNumOpt().?)),
-        else => |r| return r,
-    };
+    const cid = vm.handleId(args[0], .chan) orelse return .errType(0, "chan", typeof(args[0], vm));
     try vm.sched.channelSend(cid, args[1]);
     return host.HostResult.coreAtom(.ok);
 }
 
-/// > recv(chan: table) -> any
-/// receives value from channel, parks if empty
 pub fn chan_recv(args: []const Value, vm: *VM) !host.HostResult {
-    const cid = switch (chanIdOf(args, vm)) {
-        .ok => |d| @as(revo.vm.ChannelID, @intFromFloat(d.asNumOpt().?)),
-        else => |r| return r,
-    };
+    const cid = vm.handleId(args[0], .chan) orelse return .errType(0, "chan", typeof(args[0], vm));
     const recv_result = try vm.sched.channelRecv(cid);
     if (recv_result) |value| return .data(value);
     return .parked();
 }
 
-/// validate `args[0]` as a `:fiber, id` table and extract the fiber id
-/// , well-formed but unknown ids report separately so the message
-/// doesn't blame the shape
-const FidParse = union(enum) { ok: usize, bad_shape, bad_id };
-
-// TODO: this must return a real zig error union
-fn fiberIdOf(args: []const Value, vm: *VM) FidParse {
-    const table_id = args[0].asTable() orelse return .bad_shape;
-    const t = vm.tables.get(table_id) catch return .bad_shape;
-    if (t.array.items.len < 2) return .bad_shape;
-
-    const fiber_atom = revo.CoreAtoms.fiber.atomId();
-    if (t.array.items[0].asAtom() != fiber_atom) return .bad_shape;
-
-    const fid_num = t.array.items[1].asNumOpt() orelse return .bad_shape;
-    const fid_int = revo.memory.numToI64(fid_num) orelse return .bad_id;
-    if (fid_int < 0) return .bad_id;
-
-    const fid: usize = @intCast(fid_int);
-    if (fid >= vm.sched.fibers.items.len) return .bad_id;
-
-    return .{ .ok = fid };
-}
-
-/// > join(handle: table) -> any
-/// blocks until the fiber completes and returns its result
 pub fn join(args: []const Value, vm: *VM) !host.HostResult {
-    const target_id: usize = switch (fiberIdOf(args, vm)) {
-        .ok => |id| id,
-        .bad_shape => return .errType(0, "fiber handle", typeof(args[0], vm)),
-        .bad_id => return .{ .err = .{ .type_error = .{
-            .arg = 0,
-            .expected = "live fiber handle",
-            .got = typeof(args[0], vm),
-        } } },
-    };
+    const target_id = vm.handleId(args[0], .fiber) orelse return .errType(0, "fiber", typeof(args[0], vm));
+    if (target_id >= vm.sched.fibers.items.len) return .errType(0, "live fiber", typeof(args[0], vm));
     if (target_id == vm.sched.currentID())
         return host.HostResult.errAssertionFailed("cannot join self");
 

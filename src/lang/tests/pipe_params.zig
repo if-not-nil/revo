@@ -6,9 +6,9 @@ test "channel select w/ multiple waiters" {
     try t.topNumber(
         \\ const ch1 = chan(0)
         \\ const ch2 = chan(0)
-        \\ spawn (fn() send(ch1, 10))()
-        \\ spawn (fn() send(ch2, 20))()
-        \\ recv(ch1) + recv(ch2)
+        \\ spawn (fn() ch1:send(10))()
+        \\ spawn (fn() ch2:send(20))()
+        \\ ch1:recv() + ch2:recv()
     , 30);
 }
 

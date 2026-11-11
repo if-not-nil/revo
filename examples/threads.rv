@@ -46,7 +46,7 @@ for i in..(revo.threads() - 4)
   jobs:push(spawn worker("#{i}"))
 
 for job in jobs do
-  join(job)
+  job:join()
 end
 
 print("on #{revo.threads()} threads, #{math.max(revo.threads(), 4)} jobs were completed in #{time.now() - start}ms")

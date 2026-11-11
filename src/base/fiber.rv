@@ -1,0 +1,5 @@
+#* what you get from `spawn` *#
+pub declare fiber = {
+  #* parks until the fiber is done and gives you what it returned *#
+  join: fn(self: resource) -> any,
+}

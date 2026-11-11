@@ -467,14 +467,14 @@ test "a module's first load from a spawned fiber finishes" {
     // notes/issues/fiber_bug.rv: this used to hang
     try t.topNumberInDir(m.dir,
         \\ fn get() import("./slow").v
-        \\ join(spawn get())
+        \\ (spawn get()):join()
     , 7);
     // both fibers join the one load
     try t.topNumberInDir(m.dir,
         \\ fn get() import("./slow").v
         \\ const a = spawn get()
         \\ const b = spawn get()
-        \\ join(a) + join(b)
+        \\ a:join() + b:join()
     , 14);
 }
 

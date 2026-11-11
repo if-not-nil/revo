@@ -39,6 +39,8 @@ pub const Group = struct {
 /// one group per `.rv` next to its zig, in surface order
 pub const groups: []const Group = &.{
     Group.init("top", @embedFile("top.rv"), &.{ @import("root.zig").root_impls, @import("root.zig").os_impls }),
+    Group.init("chan", @embedFile("chan.rv"), &.{@import("root.zig").chan_impls}),
+    Group.init("fiber", @embedFile("fiber.rv"), &.{@import("root.zig").fiber_impls}),
     Group.init("ffi", @embedFile("ffi.rv"), &.{if (ffi_on) @import("ffi_lib.zig").impls else &.{}}),
     Group.init("number", @embedFile("number.rv"), &.{@import("number.zig").impls}),
     Group.init("string", @embedFile("string.rv"), &.{@import("string.zig").impls}),
