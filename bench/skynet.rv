@@ -9,12 +9,12 @@ fn skynet(num, size) do
   let acc = 0
   for i in 0..10 do
     let child = spawn skynet(num + i * size, size)
-    acc += join(child)
+    acc += child:join()
   end
   acc
 end
 
 
 let root = spawn skynet(0, 1000000)
-print("Res:", join(root))
+print("Res:", root:join())
 print(fmt("took %v", (time.now() - start)/1000))

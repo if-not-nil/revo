@@ -306,16 +306,16 @@ fn fibers() do
   const f2 = spawn (fn() "async result")()
 
   # join blocks until the fiber completes and returns its result
-  print(join(f1))
-  print(join(f2))
+  print(f1:join())
+  print(f2:join())
 
   # channels;
   #   buffered communication between fibers
   const ch = chan(2)
-  send(ch, 1)
-  send(ch, 2)
-  print(recv(ch))
-  print(recv(ch))
+  ch:send(1)
+  ch:send(2)
+  print(ch:recv())
+  print(ch:recv())
 end
 
 
@@ -348,29 +348,29 @@ fn nonblocking() do
 
   # both run concurrently;
   #   join waits for both to complete
-  let r1 = join(work1)
-  let r2 = join(work2)
+  let r1 = work1:join()
+  let r2 = work2:join()
   print("concurrent results:", r1, r2)
 
   # channels coordinate multiple fibers: producer/consumer pattern
   let jobs = chan(3)
 
   fn producerfn() do
-    send(jobs, "task1")
-    send(jobs, "task2")
-    send(jobs, "task3")
+    jobs:send("task1")
+    jobs:send("task2")
+    jobs:send("task3")
   end
   let producer = spawn producerfn()
 
   fn consumerfn() do
-    recv(jobs)
-    recv(jobs)
-    recv(jobs)
+    jobs:recv()
+    jobs:recv()
+    jobs:recv()
   end
   let consumer = spawn consumerfn()
 
-  join(producer)
-  join(consumer)
+  producer:join()
+  consumer:join()
   print("producer/consumer done")
 end
 

@@ -613,8 +613,8 @@ test "repl parked metamethod resumes with correct result" {
 
     try std.testing.expect(try env.session.evalLine(&env.out.writer,
         \\ const ch = chan()
-        \\ spawn (fn() send(ch, 42))()
-        \\ const t = set_meta({}, { __index = fn(_self, k) recv(ch) })
+        \\ spawn (fn() ch:send(42))()
+        \\ const t = set_meta({}, { __index = fn(_self, k) ch:recv() })
         \\ t.foo
     ));
 
@@ -634,13 +634,15 @@ test "repl closing a socket wakes a parked recv with SocketClosed" {
         \\ const port = srv.port
         \\ const client = (net.connect("127.0.0.1", port))?
         \\ const results = chan()
+        \\
         \\ spawn (fn() do
         \\   const r = client:recv({ mode = :read_some, max_bytes = 1024 })
-        \\   send(results, r)
+        \\   results:send(r)
         \\ end)()
+        \\
         \\ sleep(5)
         \\ client:close()
-        \\ recv(results)
+        \\ results:recv()
     ));
 
     try std.testing.expect(std.mem.find(u8, env.out.written(), ":SocketClosed") != null);
@@ -657,7 +659,7 @@ test "repl spawned host connect completes" {
         \\ const port = srv.port
         \\ const h = spawn net.connect("127.0.0.1", port)
         \\ const conn = srv:accept()?
-        \\ const c = (join(h)):unwrap()
+        \\ const c = (h:join()):unwrap()
         \\ c:send("yo\n")?
         \\ conn:recv({ mode = :read_line })?
         \\ conn:close()?

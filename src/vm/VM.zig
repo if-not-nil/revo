@@ -2064,21 +2064,40 @@ fn copySpawnArgs(
     }
 }
 
-/// publish the `{:fiber, id}` handle into the parents result register
+/// publish the fiber handle into the parents result register
 fn publishSpawnHandle(self: *VM, base: usize, result_reg: opcode.Register, child_id: FiberID) !void {
     if (self.perfActive()) self.perf.fibers_spawned += 1;
     try self.sched.enqueueRunnable(child_id);
     const result_slot = base + result_reg;
     const cur = self.currentFiber();
+
     if (result_slot >= cur.registers_len) {
         try ensureRegCapacity(cur, self.runtime.alloc, result_slot + 1);
         cur.registers_len = result_slot + 1;
     }
+
     self.noteGCPressure(@sizeOf(Value) * 2 + 64);
-    cur.registers[result_slot] = try self.tableOfSlice(&[_]Value{
-        Value.new.atom(revo.CoreAtoms.atomId(.fiber)),
-        Value.new.num(@as(i64, @intCast(child_id))),
-    });
+    cur.registers[result_slot] = try self.idHandle(.fiber, child_id);
+}
+
+/// a `chan` or `fiber` handle
+pub fn idHandle(self: *VM, module: revo.CoreAtoms, id: usize) RunError!Value {
+    const mod = (self.builtin_globals.get(module.atomId()) //
+        orelse return error.UndefinedVariable).asTable() //
+        orelse return error.UndefinedVariable;
+
+    const rid = try self.resources.create(@ptrFromInt(id + 1));
+    (self.resources.get(rid) catch return error.InvalidBytecode).metatable = mod;
+    return Value.new.resource(rid);
+}
+
+/// the id inside a handle made by `idHandle` or null
+pub fn handleId(self: *VM, v: Value, module: revo.CoreAtoms) ?usize {
+    const cell = self.resources.get(v.asResource() orelse return null) catch return null;
+    const mod = (self.builtin_globals.get(module.atomId()) orelse return null).asTable() orelse return null;
+
+    if (cell.metatable != mod) return null;
+    return @intFromPtr(cell.ptr orelse return null) - 1;
 }
 
 /// run closure `func_id` with no args on a new, enqueued fiber

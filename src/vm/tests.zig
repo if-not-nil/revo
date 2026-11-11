@@ -26,16 +26,12 @@ test "vm join returns dead fiber result" {
     vm.sched.fibers.items[1].state = .dead;
     vm.sched.fibers.items[1].result = Value.new.num(42);
 
-    const handle_table = try vm.tableOfSlice(&[_]Value{
-        Value.new.atom(revo.CoreAtoms.atomId(.fiber)),
-        Value.new.num(1),
-    });
-    const handle = try vm.addConstant(handle_table);
-    const join_atom = try vm.internAtom("join");
+    const handle = try vm.addConstant(try vm.idHandle(.fiber, 1));
+    const join_fn = try vm.addConstant(vm.getField(vm.builtin_globals.get(revo.CoreAtoms.fiber.atomId()).?, "join").?);
 
     const program = [_]revo.Instruction{
         .{ .op = .load_const, .a = 1, .bx = @intCast(handle) },
-        .{ .op = .load_user_global, .a = 0, .bx = @intCast(join_atom) },
+        .{ .op = .load_const, .a = 0, .bx = @intCast(join_fn) },
         .{ .op = .call, .a = 0, .b = 1, .c = 0 },
         .{ .op = .halt, .a = 0 },
     };
@@ -70,14 +66,14 @@ test "vm spawn passes n args to child and join returns result" {
     const c_fn = try vm.addConstant(Value.new.function(fn_id));
     const c_two = try vm.addConstant(Value.new.num(2));
     const c_three = try vm.addConstant(Value.new.num(3));
-    const join_atom = try vm.internAtom("join");
+    const join_fn = try vm.addConstant(vm.getField(vm.builtin_globals.get(revo.CoreAtoms.fiber.atomId()).?, "join").?);
 
     const program = [_]revo.Instruction{
         .{ .op = .load_const, .a = 0, .bx = @intCast(c_fn) },
         .{ .op = .load_const, .a = 1, .bx = @intCast(c_two) },
         .{ .op = .load_const, .a = 2, .bx = @intCast(c_three) },
         .{ .op = .spawn, .a = 0, .b = 2, .c = 0 },
-        .{ .op = .load_user_global, .a = 1, .bx = @intCast(join_atom) },
+        .{ .op = .load_const, .a = 1, .bx = @intCast(join_fn) },
         .{ .op = .move, .a = 2, .b = 0 },
         .{ .op = .call, .a = 1, .b = 1, .c = 0 },
         .{ .op = .halt, .a = 0 },

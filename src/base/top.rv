@@ -58,18 +58,6 @@ pub declare debug_info = fn() -> {
   panic_message: string|:nil,
 }
 
-#* creates a new channel with optional buffer size *#
-pub declare chan = fn(?capacity: number...) -> {:chan, number}
-
-#* sends value to channel *#
-pub declare send = fn(chan: {:chan, number}, value: any) -> :ok
-
-#* receives value from channel, parks if empty *#
-pub declare recv = fn(chan: {:chan, number}) -> any
-
-#* blocks until the fiber completes and returns its result *#
-pub declare join = fn(handle: {:fiber, number}) -> any
-
 #* sleeps current fiber for given milliseconds *#
 pub declare sleep = fn(ms: number) -> :parked
 

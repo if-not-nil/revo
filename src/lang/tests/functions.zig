@@ -127,28 +127,28 @@ test "spawned fiber with sleep completes" {
     try t.topNumber(
         \\ const f = fn(n) do sleep(1) n * 2 end
         \\ const h = spawn f(21)
-        \\ join(h)
+        \\ h:join()
     , 42);
 }
 
 test "channel with fibers" {
     try t.topNumber(
         \\ const ch = chan(0)
-        \\ const sender = fn(c, v) do send(c, v) v end
+        \\ const sender = fn(c, v) do c:send(v) v end
         \\ const s = spawn sender(ch, 42)
-        \\ const msg = recv(ch)
-        \\ join(s)
+        \\ const msg = ch:recv()
+        \\ s:join()
         \\ msg
     , 42);
     try t.topNumber(
         \\ const ch = chan(0)
-        \\ const worker = fn(id) do send(ch, id * 10) id end
+        \\ const worker = fn(id) do ch:send(id * 10) id end
         \\ const a = spawn worker(1)
         \\ const b = spawn worker(2)
-        \\ const x = recv(ch)
-        \\ const y = recv(ch)
-        \\ join(a)
-        \\ join(b)
+        \\ const x = ch:recv()
+        \\ const y = ch:recv()
+        \\ a:join()
+        \\ b:join()
         \\ x + y
     , 30);
 }
@@ -156,16 +156,16 @@ test "channel with fibers" {
 test "buffered channels" {
     try t.topNumber(
         \\ const ch = chan(2)
-        \\ send(ch, 10)
-        \\ send(ch, 32)
-        \\ recv(ch) + recv(ch)
+        \\ ch:send(10)
+        \\ ch:send(32)
+        \\ ch:recv() + ch:recv()
     , 42);
     try t.topNumber(
         \\ const ch = chan(3)
-        \\ send(ch, 1)
-        \\ send(ch, 2)
-        \\ send(ch, 3)
-        \\ recv(ch) + recv(ch) + recv(ch)
+        \\ ch:send(1)
+        \\ ch:send(2)
+        \\ ch:send(3)
+        \\ ch:recv() + ch:recv() + ch:recv()
     , 6);
 }
 
@@ -179,11 +179,11 @@ test "spawned buffered channel recv does not return missing" {
     try t.topNumber(
         \\ let ch = chan(2)
         \\ let worker = fn(n) do
-        \\   send(ch, n + 10)
+        \\   ch:send(n + 10)
         \\ end
         \\ spawn worker(1)
         \\ spawn worker(2)
-        \\ recv(ch) + recv(ch)
+        \\ ch:recv() + ch:recv()
     , 23);
 }
 
@@ -195,9 +195,9 @@ test "multiple spawned joins survive nested calls" {
         \\ let a = spawn worker(1)
         \\ let b = spawn worker(2)
         \\ let c = spawn worker(3)
-        \\ let ra = number(string(join(a))):unwrap()
-        \\ let rb = number(string(join(b))):unwrap()
-        \\ let rc = number(string(join(c))):unwrap()
+        \\ let ra = number(string(a:join())):unwrap()
+        \\ let rb = number(string(b:join())):unwrap()
+        \\ let rc = number(string(c:join())):unwrap()
         \\ ra + rb + rc
     , 36);
 }
@@ -260,12 +260,12 @@ test "fn name(params) multiple named functions" {
 test "channel receives from multiple producers preserve ordering" {
     try t.topNumber(
         \\ const ch = chan(0)
-        \\ const work = fn(id, v) do send(ch, v) id end
+        \\ const work = fn(id, v) do ch:send(v) id end
         \\ const a = spawn work(1, 100)
         \\ const b = spawn work(2, 200)
-        \\ const v1 = recv(ch)
-        \\ const v2 = recv(ch)
-        \\ join(a) + join(b) + v1 + v2
+        \\ const v1 = ch:recv()
+        \\ const v2 = ch:recv()
+        \\ a:join() + b:join() + v1 + v2
     , 303);
 }
 

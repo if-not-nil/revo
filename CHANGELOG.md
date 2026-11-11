@@ -309,6 +309,9 @@ most breaking change yet
 
 ### Changed
 
+- channels and fibers are handles, not `{:chan, n}` and `{:fiber, n}` tables
+  they have their own metatables
+  the `send`, `recv` and `join` globals are gone
 - table keys take keywords too, `{end = 1, import = 2}`
 - `number` is the only spelling of the number type
   `num` and `int` no longer exist, so `let x: num` is now an untyped binding
