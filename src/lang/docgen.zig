@@ -243,31 +243,46 @@ fn renderTextModules(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpe
     try style(w, reset, color);
     try w.writeAll("\n");
     for (names.items) |mod_name| {
-        var planned = try collectModule(alloc, specs, mod_name);
-        defer planned.deinit(alloc);
-
-        try w.writeAll("\n  ");
-        try style(w, dim, color);
-        try w.writeAll("module ");
-        try style(w, reset, color);
-        try style(w, bold ++ cyan, color);
-        try w.writeAll(mod_name);
-        try style(w, reset, color);
         try w.writeAll("\n");
+        try renderModule(alloc, w, specs, mod_name, .{ .indent = 2, .color = color });
+    }
+}
 
-        for (planned.items) |p| {
-            if (p.spec.module_doc.len > 0) {
-                try style(w, dim, color);
-                try writeIndentedDoc(w, p.spec.module_doc, 4);
-                try style(w, reset, color);
-                try w.writeByte('\n');
-                break;
-            }
-        }
+pub const ModuleOpts = struct {
+    /// children sit 2 deeper and docs 4
+    indent: usize = 0,
+    color: bool = false,
+};
 
-        for (planned.items) |p| {
-            try renderFn(alloc, w, p.spec, .{ .sig_indent = 4, .doc_indent = 6 });
+pub fn renderModule(alloc: std.mem.Allocator, w: *Writer, specs: []*const FnSpec, mod_name: []const u8, opts: ModuleOpts) !void {
+    const color = opts.color;
+    var planned = try collectModule(alloc, specs, mod_name);
+    defer planned.deinit(alloc);
+
+    try writeIndent(w, opts.indent);
+    try style(w, dim, color);
+    try w.writeAll("module ");
+    try style(w, reset, color);
+    try style(w, bold ++ cyan, color);
+    try w.writeAll(mod_name);
+    try style(w, reset, color);
+    try w.writeAll("\n");
+
+    for (planned.items) |p| {
+        if (p.spec.module_doc.len > 0) {
+            try style(w, dim, color);
+            try writeIndentedDoc(w, p.spec.module_doc, opts.indent + 2);
+            try style(w, reset, color);
+            try w.writeByte('\n');
+            break;
         }
+    }
+
+    for (planned.items) |p| {
+        try renderFn(alloc, w, p.spec, .{
+            .sig_indent = opts.indent + 2,
+            .doc_indent = opts.indent + 4,
+        });
     }
 }
 
