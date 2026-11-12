@@ -20,6 +20,40 @@ test "type alias gets unaliased" {
         \\ x[1] + y[1] == 155.1
     );
 }
+
+test "leading bar union alias" {
+    try t.topTrue(
+        \\ type Res =
+        \\     | {:ok, number}
+        \\     | {:err, string}
+        \\
+        \\ let x: Res = {:ok, 41}
+        \\ let y: Res = {:err, "nope"}
+        \\
+        \\ x[1] == 41 and y[1] == "nope"
+    );
+}
+
+test "leading bar union alias of atoms" {
+    try t.topAtom(
+        \\ type A =
+        \\   | :one
+        \\   | :two
+        \\   | :three
+        \\ let pred: A = :three
+        \\ pred
+    , "three");
+}
+
+test "leading bar union with a single member" {
+    try t.topNumber(
+        \\ type One =
+        \\   | {:ok, number}
+        \\ let x: One = {:ok, 7}
+        \\ x[1]
+    , 7);
+}
+
 test "comp block infers number from literal" {
     var vm = try VM.init(t.runtime());
     defer vm.deinit();
