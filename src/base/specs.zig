@@ -888,6 +888,13 @@ pub fn registerAll(
             const module_tid = moduleTableFor(vm, target) orelse continue;
             try vm.setMetatable(try prototype(target, vm), module_tid);
         }
+
+        // a table that misses falls through to `iter`, so that `t:map(f)` and `t:sum()` just work
+        if (moduleTableFor(vm, .table)) |table_tid| {
+            if (vm.builtin_globals.get(try vm.internAtom("iter"))) |iter_mod| {
+                try (try vm.tables.get(table_tid)).putRawAtom(revo.CoreAtoms.__index.atomId(), iter_mod, vm);
+            }
+        }
     }
 }
 

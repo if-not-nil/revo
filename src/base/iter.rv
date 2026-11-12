@@ -102,6 +102,26 @@ pub declare iter = {
   *#
   count: fn(collection: any, ?pred: function) -> number,
   #*
+  joins the elements into a string, with the default formatting (same as just `print`)
+     iter.join({1, 2, 3}, ", ")   # "1, 2, 3"
+  *#
+  join: fn(collection: any, ?sep: string) -> string,
+  #*
+  gives the index of the first element equal to value, or :undef when it's not there
+     iter.index_of({5, 7}, 7)   # 1
+  *#
+  index_of: fn(collection: any, value: any) -> number | :undef,
+  #*
+  returns a lazy iterator that goes one level into nested tables, other elements pass thru
+     iter.collect(iter.flatten({1, {2, 3}, 4}))   # {1, 2, 3, 4}
+  *#
+  flatten: fn(collection: any) -> function,
+  #*
+  returns a lazy iterator that skips elements it already yielded
+     iter.collect(iter.unique({1, 2, 1, 3}))   # {1, 2, 3}
+  *#
+  unique: fn(collection: any) -> function,
+  #*
   sums numeric elements, skipping non-numbers
      iter.sum({1, 2, "x", 3})
   *#

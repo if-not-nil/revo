@@ -309,6 +309,12 @@ most breaking change yet
 
 ### Changed
 
+- tables fall through to `iter`, so thta `t:map(f)` and `t:sum()` just work
+  `table.join`, `index_of`, `flatten` and `unique` moved to `iter`, and they're lazy now
+      (`join` and `index_of` just walk it)
+
+  - `index_of` gives `:undef` when it's not there
+  - `table.count_of` is gone, `t:count(fn(x) x == v)` does it insteaf
 - channels and fibers are handles, not `{:chan, n}` and `{:fiber, n}` tables
   they have their own metatables
   the `send`, `recv` and `join` globals are gone
