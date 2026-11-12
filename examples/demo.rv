@@ -178,7 +178,7 @@ fn pipes() do
   print(p2)
 
   # with arguments
-  const p3 = "hello" |> _:sub(1, 2)
+  const p3 = "hello" |> _:replace("l", "L")
   print(p3)
 
   # _ placeholder gets the left-hand value

@@ -76,8 +76,6 @@ pub declare table = {
   deep_copy: fn<T>(self: table<T>) -> table<T>,
   #* applies fn to the value at key (missing reads as :nil) and stores the result back, returns self *#
   update: fn<T>(self: table<T>, key: any, fn: function) -> table<T>,
-  #* returns a new table with array items [start, end), end defaults to the array length, bounds clamp *#
-  slice: fn<T>(self: table<T>, start: number, end: number...) -> table<T>,
   #* repeats table array part n times *#
   repeat: fn<T>(self: table<T>, n: number) -> table<T>,
 }

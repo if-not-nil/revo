@@ -148,7 +148,6 @@ pub const Impl = struct {
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Impl{
     .{ .name = "to_iter", .f = root.host.define(&.{.any}, to_iter_fn) },
-    .{ .name = "range", .f = root.host.defineVariadic(&.{.any}, range_fn) },
     .{ .name = "map", .f = root.host.define(&.{ .any, .function }, transformFn(.map)) },
     .{ .name = "filter", .f = root.host.define(&.{ .any, .function }, transformFn(.filter)) },
     .{ .name = "take", .f = root.host.define(&.{ .any, .any }, boundedFn(.take)) },
@@ -244,22 +243,11 @@ const Kind = enum(usize) {
     unique,
 };
 
+/// `a..b` and `a..s..b` compile to this
 pub fn range_fn(args: []const Value, vm: *VM) !HostResult {
-    const start: f64 = if (args.len == 1) 0 else blk: {
-        const n = args[0].asNumOpt() orelse return .errType(0, "number", typeof(args[0], vm));
-        break :blk n;
-    };
-    const end: f64 = if (args.len == 1) blk: {
-        const n = args[0].asNumOpt() orelse return .errType(0, "number", typeof(args[0], vm));
-        break :blk n;
-    } else blk: {
-        const n = args[1].asNumOpt() orelse return .errType(1, "number", typeof(args[1], vm));
-        break :blk n;
-    };
-    const step: f64 = if (args.len >= 3) blk: {
-        const n = args[2].asNumOpt() orelse return .errType(2, "number", typeof(args[2], vm));
-        break :blk n;
-    } else 1;
+    const start = args[0].asNumOpt() orelse return .errType(0, "number", typeof(args[0], vm));
+    const end = args[1].asNumOpt() orelse return .errType(1, "number", typeof(args[1], vm));
+    const step = args[2].asNumOpt() orelse return .errType(2, "number", typeof(args[2], vm));
     if (step == 0) return .errType(2, "non-zero step", "0");
 
     const it_id = try makeIterator(vm, .range);
@@ -789,24 +777,24 @@ test "iter lazy transforms" {
 
 test "iter range" {
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.range(5)))
+        \\ iter.sum(iter.collect((0..5)))
     , 10);
 
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.range(1, 5)))
+        \\ iter.sum(iter.collect((1..5)))
     , 10);
 
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.range(0, 10, 2)))
+        \\ iter.sum(iter.collect((0..2..10)))
     , 20);
 
     try testing.topNumber(
-        \\ iter.sum(iter.collect(iter.range(5, 0, -1)))
+        \\ iter.sum(iter.collect((5..-1..0)))
     , 15);
 
     try testing.topNumber(
         \\ let total = 0
-        \\ for x in iter.range(4) do total = total + x end
+        \\ for x in 0..4 do total = total + x end
         \\ total
     , 6);
 }
@@ -829,7 +817,7 @@ test "iter fold count sum" {
     , 2);
 
     try testing.topNumber(
-        \\ iter.count(iter.range(10), fn(x) x % 2 == 0)
+        \\ iter.count((0..10), fn(x) x % 2 == 0)
     , 5);
 
     try testing.topNumber(
@@ -921,7 +909,7 @@ test "iter method chaining" {
     , 24);
 
     try testing.topNumber(
-        \\ iter.range(5)
+        \\ (0..5)
         \\   :map(fn(x) x + 1)
         \\   :collect()
         \\   |> iter.sum()
@@ -938,6 +926,18 @@ test "iter join, index_of, flatten and unique" {
     try testing.topTrue("{\"ab\", {1}}:flatten():collect() == {\"ab\", 1}");
     try testing.topTrue("{1, 2, 1, 3, 2}:unique():collect() == {1, 2, 3}");
     try testing.topNumber("{1, 2, 1}:unique():count()", 2);
+}
+
+test "range literals as values" {
+    try testing.topTrue("(0..5):collect() == {0, 1, 2, 3, 4}");
+    try testing.topTrue("(0..2..10):collect() == {0, 2, 4, 6, 8}");
+    try testing.topTrue("(5..-1..0):collect() == {5, 4, 3, 2, 1}");
+    try testing.topTrue("(3..3):collect() == {}");
+    try testing.topNumber("(0..5):map(fn(x) x * x):sum()", 30);
+    try testing.topNumber("const r = 1..4; r:sum()", 6);
+    try testing.topNumber("let t = 0; for x in 0..2..6 do t += x end; t", 6);
+    try testing.topTrue("\"hello\"[1..3] == \"el\"");
+    try testing.expectRuntimeError("(0..0..5):collect()", .TypeError);
 }
 
 const std = @import("std");

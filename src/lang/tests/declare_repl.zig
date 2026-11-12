@@ -345,7 +345,7 @@ test "repl_mode leaves a function-local let as a local" {
         \\    const n = needle:len()
         \\    let at = -1
         \\    for i in 0..haystack:len() do
-        \\        if haystack:sub(i, n) == needle do
+        \\        if haystack[i..i + n] == needle do
         \\            at = i
         \\            break(:nil)
         \\        end
@@ -361,7 +361,7 @@ const module_with_loop_local =
     \\    const n = needle:len()
     \\    let at = -1
     \\    for i in 0..haystack:len() do
-    \\        if haystack:sub(i, n) == needle do
+    \\        if haystack[i..i + n] == needle do
     \\            at = i
     \\            break(:nil)
     \\        end

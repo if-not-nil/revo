@@ -110,8 +110,13 @@ fn parse_list(s, i) do
 end
 
 
+# todo the return type is auto annotated as any here
+#* up to n chars from i, and a short string at the end instead of an error *#
+fn take(s, i, n)
+  s[math.min(i, s:len())..math.min(i + n, s:len())]
+
 fn tag(s, i, symbol) do
-  if (s:sub(i, symbol:len()) == symbol)
+  if (take(s, i, symbol:len()) == symbol)
     {:ok, symbol:len()}
   else {:err, 'expected ':add(symbol)}
 end
@@ -121,19 +126,19 @@ fn parse_num(s, i) do
   let count = 0
   while (i + count < s:len() and numeric?(s[i + count]))
     count += 1
-  let num = number(s:sub(i, count))?
+  let num = number(take(s, i, count))?
   {:ok, {count, num}}
 end
 
 
 fn parse_null(s, i)
-  if (s:sub(i, 4) == "null") {:ok, {4, :nil}} else {:err, "expected 'null'"}
+  if (take(s, i, 4) == "null") {:ok, {4, :nil}} else {:err, "expected 'null'"}
 
 
 fn parse_bool(s, i) do
-  if (s:sub(i, 4) == "true")
+  if (take(s, i, 4) == "true")
     {:ok, {4, :true}}
-  else if (s:sub(i, 5) == "false")
+  else if (take(s, i, 5) == "false")
     {:ok, {5, :false}}
   else {:err, "expected boolean"}
 end

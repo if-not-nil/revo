@@ -20,18 +20,6 @@ pub const Impl = struct {
         return .data(try vm.adoptValueStringNoDedup(buf));
     }
 
-    pub fn sub(vm: *VM, self: Args.string, start: Args.number, length: Args.number) !HostResult {
-        const str = vm.stringValue(@backingInt(self));
-        const s = @as(i64, @intFromFloat(start));
-        const l = @as(i64, @intFromFloat(length));
-        if (s < 0 or l < 0 or s >= str.len) {
-            return .data(try vm.ownValueString(""));
-        }
-        const end = @min(@as(usize, @intCast(s + l)), str.len);
-        const s_u: usize = @intCast(s);
-        return .data(try vm.ownValueStringNoDedup(str[s_u..end]));
-    }
-
     pub fn replace(vm: *VM, self: Args.string, old: Args.string, new: Args.string) !HostResult {
         const str = vm.stringValue(@backingInt(self));
         const o = vm.stringValue(@backingInt(old));
@@ -153,30 +141,6 @@ pub const Impl = struct {
         return .data(try vm.adoptValueStringNoDedup(buf));
     }
 
-    pub fn with(vm: *VM, self: Args.string, idx: Args.number, char_val: Args.any) !HostResult {
-        const str = vm.stringValue(@backingInt(self));
-        const i: usize = try revo.asIndex(idx);
-        if (i >= str.len) return .data(revo.Value.new.core(.missing));
-
-        const char: u8 = blk: {
-            if (char_val.asString()) |s| {
-                const s_val = vm.stringValue(s);
-                if (s_val.len == 0) return .errType(2, "non-empty string", root.typeof(char_val, vm));
-                break :blk s_val[0];
-            } else if (char_val.asNumOpt()) |val| {
-                if (!std.math.isFinite(val)) return .errType(2, "string or byte", root.typeof(char_val, vm));
-                break :blk @intFromFloat(std.math.clamp(@round(val), 0, 255));
-            } else {
-                return .errType(2, "string or byte", root.typeof(char_val, vm));
-            }
-        };
-
-        var new_buf = try vm.runtime.alloc.dupe(u8, str);
-        errdefer vm.runtime.alloc.free(new_buf);
-        new_buf[i] = char;
-        return .data(try vm.adoptValueStringNoDedup(new_buf));
-    }
-
     pub fn __call(vm: *VM, self: Args.any, arg: Args.any) !HostResult {
         _ = self;
         return root.string_(&.{arg}, vm);
@@ -256,11 +220,11 @@ pub const Impl = struct {
 pub const impls = root.host.impls(Impl).val;
 
 test "string metatable" {
-    try testing.topString("\"hello\":sub(0, 2)", "he");
+    try testing.topString("\"hello\"[0..2]", "he");
 
     try testing.topNumber("len(\"asdf\")", 4);
     try testing.topNumber("\"asdf\":len()", 4);
-    try testing.topString("\"asdf\":with(1, \"y\")", "aydf");
+    try testing.topString("let s = \"asdf\"; s[0..1] ~ \"y\" ~ s[2..]", "aydf");
     try testing.topString("string(\"asdf\")", "asdf");
     try testing.topString("\"asdf\"[2]", "d");
     try testing.topString("\"asdf\" ~ \"qwer\"", "asdfqwer");
@@ -277,8 +241,6 @@ test "string methods" {
     try testing.topNumber("\"hello\":index_of(\"ll\")", 2);
     try testing.topString("string.of_ascii(97)", "a");
     try testing.topString("'hello':upper()", "HELLO");
-    try testing.expectSemanticError("'hello':sub('x', 2)");
-    try testing.expectSemanticError("'hello':sub(2, 2, 3)");
     try testing.topNumber("'hello':index_of('el')", 1);
     try testing.expectSemanticError("'hello':index_of(42)");
     try testing.topString("'hello':replace('l', 'x')", "hexxo");
@@ -289,9 +251,6 @@ test "string methods" {
     try testing.topString("\"ab\":repeat(3)", "ababab");
     try testing.topString("\"x\":repeat(1)", "x");
     try testing.topString("\"x\":repeat(0)", "");
-    try testing.expectRuntimeFailureWithMessage(
-        \\ "abc":with(1, "")
-    , .TypeError, "arg 2: wants non-empty string, got string");
 }
 
 const std = @import("std");
