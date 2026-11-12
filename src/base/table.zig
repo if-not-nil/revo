@@ -125,21 +125,6 @@ pub const Impl = struct {
         return .data(removed);
     }
 
-    pub fn join(vm: *VM, self: Args.table, delim: Args.string) !HostResult {
-        const table = try vm.tables.get(@backingInt(self));
-        const delim_str = vm.stringValue(@backingInt(delim));
-        var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
-        defer buf.deinit();
-
-        for (table.array.items, 0..) |item, idx| {
-            if (idx > 0) try buf.writer.writeAll(delim_str);
-            try item.write(&buf.writer, vm, .plain, vm.runtime.supports_color);
-        }
-
-        const slice = try buf.toOwnedSlice();
-        return .data(try vm.adoptValueString(slice));
-    }
-
     pub fn keys(vm: *VM, self: Args.table) !HostResult {
         const table = try vm.tables.get(@backingInt(self));
         var keys_list = try std.ArrayList(Value).initCapacity(vm.runtime.alloc, table.array.items.len + 10);
@@ -232,25 +217,6 @@ pub const Impl = struct {
         return .data(Value.new.table(@backingInt(self)));
     }
 
-    pub fn flatten(vm: *VM, self: Args.table) !HostResult {
-        const src = try vm.tables.get(@backingInt(self));
-        const result_id = try vm.tables.create();
-        const result = try vm.tables.get(result_id);
-
-        for (src.array.items) |item| {
-            if (item.asTable()) |nested_id| {
-                const nested = try vm.tables.get(nested_id);
-                for (nested.array.items) |maybe_nested| {
-                    try result.array.append(vm.runtime.alloc, maybe_nested);
-                }
-            } else {
-                try result.array.append(vm.runtime.alloc, item);
-            }
-        }
-
-        return .data(Value.new.table(result_id));
-    }
-
     /// first array index holding `search_val` by value, or null
     fn findInArray(vm: *VM, items: []const Value, search_val: Value) ?usize {
         for (items, 0..) |item, i| {
@@ -262,18 +228,6 @@ pub const Impl = struct {
     pub fn @"contains?"(vm: *VM, self: Args.table, search_val: Args.any) !HostResult {
         const tbl = try vm.tables.get(@backingInt(self));
         return ._bool(findInArray(vm, tbl.array.items, search_val) != null);
-    }
-
-    pub fn unique(vm: *VM, self: Args.table) !HostResult {
-        const src = try vm.tables.get(@backingInt(self));
-        const result_id = try vm.tables.create();
-        const result = try vm.tables.get(result_id);
-        for (src.array.items) |item| {
-            if (findInArray(vm, result.array.items, item) == null) {
-                try result.array.append(vm.runtime.alloc, item);
-            }
-        }
-        return .data(Value.new.table(result_id));
     }
 
     pub fn len(vm: *VM, self: Args.table) !HostResult {
@@ -330,25 +284,6 @@ pub const Impl = struct {
         return .data(Value.new.table(result_id));
     }
 
-    pub fn count_of(vm: *VM, self: Args.table, search_val: Args.any) !HostResult {
-        const table = try vm.tables.get(@backingInt(self));
-        var counter: i16 = 0;
-
-        for (table.array.items) |item| {
-            if (vm.compare(item, search_val) == .eq) {
-                counter += 1;
-            }
-        }
-        return .data(Value.new.num(counter));
-    }
-
-    pub fn index_of(vm: *VM, self: Args.table, search_val: Args.any) !HostResult {
-        const tbl = try vm.tables.get(@backingInt(self));
-        if (findInArray(vm, tbl.array.items, search_val)) |i| {
-            return .data(Value.new.num(i));
-        }
-        return .coreAtom(.nil);
-    }
 };
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Impl{
@@ -475,19 +410,13 @@ test "contains? and index_of compare string content, not ids" {
     , 1);
 }
 
-test "get count of a value" {
-    try testing.topNumber("{1, 2}:count_of(1)", 1);
-    try testing.topNumber("{1, 2, 'hello'}:count_of('hello')", 1);
-    try testing.topNumber("{:true, :false, 'hello', 1, 2, {1, 'hello' = 2}}:count_of(:true)", 1);
-}
-
 test "get index of a value" {
     try testing.topNumber("{1, 2}:index_of(1)", 0);
     try testing.topNumber("{1, 2, 'hello'}:index_of('hello')", 2);
     try testing.topNumber("{:true, :false, 'hello', 1, 2, {1, 'hello' = 2}}:index_of({1, 'hello' = 2})", 5);
     try testing.topAtom(
         "{:true, :false, 'hello', 1, 2, {1, 'hello' = 2}}:index_of(3)",
-        "nil",
+        "undef",
     );
 }
 

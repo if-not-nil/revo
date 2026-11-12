@@ -47,6 +47,19 @@ pub const Impl = struct {
         return .data(try vm.adoptValueString(try buf.toOwnedSlice(vm.runtime.alloc)));
     }
 
+    pub fn index_of(vm: *VM, obj: Args.any, needle: Args.any) !HostResult {
+        const st_id = toState(vm, obj) catch
+            return .errType(0, "iterable", typeof(obj, vm));
+
+        var v: Value = undefined;
+        var idx: Value = undefined;
+        while (try pullStep(vm, st_id, &v, &idx)) {
+            if (vm.compare(v, needle) == .eq) return .data(idx);
+        }
+
+        return .coreAtom(.undef);
+    }
+
     pub fn each(vm: *VM, obj: Args.any, f: Args.function) !HostResult {
         const st_id = toState(vm, obj) catch
             return .errType(0, "iterable", typeof(obj, vm));
@@ -144,7 +157,70 @@ pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Imp
     .{ .name = "chunk", .f = root.host.define(&.{ .any, .any }, boundedFn(.chunk)) },
     .{ .name = "flat_map", .f = root.host.define(&.{ .any, .function }, transformFn(.flat_map)) },
     .{ .name = "count", .f = root.host.defineVariadic(&.{.any}, count_fn) },
+    .{ .name = "join", .f = root.host.defineVariadic(&.{.any}, join_fn) },
+    .{ .name = "flatten", .f = root.host.define(&.{.any}, plainFn(.flat_map)) },
+    .{ .name = "unique", .f = root.host.define(&.{.any}, uniqueFn) },
 };
+
+fn join_fn(args: []const Value, vm: *VM) !HostResult {
+    if (args.len > 2) return .errArity(args.len, 2);
+    const sep: []const u8 = if (args.len == 2)
+        vm.stringValue(args[1].asString() orelse return .errType(1, "string", typeof(args[1], vm)))
+    else
+        "";
+    const st_id = toState(vm, args[0]) catch
+        return .errType(0, "iterable", typeof(args[0], vm));
+    var buf = std.Io.Writer.Allocating.init(vm.runtime.alloc);
+    defer buf.deinit();
+    var first = true;
+    var v: Value = undefined;
+    var idx: Value = undefined;
+    while (try pullStep(vm, st_id, &v, &idx)) {
+        if (!first) try buf.writer.writeAll(sep);
+        first = false;
+        try v.write(&buf.writer, vm, .plain, vm.runtime.supports_color);
+    }
+    return .data(try vm.adoptValueString(try buf.toOwnedSlice()));
+}
+
+/// an iterator of `kind` over one iterable, with no other state
+fn plainFn(comptime kind: Kind) root.host.HostFn {
+    return struct {
+        fn f(args: []const Value, vm: *VM) anyerror!HostResult {
+            const up = (try wrapIterable(vm, args[0])) orelse
+                return .errType(0, "iterable", typeof(args[0], vm));
+            const it_id = try makeIterator(vm, kind);
+            try putState(vm, it_id, .up, up);
+            return .data(Value.new.table(it_id));
+        }
+    }.f;
+}
+
+fn uniqueFn(args: []const Value, vm: *VM) !HostResult {
+    const up = (try wrapIterable(vm, args[0])) orelse
+        return .errType(0, "iterable", typeof(args[0], vm));
+    const it_id = try makeIterator(vm, .unique);
+    try putState(vm, it_id, .up, up);
+    try putState(vm, it_id, .cur, try vm.tableOfSlice(&.{}));
+    return .data(Value.new.table(it_id));
+}
+
+/// `cur` holds what's been yielded so far
+fn uniqueNext(st_id: mem.TableID, vm: *VM) !HostResult {
+    while (true) {
+        var v: Value = undefined;
+        var idx: Value = undefined;
+        if (!try pullStep(vm, st_id, &v, &idx)) return .data(revo.Value.new.core(.done));
+        const seen_id = (try vm.tables.get(st_id)).getRawAtom(revo.CoreAtoms.cur.atomId(), vm).?.asTable().?;
+        const seen = try vm.tables.get(seen_id);
+        for (seen.array.items) |s| {
+            if (vm.compare(s, v) == .eq) break;
+        } else {
+            try seen.array.append(vm.runtime.alloc, v);
+            return .data(v);
+        }
+    }
+}
 
 fn to_iter_fn(args: []const Value, vm: *VM) !HostResult {
     const w = (try wrapIterable(vm, args[0])) orelse
@@ -165,6 +241,7 @@ const Kind = enum(usize) {
     zip,
     flat_map,
     range,
+    unique,
 };
 
 pub fn range_fn(args: []const Value, vm: *VM) !HostResult {
@@ -266,6 +343,7 @@ fn iteratorNext(args: []const Value, vm: *VM) !HostResult {
         .zip => zipNext(table_id, vm),
         .flat_map => flatMapNext(table_id, vm),
         .range => rangeNext(table_id, vm),
+        .unique => uniqueNext(table_id, vm),
     };
 }
 
@@ -373,11 +451,17 @@ fn flatMapNext(st_id: mem.TableID, vm: *VM) !HostResult {
                 var v: Value = undefined;
                 var idx: Value = undefined;
                 if (!try pullStep(vm, st_id, &v, &idx)) return .data(revo.Value.new.core(.done));
-                const f = (try vm.tables.get(st_id)).getRawAtom(revo.CoreAtoms.func.atomId(), vm) orelse
-                    return .data(revo.Value.new.core(.done));
-                const mapped = try callPred(vm, f, v, idx);
-                const sub = (try toCallable(vm, mapped)) orelse
-                    return .errType(1, "iterable", typeof(mapped, vm));
+
+                const sub = if ((try vm.tables.get(st_id)).getRawAtom(revo.CoreAtoms.func.atomId(), vm)) |f| blk: {
+                    const mapped = try callPred(vm, f, v, idx);
+                    break :blk (try toCallable(vm, mapped)) orelse
+                        return .errType(1, "iterable", typeof(mapped, vm));
+                } else if (v.isTable())
+                    (try toCallable(vm, v)).?
+                else
+                    // flatten, a lone element is a one-element sequence
+                    (try toCallable(vm, try vm.tableOfSlice(&.{v}))).?;
+
                 st = try vm.tables.get(st_id);
                 try st.putRawAtom(revo.CoreAtoms.cur.atomId(), sub, vm);
                 continue;
@@ -842,6 +926,18 @@ test "iter method chaining" {
         \\   :collect()
         \\   |> iter.sum()
     , 15);
+}
+
+test "iter join, index_of, flatten and unique" {
+    try testing.topTrue("{1, 2, 3}:join(\", \") == \"1, 2, 3\"");
+    try testing.topTrue("{1, 2, 3}:join() == \"123\"");
+    try testing.topTrue("iter.join({}, \",\") == \"\"");
+    try testing.topNumber("{5, 7}:index_of(7)", 1);
+    try testing.topAtom("{5, 7}:index_of(9)", "undef");
+    try testing.topTrue("{1, {2, 3}, 4}:flatten():collect() == {1, 2, 3, 4}");
+    try testing.topTrue("{\"ab\", {1}}:flatten():collect() == {\"ab\", 1}");
+    try testing.topTrue("{1, 2, 1, 3, 2}:unique():collect() == {1, 2, 3}");
+    try testing.topNumber("{1, 2, 1}:unique():count()", 2);
 }
 
 const std = @import("std");

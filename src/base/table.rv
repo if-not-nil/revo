@@ -45,8 +45,6 @@ pub declare table = {
   pop: fn<T>(self: table<T>) -> T | :undef,
   #* removes element at position or key, returns removed value *#
   remove: fn<T>(self: table<T>, key: any) -> T,
-  #* joins array elements with delimiter *#
-  join: fn(self: table, delim: string) -> string,
   #* returns all keys as table (array indices + hash keys) *#
   keys: fn<K, V>(self: table<K, V>) -> table<K>,
   #* returns all values as table *#
@@ -64,16 +62,8 @@ pub declare table = {
   sort_by: fn(self: table, fn: function) -> table,
   #* reverses table array part in place *#
   reverse: fn<T>(self: table<T>) -> table<T>,
-  #* flattens nested tables into single array (non-table elements pass through) *#
-  flatten: fn(self: table<any>) -> table<any>,
-  #* returns 0-based index of value in the array part, or nil if not found *#
-  index_of: fn(self: {}, value: any) -> number|:nil,
-  #* returns the number of times a specified value appears in a table's array part *#
-  count_of: fn(self: {}, search_val: any) -> number,
   #* checks if table contains value *#
   contains?: fn(self: table, value: any) -> bool,
-  #* removes duplicate elements *#
-  unique: fn<T>(self: table<T>) -> table<T>,
   #* returns total length of table (array part + keyed entries) *#
   len: fn(self: table) -> number,
   #* returns length of table array part only *#
