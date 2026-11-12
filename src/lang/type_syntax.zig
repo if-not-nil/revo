@@ -88,11 +88,14 @@ fn StreamParser(comptime S: type) type {
         fn prevSpan(self: *@This(), start: Token) Lexer.Span {
             return Lexer.Span.merge(start.span(), self.stream.prevToken().span());
         }
+        fn nl_before(self: *@This()) bool {
+            return self.peek().nl_before;
+        }
 
         fn parseExpr(self: *@This()) anyerror!*cst.CstType {
+            const is_bar = self.nl_before() and self.match(.bar);
             const first = try self.parseAtom();
-
-            if (!self.check(.bar)) {
+            if (!is_bar and !self.check(.bar)) {
                 if (self.match(.slash)) {
                     const slash_tok = self.stream.prevToken();
                     const tag = try self.parseAtom();
@@ -512,6 +515,25 @@ test "qualified optional type is a nilable union" {
     // lowering folds it to a nilable union like before
     const ti = try types.evalBare(alloc, te);
     try std.testing.expect(ti.tag == .@"union");
+}
+
+test "leading bar parses like the inline union" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const cases = [_][2][]const u8{
+        .{ "\n| {:ok, any}\n| {:err, any}", "{:ok, any} | {:err, any}" },
+        .{ "\n  | :one\n  | :two\n  | :three", ":one | :two | :three" },
+        .{ "\n| {:ok, any} | {:err, any}", "{:ok, any} | {:err, any}" },
+    };
+    for (cases) |c| {
+        const tokens = try Lexer.lexAt(alloc, c[0]);
+        var pos: usize = 0;
+        const te = try parseCstTypeExpr(tokens, &pos, alloc);
+        const ti = try types.evalBare(alloc, te);
+        try std.testing.expectEqualStrings(c[1], try formatTypeOpts(alloc, ti, .{}));
+    }
 }
 
 test "type serde roundtrips" {
