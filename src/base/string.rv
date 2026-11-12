@@ -6,8 +6,6 @@ pub declare string = {
   upper: fn(self: string) -> string,
   #* converts string to lowercase *#
   lower: fn(self: string) -> string,
-  #* extracts substring from start with given length *#
-  sub: fn(self: string, start: number, length: number) -> string,
   #* replaces all occurrences of old with new *#
   replace: fn(self: string, old: string, new: string) -> string,
   #* splits string by delimiter into table *#
@@ -32,11 +30,6 @@ pub declare string = {
   punct?: fn(self: string) -> bool,
   #* reverses the string *#
   reverse: fn(self: string) -> string,
-  #*
-  replaces character at index with given char or byte
-  index is 0-based
-  *#
-  with: fn(self: string, idx: number, char: string|number) -> string,
   #*
   converts string to table of characters
   

@@ -9,30 +9,30 @@ for c in "hi" do print(c) end
 # "h" "i"
 
 # lazy arithmetic sequences
-for x in iter.range(5) do print(x) end
+for x in 0..5 do print(x) end
 # 0 1 2 3 4
 
-for x in iter.range(1, 6) do print(x) end
+for x in 1..6 do print(x) end
 # 1 2 3 4 5
 
-for x in iter.range(0, 10, 3) do print(x) end
+for x in 0..3..10 do print(x) end
 # 0 3 6 9
 
 # pipes and transformers (all lazy, collect to materialize)
-iter.range(10)
+(0..10)
   :filter(fn(x) x % 2 == 0)
   :collect()
   |> for x in _ print(x)
 # { 0, 2, 4, 6, 8 }
 
-iter.range(1, 11)
+(1..11)
   :map(fn(x) x * x)
   :filter(fn(x) x > 20)
   :take(3)
   :collect()
 # {25, 36, 49}
 
-iter.range(1, 6) |> iter.fold(fn(a, b) a * b)
+(1..6) |> iter.fold(fn(a, b) a * b)
 # 120
 
 #

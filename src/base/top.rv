@@ -88,6 +88,7 @@ pub declare system = fn(args: table<string>) -> !{string, string}
 
 #* internal, do not use. the runtime half of `import`, takes a realpath *#
 pub declare __internal_import = fn(path: string) -> any
+pub declare __internal_range = fn(start: number, end: number, step: number) -> function
 
 #* internal, do not use. the natives of a `src/std` module, by name *#
 pub declare __internal_native = fn(name: string) -> table

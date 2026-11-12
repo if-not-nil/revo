@@ -309,6 +309,9 @@ most breaking change yet
 
 ### Changed
 
+- range literals work everywhere, not only in `for`!
+  `iter.range`, `string.sub`, `string.with` and `table.slice` are gone, `s[a..b]` and `t[a..b]` slice
+  a slice that runs past the end is an error now, `sub` and `slice` used to clamp
 - tables fall through to `iter`, so thta `t:map(f)` and `t:sum()` just work
   `table.join`, `index_of`, `flatten` and `unique` moved to `iter`, and they're lazy now
       (`join` and `index_of` just walk it)

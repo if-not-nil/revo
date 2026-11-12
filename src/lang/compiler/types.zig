@@ -1024,7 +1024,9 @@ pub fn inferExprType(ctx: CheckCtx, node: *const cst.CstNode) TypeInfo {
             const one = [_]*const cst.CstNode{b.arg};
             break :blk ctx.inferCallReturnType(b.callee, &one, &.{}, false);
         },
-        .range, .for_range, .slice => .{ .tag = .number },
+        // an iterator object, so no static shape yet
+        .range => .{ .tag = .any },
+        .for_range, .slice => .{ .tag = .number },
         // `a |> f` desugars to a call or a temp block; answer `any`
         .pipe => .{ .tag = .any },
         .try_expr => |t| blk: {

@@ -288,7 +288,6 @@ pub const Impl = struct {
 
 pub const impls: []const specs.Impl = root.host.impls(Impl).val ++ &[_]specs.Impl{
     .{ .name = "push", .f = root.host.defineVariadic(&.{.table}, push) },
-    .{ .name = "slice", .f = root.host.defineVariadic(&.{ .table, .number }, sliceRange) },
     .{ .name = "get_meta", .f = root.host.define(&.{.table}, @import("metatable.zig").get_meta) },
     .{ .name = "set_meta", .f = root.host.define(&.{ .table, .any }, @import("metatable.zig").set_meta) },
 };
@@ -299,26 +298,6 @@ fn push(args: []const Value, vm: *VM) !HostResult {
     if (table.frozen) return .other("pub records are read-only");
     try table.array.appendSlice(vm.runtime.alloc, args[1..]);
     return .data(Value.new.table(table_id));
-}
-
-/// array slice `[start, end)`, end defaults to the array length
-/// bounds clamp; empty when start >= end
-fn sliceRange(args: []const Value, vm: *VM) !HostResult {
-    const table = vm.tables.get(args[0].asTable().?) catch return .errType(0, "table", typeof(args[0], vm));
-    const alen = table.array.items.len;
-    const start_num = args[1].asNumOpt() orelse return .errType(1, "integer number", typeof(args[1], vm));
-    const end_num = if (args.len > 2)
-        args[2].asNumOpt() orelse return .errType(2, "integer number", typeof(args[2], vm))
-    else
-        @as(f64, @floatFromInt(alen));
-    if (start_num < 0.0 or end_num < 0.0) return .errAssertionFailed("range cannot be negative");
-    if (start_num > end_num) return .errAssertionFailed("range start cannot be greater than end");
-    const start_isize = root.host.numToInt(isize, start_num) orelse return .errType(1, "integer number", typeof(args[1], vm));
-    const end_isize = root.host.numToInt(isize, end_num) orelse return .errType(2, "integer number", typeof(args[2], vm));
-    const lo: usize = @intCast(@max(start_isize, 0));
-    const hi: usize = @intCast(@min(end_isize, @as(isize, @intCast(alen))));
-    if (lo >= hi) return .data(try vm.tableOfSlice(&.{}));
-    return .data(try vm.tableOfSlice(table.array.items[lo..hi]));
 }
 
 test "table library" {
@@ -395,10 +374,9 @@ test "table deep_copy" {
 }
 
 test "table slice" {
-    try testing.topNumber("iter.sum({1, 2, 3, 4}:slice(1, 3))", 5);
-    try testing.topNumber("{1, 2, 3}:slice(1):len()", 2);
-    try testing.topNumber("{1, 2, 3}:slice(0, 10):len()", 3);
-    try testing.topNumber("{1, 2, 3}:slice(2, 2):len()", 0);
+    try testing.topNumber("iter.sum({1, 2, 3, 4}[1..3])", 5);
+    try testing.topNumber("{1, 2, 3}[1..]:len()", 2);
+    try testing.topNumber("{1, 2, 3}[2..2]:len()", 0);
 }
 
 test "contains? and index_of compare string content, not ids" {

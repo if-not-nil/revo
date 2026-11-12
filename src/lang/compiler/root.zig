@@ -1153,15 +1153,25 @@ pub const Compiler = struct {
                 expr,
                 "type ascriptions only go in match patterns",
             ),
-            .range => return self.fail(
-                .UnsupportedSyntax,
-                expr,
-                "range literals only go in forloops for now",
-            ),
+            .range => |r| {
+                // `a..b` is start..end with step 1, `a..s..b` is start..end with step s
+                try self.emit(.load_user_global, try self.vm.internAtom("__internal_range"));
+                if (r.dot2_tok != null) {
+                    const end = r.end orelse return self.fail(.UnsupportedSyntax, expr, "open range needs an end");
+                    try self.compile(r.start, true);
+                    try self.compile(end, true);
+                    try self.compile(r.mid, true);
+                } else {
+                    try self.compile(r.start, true);
+                    try self.compile(r.mid, true);
+                    try self.@"const"(Value.new.num(1));
+                }
+                try self.emit(.call, 3);
+            },
             .for_range => return self.fail(
                 .UnsupportedSyntax,
                 expr,
-                "range literals only go in forloops for now",
+                "open ranges only go in for loops and between `[` `]`",
             ),
             .slice => return self.fail(
                 .UnsupportedSyntax,

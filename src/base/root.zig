@@ -106,6 +106,7 @@ pub const os_impls: []const specs.Impl = &.{
     .{ .name = "cwd", .f = gated(revo.default_caps.io, &[_]host.ParamType{}, cwd) },
     .{ .name = "exit", .f = gated(revo.default_caps.io, &[_]host.ParamType{.number}, exit) },
     .{ .name = "system", .f = gated(revo.default_caps.io, &[_]host.ParamType{.table}, system_) },
+    .{ .name = "__internal_range", .f = host.define(&[_]host.ParamType{ .number, .number, .number }, @import("iter.zig").range_fn) },
     .{ .name = "__internal_import", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, internal_import) },
     .{ .name = "__internal_native", .f = if (revo.is_freestanding) host.defineStub(&.{.string}) else host.define(&.{.string}, internal_native) },
     .{ .name = "__internal_dotest", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dotest) },

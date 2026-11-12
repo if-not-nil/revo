@@ -765,7 +765,7 @@ test "repl string methods work on multiple string literals" {
     try std.testing.expect(ok1);
 
     const before = env.out.written().len;
-    _ = try env.session.evalLine(&env.out.writer, "\"abc\":sub(1,1)");
+    _ = try env.session.evalLine(&env.out.writer, "\"abc\":upper()");
     // second step should succeed but may error with wrong method name
     try std.testing.expect(std.mem.find(u8, env.out.written()[before..], "error:") == null);
 }
@@ -777,7 +777,7 @@ test {
     const alloc = arena.allocator();
     var env = try initTestEnv(alloc);
 
-    _ = try env.session.evalLine(&env.out.writer, "\"abc\":sub(1,1)");
+    _ = try env.session.evalLine(&env.out.writer, "\"abc\":upper()");
 
     const before = env.out.written().len;
     _ = try env.session.evalLine(&env.out.writer, "\"abc\":trim()");
