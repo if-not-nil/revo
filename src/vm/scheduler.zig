@@ -430,6 +430,8 @@ pub fn init(alloc: std.mem.Allocator) !@This() {
 }
 
 pub fn deinit(self: *@This()) void {
+    // a later scheduler at the same address would otherwise inherit this one's fiber id
+    if (tl_sched == self) tl_sched = null;
     for (self.fibers.items) |box| {
         box.deinit(self.alloc);
     }
