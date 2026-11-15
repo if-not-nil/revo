@@ -202,6 +202,22 @@ test "multiple spawned joins survive nested calls" {
     , 36);
 }
 
+test "spawn method call passes the object as self" {
+    try t.topNumber(
+        \\ const a = {m = fn(s, x) x}
+        \\ const h = spawn a:m(1)
+        \\ h:join()
+    , 1);
+    // the object is evaluated once and bound as self
+    try t.topNumber(
+        \\ let calls = 0
+        \\ const T = { n = 40 }
+        \\ fn T:add(a, b) self.n + a + b
+        \\ const mk = fn() do calls = calls + 1 T end
+        \\ (spawn mk():add(1, 1)):join() + calls
+    , 43);
+}
+
 //
 // comptime
 //
