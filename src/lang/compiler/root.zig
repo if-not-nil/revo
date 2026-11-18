@@ -893,14 +893,25 @@ pub const Compiler = struct {
                             try self.emit(.spawn, @intCast(spawn_args.len));
                         },
                         .method_call => |m| {
+                            // spawn has no colon form like call_field, so lay out
+                            // `obj.m, obj, args...` and pass obj as the first arg
                             try self.compile(m.object, true);
+                            try self.regDupe();
+                            const top = self.value_stack.items.len;
                             const mname = cst.atomName(m.atom_tok.text);
-                            try self.@"const"(Value.new.atom(try self.vm.internAtom(mname)));
+                            // read the copy, then overwrite obj's slot with the method
+                            try self.spans.append(self.alloc, self.active_span);
+                            self.value_stack.items[top - 2] = try self.record(
+                                .table_get_atom,
+                                &.{.{ .inst = self.value_stack.items[top - 1] }},
+                                false,
+                                try toRegister(self.active_registers - 2),
+                                try self.vm.internAtom(mname),
+                            );
                             for (m.args) |arg| {
                                 if (cst.namedArgValue(arg)) |v| try self.compile(v, true) else try self.compile(arg, true);
                             }
-                            const argc = m.args.len | (@as(usize, 1) << 7);
-                            try self.emit(.spawn, @intCast(argc));
+                            try self.emit(.spawn, @intCast(m.args.len + 1));
                         },
                         .generic_call => |g| {
                             try self.compile(g.receiver, true);
