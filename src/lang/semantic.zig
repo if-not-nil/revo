@@ -1107,7 +1107,7 @@ const SemanticChecker = struct {
                 const inner_type = try self.analyzeNode(tt.expr);
                 if (inner_type.tag != .any and !types_mod.isResultType(inner_type)) {
                     try self.appendError(
-                        try self.alloc.print("try expects :ok/:err tagged result, got {s}", .{try type_syntax.formatTypeOpts(self.alloc, inner_type, .{})}),
+                        try self.alloc.print("try expects :ok/:err or :some/:none tagged result, got {s}", .{try type_syntax.formatTypeOpts(self.alloc, inner_type, .{})}),
                         tt.expr.span,
                         "not a result type",
                     );

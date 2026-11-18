@@ -595,18 +595,30 @@ pub fn resultParts(self: *VM, val: Value) ?ResultParts {
     };
 }
 
-/// `:err` table check, for `?`, `orelse`, jumps, `try`
-pub fn isErrTable(self: *VM, val: Value) bool {
+fn checkTableTag(self: *VM, val: Value, atomId: revo.CoreAtoms) bool {
     const parts = self.resultParts(val) orelse return false;
     const atom = parts.tag.asAtom() orelse return false;
-    return atom == revo.CoreAtoms.atomId(.err);
+    return atom == revo.CoreAtoms.atomId(atomId);
 }
 
-/// `:ok` table check, pairs `isErrTable`
+/// `:err` table check, for `?`, `orelse`, jumps, `try`
+pub fn isErrTable(self: *VM, val: Value) bool {
+    return checkTableTag(self, val, .err);
+}
+
+/// `:ok` table check
 pub fn isOkTable(self: *VM, val: Value) bool {
-    const parts = self.resultParts(val) orelse return false;
-    const atom = parts.tag.asAtom() orelse return false;
-    return atom == revo.CoreAtoms.atomId(.ok);
+    return checkTableTag(self, val, .ok);
+}
+
+/// `:some` table check
+pub fn isSomeTable(self: *VM, val: Value) bool {
+    return checkTableTag(self, val, .some);
+}
+
+/// `:none` table check
+pub fn isNoneTable(self: *VM, val: Value) bool {
+    return checkTableTag(self, val, .none);
 }
 
 /// named-field write without the intern dance
@@ -949,6 +961,15 @@ pub fn panicFromErrPayload(self: *VM, payload: ?Value, pc: usize) error{ OutOfMe
         };
         self.setPanicMessageOwned(try buf.toOwnedSlice());
     }
+    self.panic_span = if (self.currentDebugInfo()) |debug|
+        self.spanAtPc(debug, if (pc > 0) pc - 1 else 0)
+    else
+        null;
+}
+
+/// top-level `x?` on a `{:none, ...}`: nothing to propagate to, so panic
+pub fn panicFromNone(self: *VM, pc: usize) error{ OutOfMemory, Panic }!void {
+    self.setPanicMessageOwned(try self.runtime.alloc.dupe(u8, "unwrapped :none"));
     self.panic_span = if (self.currentDebugInfo()) |debug|
         self.spanAtPc(debug, if (pc > 0) pc - 1 else 0)
     else
