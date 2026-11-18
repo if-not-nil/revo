@@ -72,16 +72,10 @@ pub declare hash = fn(val: any) -> number
 
 # os
 
-# process and host access: cwd, exit, subprocesses, stdin lines, importing modules, running tests
+# process and host access
 
 #* reads one line from stdin, or until a custom delimiter (?opts: { delimiter: string|:nil|:eof }) *#
 pub declare input = fn(?opts: os.InputOpts...) -> !string
-
-#* returns current working directory path *#
-pub declare cwd = fn() -> string
-
-#* exists the program with a status *#
-pub declare exit = fn(status: number) -> never
 
 #* runs a subprocess and returns (stdout, stderr) *#
 pub declare system = fn(args: table<string>) -> !{string, string}
@@ -98,14 +92,3 @@ pub declare __internal_dotest = fn(name: string, body: function) -> :ok
 
 #* internal, pls dont use. runs a test suite *#
 pub declare __internal_dosuite = fn(name: string, body: function) -> :ok
-
-#* returns value of environment variable, or nil if not set *#
-pub declare getenv = fn(name: string) -> string?
-
-#* sets an environment variable, returns :ok *#
-pub declare setenv = fn(name: string, value: string) -> :ok
-
-#* read input options *#
-pub type os.InputOpts = {
-  ?delimiter: string | :nil | :eof
-}

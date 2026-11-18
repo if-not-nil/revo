@@ -230,7 +230,7 @@ code --install-extension ~/Downloads/revo-lsp-<the version you've dowloaded>.vsi
 the server builds on the great work done by the zls team, being lsp-kit
 it's bundled into the `revo` binary! start it with `revo lsp`
 
-all lsp-specific information lives here [here](https://github.com/if-not-nil/revo/tree/main/src/lsp)
+for integration advice, ask the discord server
 
 ## references
 

@@ -1,6 +1,6 @@
 print("a perfect number equals the sum of its proper divisors; N = 20000\n")
 
-let start = time.now()
+let start = os.now()
 let found: number = 0
 
 for num in 0..20001 do
@@ -17,4 +17,4 @@ for num in 0..20001 do
 end
 
 print(fmt("found %v perfect numbers", found))
-print(fmt("took %v", (time.now() - start)/1000))
+print(fmt("took %v", (os.now() - start)/1000))

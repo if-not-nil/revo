@@ -46,7 +46,7 @@ const result = argparse.parse(fn(p) do
   p:option(:output, {short = "o", description = "output file"})
   p:command(:compile, {description = "compile a file"})
   p:positional(:script, {description = "input script"})
-end, argv)
+end, os.args())
 
 if result.err do
   print("error:", result.err)

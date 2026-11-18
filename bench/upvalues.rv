@@ -10,7 +10,7 @@ end
 
 print(shallow(100))
 
-let t0 = time.monotonic_ns()
+let t0 = os.clock()
 let r1 = shallow(10000)
-let t1 = time.monotonic_ns()
+let t1 = os.clock()
 print("bench:", r1, t1 - t0)

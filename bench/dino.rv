@@ -1,5 +1,5 @@
 # used throughout redhat dino's development process @ https://arxiv.org/pdf/1604.01290
-let start = time.now()
+let start = os.now()
 
 const n: number = 25
 let x: number = 0
@@ -14,4 +14,4 @@ for _ in 0..n
 
 print(x)
 
-print(fmt("took %v", (time.now() - start)/1000))
+print(fmt("took %v", (os.now() - start)/1000))

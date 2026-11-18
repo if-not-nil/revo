@@ -79,7 +79,7 @@ test "formatter" {
         \\
         },
         .{ .name = "spacing stays put", .src =
-        \\let r = fs.open("x")?:read()
+        \\let r = file.open("x")?:read()
         \\pub declare f = fn(a: any) -> !any/:Fail
         \\let xs = make<number>(1)
         \\let n = self.tl[ch]
@@ -214,13 +214,13 @@ test "formatter" {
         },
         .{ .name = "method chains continue", .src =
         \\const w =
-        \\fs.open(c)?:read()?
+        \\file.open(c)?:read()?
         \\:replace("a", "b")
         \\:split(" ")
         \\
         , .want =
         \\const w =
-        \\  fs.open(c)?:read()?
+        \\  file.open(c)?:read()?
         \\  :replace("a", "b")
         \\  :split(" ")
         \\

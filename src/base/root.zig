@@ -101,44 +101,46 @@ pub const fiber_impls: []const specs.Impl = &.{
     .{ .name = "join", .f = host.define(&[_]host.ParamType{.resource}, join) },
 };
 
-pub const os_impls: []const specs.Impl = &.{
-    .{ .name = "input", .f = gatedVariadic(revo.default_caps.io, &[_]host.ParamType{}, input) },
+pub const os_module_impls: []const specs.Impl = &.{
+    .{ .name = "args", .f = host.define(&[_]host.ParamType{}, os_args) },
     .{ .name = "cwd", .f = gated(revo.default_caps.io, &[_]host.ParamType{}, cwd) },
     .{ .name = "exit", .f = gated(revo.default_caps.io, &[_]host.ParamType{.number}, exit) },
+    .{ .name = "env", .f = gatedVariadic(revo.default_caps.io, &[_]host.ParamType{}, env) },
+    .{ .name = "setenv", .f = gated(revo.default_caps.setenv, &[_]host.ParamType{ .string, .string }, setenv_) },
+    .{ .name = "now", .f = host.define(&[_]host.ParamType{}, now) },
+    .{ .name = "clock", .f = host.define(&[_]host.ParamType{}, clock) },
+};
+
+pub const os_impls: []const specs.Impl = &.{
+    .{ .name = "input", .f = gatedVariadic(revo.default_caps.io, &[_]host.ParamType{}, input) },
     .{ .name = "system", .f = gated(revo.default_caps.io, &[_]host.ParamType{.table}, system_) },
     .{ .name = "__internal_range", .f = host.define(&[_]host.ParamType{ .number, .number, .number }, @import("iter.zig").range_fn) },
     .{ .name = "__internal_import", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, internal_import) },
     .{ .name = "__internal_native", .f = if (revo.is_freestanding) host.defineStub(&.{.string}) else host.define(&.{.string}, internal_native) },
     .{ .name = "__internal_dotest", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dotest) },
     .{ .name = "__internal_dosuite", .f = gated(revo.default_caps.io, &[_]host.ParamType{ .string, .function }, dosuite) },
-    .{ .name = "getenv", .f = gated(revo.default_caps.io, &[_]host.ParamType{.string}, getenv_) },
-    .{ .name = "setenv", .f = gated(revo.default_caps.setenv, &[_]host.ParamType{ .string, .string }, setenv_) },
 };
 
 pub fn register_base(vm: *revo.VM) !void {
     vm.loaded_specs = try specs.loadAllSpecs(vm.runtime.alloc);
 
-    const argv_atom = try vm.internAtom("argv");
-    const all = specs.full_specs;
-    try specs.registerAll(vm, all, mtPrototype);
+    try specs.registerAll(vm, specs.full_specs, mtPrototype);
     try registerTypePredicates(vm);
-
-    const argv_id = try vm.tables.create();
-    const argv_val = Value.new.table(argv_id);
-    try vm.user_globals.put(argv_atom, argv_val);
-    try vm.builtin_globals.put(argv_atom, argv_val);
 }
 
-/// argv has to be populated after compilation
-/// get rid of this one at some point
-pub fn populateArgv(vm: *revo.VM) !void {
-    const argv_atom = try vm.internAtom("argv");
-    const argv_val = vm.user_globals.get(argv_atom) orelse return;
-    const argv_id = argv_val.asTable() orelse return;
-    const argv = try vm.tables.get(argv_id);
-    for (vm.runtime.argv) |arg| {
-        try argv.push(vm.runtime.alloc, try vm.ownValueString(arg));
-    }
+pub fn now(_: []const Value, vm: *VM) !host.HostResult {
+    return .data(Value.new.num(std.Io.Clock.real.now(vm.runtime.io).toMilliseconds()));
+}
+
+pub fn clock(_: []const Value, vm: *VM) !host.HostResult {
+    return .data(Value.new.num(std.Io.Clock.awake.now(vm.runtime.io).toMilliseconds()));
+}
+
+pub fn os_args(_: []const Value, vm: *VM) !host.HostResult {
+    const id = try vm.tables.create();
+    const t = try vm.tables.get(id);
+    for (vm.runtime.argv) |arg| try t.push(vm.runtime.alloc, try vm.ownValueString(arg));
+    return .data(Value.new.table(id));
 }
 
 fn mtPrototype(target: host.ParamType, vm: *revo.VM) !Value {
@@ -206,6 +208,19 @@ pub fn fmt(args: []const Value, vm: *VM) !host.HostResult {
 
     const str = try result.toOwnedSlice();
     return .data(try vm.adoptValueString(str));
+}
+
+test "os.env reads and lists" {
+    try testing.topString(
+        \\ os.setenv("REVO_TEST_ENV", "hi")
+        \\ os.env("REVO_TEST_ENV")
+    , "hi");
+    try testing.topAtom("os.env(\"REVO_TEST_ENV_UNSET\")", "nil");
+    try testing.topString("os.env().REVO_TEST_ENV", "hi");
+}
+
+test "os.args is a fresh table" {
+    try testing.topNumber("os.args():len()", 0);
 }
 
 test "fmt %v formats plain" {
@@ -669,17 +684,26 @@ pub fn exit(args: []const Value, vm: *VM) !host.HostResult {
     std.process.exit(status);
 }
 
-pub fn getenv_(args: []const Value, vm: *VM) !host.HostResult {
-    const name = args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm));
-
-    const name_s = vm.stringValue(name);
-    const name_z = try vm.runtime.alloc.dupeSentinel(u8, name_s, 0);
-    defer vm.runtime.alloc.free(name_z);
+pub fn env(args: []const Value, vm: *VM) !host.HostResult {
     // really dont feel like threading environ_map down from main, sorry
-    if (std.c.getenv(name_z)) |val| {
-        const slice = std.mem.span(val);
-        return .data(try vm.ownValueString(slice));
+    if (args.len > 1) return .errArity(args.len, 1);
+
+    if (args.len == 0) {
+        const t_id = try vm.tables.create();
+        var i: usize = 0;
+        while (std.c.environ[i]) |entry| : (i += 1) {
+            const kv = std.mem.span(entry);
+            const eq = std.mem.findScalar(u8, kv, '=') orelse continue;
+            try vm.putField(t_id, kv[0..eq], try vm.ownValueString(kv[eq + 1 ..]));
+        }
+        return .data(Value.new.table(t_id));
     }
+
+    const name = args[0].asString() orelse return .errType(0, "string", typeof(args[0], vm));
+    const name_z = try vm.runtime.alloc.dupeSentinel(u8, vm.stringValue(name), 0);
+    defer vm.runtime.alloc.free(name_z);
+
+    if (std.c.getenv(name_z)) |val| return .data(try vm.ownValueString(std.mem.span(val)));
     return .data(Value.new.nil());
 }
 
@@ -880,7 +904,8 @@ test "array flatten" {
 test "baselib json time and string modules are exposed" {
     try testing.topString("json.encode({\"a\", \"b\", \"c\"}):unwrap()", "[\"a\",\"b\",\"c\"]");
     try testing.topNumber("json.decode(\"{{ \\\"a\\\" : 1}}\"):unwrap().a", 1);
-    try testing.topTrue("time.now() > 0");
+    try testing.topTrue("os.now() > 0");
+    try testing.topTrue("os.clock() >= 0");
     try testing.topNumber("len(string.split(\"a,b\", \",\"))", 2);
 }
 

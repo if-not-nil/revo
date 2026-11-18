@@ -21,7 +21,7 @@ end
 
 
 test "rng doesnt output 0" do
-  const rng: Rng = {state = time.monotonic_ns(), next = rng_next}
+  const rng: Rng = {state = os.clock(), next = rng_next}
 
   for i in 0..100 do
     if (not rng:next(1000) != 0)
@@ -29,7 +29,7 @@ test "rng doesnt output 0" do
   end
 end
 
-const rng: Rng = {state = time.monotonic_ns(), next = rng_next}
+const rng: Rng = {state = os.clock(), next = rng_next}
 
 
 fn pref(a: any, b: any) fmt("%v %v", a, b)
@@ -60,7 +60,7 @@ end
 fn chain_train(self: Chain, corpus: string) do
   # normalize line breaks and split punctuation so the chain sees more shape
   const all_w =
-    fs.open(corpus)?:read()?
+    file.open(corpus)?:read()?
     :replace("\r", " ")
     :replace("\n", " ")
     :replace("\t", " ")

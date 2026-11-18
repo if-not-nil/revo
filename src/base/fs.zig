@@ -12,11 +12,9 @@ const dir_default: f64 = if (builtin.target.os.tag == .windows) 0 else 0o777;
 const file_default: f64 = if (builtin.target.os.tag == .windows) 0 else 0o666;
 
 pub const Impl = struct {
-    pub const @"fs.readdir" = readdirImpl(Args.string);
+    pub const @"os.readdir" = readdirImpl(Args.string);
 
-    pub const @"file.readdir" = readdirImpl(Args.table);
-
-    pub fn @"fs.chdir"(vm: *VM, path: Args.string) !HostResult {
+    pub fn @"os.chdir"(vm: *VM, path: Args.string) !HostResult {
         _ = vm;
         _ = path;
 
@@ -26,7 +24,7 @@ pub const Impl = struct {
     // TODO(gusic): add support for patterns with ".." in them
     // TODO(gusic): add support for recursive matching
     // TODO(gusic): make use of depth limit
-    pub fn @"fs.glob"(vm: *VM, pattern: Args.string, recursive: Args.Optional(.bool, false), depth_limit: Args.Optional(.number, 100)) !HostResult {
+    pub fn @"os.glob"(vm: *VM, pattern: Args.string, recursive: Args.Optional(.bool, false), depth_limit: Args.Optional(.number, 100)) !HostResult {
         _ = recursive;
         _ = depth_limit;
 
@@ -92,7 +90,7 @@ pub const Impl = struct {
         return .data(Value.new.table(table_id));
     }
 
-    pub fn @"fs.exists?"(vm: *VM, path: Args.string) !HostResult {
+    pub fn @"os.exists?"(vm: *VM, path: Args.string) !HostResult {
         const expanded = expandPath(vm, vm.stringValue(@backingInt(path))) catch |err| return progErr(err);
         defer vm.runtime.alloc.free(expanded);
 
@@ -104,7 +102,7 @@ pub const Impl = struct {
         return .{ .ok = Value.new.boolean(true) };
     }
 
-    pub fn @"fs.remove"(vm: *VM, path: Args.string, recursive: Args.Optional(.bool, false)) !HostResult {
+    pub fn @"os.remove"(vm: *VM, path: Args.string, recursive: Args.Optional(.bool, false)) !HostResult {
         const expanded = expandPath(vm, vm.stringValue(@backingInt(path))) catch |err| return progErr(err);
         defer vm.runtime.alloc.free(expanded);
 
@@ -124,7 +122,7 @@ pub const Impl = struct {
         return .Ok(vm, revo.Value.new.core(.ok));
     }
 
-    pub fn @"fs.mkdir"(vm: *VM, path: Args.string, parents: Args.Optional(.bool, false), permissions: Args.Optional(.number, dir_default)) !HostResult {
+    pub fn @"os.mkdir"(vm: *VM, path: Args.string, parents: Args.Optional(.bool, false), permissions: Args.Optional(.number, dir_default)) !HostResult {
         const expanded = expandPath(vm, vm.stringValue(@backingInt(path))) catch |err| return progErr(err);
         defer vm.runtime.alloc.free(expanded);
 
@@ -139,7 +137,7 @@ pub const Impl = struct {
         return .Ok(vm, revo.Value.new.core(.ok));
     }
 
-    pub fn @"fs.touch"(vm: *VM, path: Args.string) !HostResult {
+    pub fn @"os.touch"(vm: *VM, path: Args.string) !HostResult {
         const expanded = expandPath(vm, vm.stringValue(@backingInt(path))) catch |err| return progErr(err);
         defer vm.runtime.alloc.free(expanded);
 
@@ -161,7 +159,7 @@ pub const Impl = struct {
         return .Ok(vm, revo.Value.new.core(.ok));
     }
 
-    pub fn @"fs.copy"(vm: *VM, src: Args.string, dst: Args.string) !HostResult {
+    pub fn @"os.copy"(vm: *VM, src: Args.string, dst: Args.string) !HostResult {
         const from = expandPath(vm, vm.stringValue(@backingInt(src))) catch |err| return progErr(err);
         defer vm.runtime.alloc.free(from);
         const to = expandPath(vm, vm.stringValue(@backingInt(dst))) catch |err| return progErr(err);
@@ -175,7 +173,7 @@ pub const Impl = struct {
         return .Ok(vm, revo.Value.new.core(.ok));
     }
 
-    pub fn @"fs.rename"(vm: *VM, old_path: Args.string, new_path: Args.string) !HostResult {
+    pub fn @"os.rename"(vm: *VM, old_path: Args.string, new_path: Args.string) !HostResult {
         const old = expandPath(vm, vm.stringValue(@backingInt(old_path))) catch |err| return progErr(err);
         defer vm.runtime.alloc.free(old);
         const new = expandPath(vm, vm.stringValue(@backingInt(new_path))) catch |err| return progErr(err);
@@ -257,7 +255,7 @@ pub const Impl = struct {
         return .Ok(vm, revo.Value.new.core(.ok));
     }
 
-    pub const @"fs.stat" = statImpl(Args.string);
+    pub const @"os.stat" = statImpl(Args.string);
 };
 
 pub const impls: []const specs.Impl = if (!revo.default_caps.io)
@@ -265,7 +263,7 @@ pub const impls: []const specs.Impl = if (!revo.default_caps.io)
 else
     root.host.impls(Impl).val ++ &[_]specs.Impl{
         // takes optional mode string, parsed by hand
-        .{ .name = "fs.open", .f = root.host.defineVariadic(&.{.string}, open_fn) },
+        .{ .name = "file.open", .f = root.host.defineVariadic(&.{.string}, open_fn) },
     };
 
 fn openMode(args: []const Value, vm: *VM) !OpenMode {
@@ -462,16 +460,16 @@ fn sourceForPath(comptime template: []const u8, path: []const u8) ![]u8 {
     return alloc.print(template, .{path});
 }
 
-test "fs.glob returning empty table on bogus path" {
+test "os.glob returning empty table on bogus path" {
     try testing.topString(
-        \\ let path = fs.glob "oughhhhhhhh"
+        \\ let path = os.glob "oughhhhhhhh"
         \\ "#{path}"
     , "{}");
 }
 
-test "fs.glob wildcards" {
+test "os.glob wildcards" {
     const source =
-        \\ let paths = fs.glob "*.txt"
+        \\ let paths = os.glob "*.txt"
         \\ "#{paths}"
     ;
 
@@ -484,7 +482,7 @@ test "fs.glob wildcards" {
     try std.testing.expect(std.mem.find(u8, result.vm.stringValue(result.value.asString().?), "LICENSE.txt") != null);
 }
 
-test "fs.open/read reads file contents" {
+test "file.open/read reads file contents" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "a.txt", .data = "hello from fs" });
@@ -495,14 +493,14 @@ test "fs.open/read reads file contents" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ fs.open('{s}')?:read()?
+        \\ file.open('{s}')?:read()?
     , file_path);
     defer alloc.free(source);
 
     try testing.topString(source, "hello from fs");
 }
 
-test "fs.write overwrites file" {
+test "file.write overwrites file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "w.txt", .data = "old" });
@@ -513,7 +511,7 @@ test "fs.write overwrites file" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ const f = fs.open('{s}')?
+        \\ const f = file.open('{s}')?
         \\ f:write("new value", :false)?
         \\ f:read()?
     , file_path);
@@ -522,7 +520,7 @@ test "fs.write overwrites file" {
     try testing.topString(source, "new value");
 }
 
-test "fs.write appends with flag" {
+test "file.write appends with flag" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "app.txt", .data = "hello" });
@@ -533,7 +531,7 @@ test "fs.write appends with flag" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ const f = fs.open('{s}')?
+        \\ const f = file.open('{s}')?
         \\ f:write(" world", :true)?
         \\ f:read()?
     , file_path);
@@ -542,7 +540,7 @@ test "fs.write appends with flag" {
     try testing.topString(source, "hello world");
 }
 
-test "fs.readdir returns table of entries" {
+test "os.readdir returns table of entries" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "a.txt", .data = "a" });
@@ -552,13 +550,13 @@ test "fs.readdir returns table of entries" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ typeof(fs.readdir('{s}')?) == :table
+        \\ typeof(os.readdir('{s}')?) == :table
     , dir_path);
     defer alloc.free(source);
     try testing.topTrue(source);
 }
 
-test "fs.readdir returns entries with name and kind" {
+test "os.readdir returns entries with name and kind" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "x.txt", .data = "hello" });
@@ -568,7 +566,7 @@ test "fs.readdir returns entries with name and kind" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ const entries = fs.readdir('{s}')?
+        \\ const entries = os.readdir('{s}')?
         \\ const e1 = entries[1]
         \\ e1.name != :nil and e1.kind != :nil
     , dir_path);
@@ -576,24 +574,7 @@ test "fs.readdir returns entries with name and kind" {
     try testing.topTrue(source);
 }
 
-test "fs.dir:readdir() returns entries" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.writeFile(io, .{ .sub_path = "z.txt", .data = "test" });
-
-    const dir_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
-    defer alloc.free(dir_path);
-
-    const source = try sourceForPath(
-        \\ const dir = fs.open('{s}')?
-        \\ const entries = dir:readdir()?
-        \\ typeof(entries) == :table
-    , dir_path);
-    defer alloc.free(source);
-    try testing.topTrue(source);
-}
-
-test "fs.readdir works with current directory" {
+test "os.readdir works with current directory" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "c.txt", .data = "data" });
@@ -602,14 +583,14 @@ test "fs.readdir works with current directory" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ const entries = fs.readdir('{s}')?
+        \\ const entries = os.readdir('{s}')?
         \\ typeof(entries) == :table
     , dir_path);
     defer alloc.free(source);
     try testing.topTrue(source);
 }
 
-test "fs.open w creates missing file" {
+test "file.open w creates missing file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -619,7 +600,7 @@ test "fs.open w creates missing file" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ const f = fs.open('{s}', "w")?
+        \\ const f = file.open('{s}', "w")?
         \\ f:write("created")?
         \\ f:read()?
     , file_path);
@@ -628,7 +609,7 @@ test "fs.open w creates missing file" {
     try testing.topString(source, "created");
 }
 
-test "fs.open w truncates existing file" {
+test "file.open w truncates existing file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "t.txt", .data = "old content here" });
@@ -639,15 +620,15 @@ test "fs.open w truncates existing file" {
     defer alloc.free(file_path);
 
     const source = try alloc.print(
-        \\ fs.open('{s}', "w")?:close()
-        \\ fs.open('{s}')?:read()?
+        \\ file.open('{s}', "w")?:close()
+        \\ file.open('{s}')?:read()?
     , .{ file_path, file_path });
     defer alloc.free(source);
 
     try testing.topString(source, "");
 }
 
-test "fs.open a creates missing file and keeps existing content" {
+test "file.open a creates missing file and keeps existing content" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "k.txt", .data = "keep" });
@@ -660,37 +641,37 @@ test "fs.open a creates missing file and keeps existing content" {
     defer alloc.free(made);
 
     const source = try alloc.print(
-        \\ fs.open('{s}', "a")?:close()
-        \\ fs.open('{s}', "a")?:close()
-        \\ fs.open('{s}')?:read()?
+        \\ file.open('{s}', "a")?:close()
+        \\ file.open('{s}', "a")?:close()
+        \\ file.open('{s}')?:read()?
     , .{ made, kept, kept });
     defer alloc.free(source);
 
     try testing.topString(source, "keep");
 }
 
-test "fs.open missing file in r mode is FileNotFound" {
+test "file.open missing file in r mode is FileNotFound" {
     const source = try sourceForPath(
-        \\ match fs.open('{s}/nope.txt') | {{:err, e}} => e | _ => :ok
+        \\ match file.open('{s}/nope.txt') | {{:err, e}} => e | _ => :ok
     , "/tmp/revo-fs-test-missing-12345");
     defer alloc.free(source);
 
     try testing.topAtom(source, "FileNotFound");
 }
 
-test "fs.open unknown mode is a type error" {
+test "file.open unknown mode is a type error" {
     try testing.expectRuntimeError(
-        \\ fs.open('/tmp/revo-fs-test-missing-12345', "x")
+        \\ file.open('/tmp/revo-fs-test-missing-12345', "x")
     , .TypeError);
 }
 
-test "fs.open non-string path is a compile error" {
+test "file.open non-string path is a compile error" {
     try testing.expectSemanticFailure(
-        \\ fs.open(42)
-    , 1, 10, "arg 1 (`path`) to `open` wants string, got number");
+        \\ file.open(42)
+    , 1, 12, "arg 1 (`path`) to `open` wants string, got number");
 }
 
-test "fs.touch creates missing file and leaves existing content" {
+test "os.touch creates missing file and leaves existing content" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "e.txt", .data = "stay" });
@@ -703,16 +684,16 @@ test "fs.touch creates missing file and leaves existing content" {
     defer alloc.free(made);
 
     const source = try alloc.print(
-        \\ fs.touch('{s}')
-        \\ fs.touch('{s}')
-        \\ fs.open('{s}')?:read()?
+        \\ os.touch('{s}')
+        \\ os.touch('{s}')
+        \\ file.open('{s}')?:read()?
     , .{ made, kept, kept });
     defer alloc.free(source);
 
     try testing.topString(source, "stay");
 }
 
-test "fs.mkdir parents flag creates nested parents" {
+test "os.mkdir parents flag creates nested parents" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -722,15 +703,15 @@ test "fs.mkdir parents flag creates nested parents" {
     defer alloc.free(nested);
 
     const source = try alloc.print(
-        \\ fs.mkdir('{s}', :true)
-        \\ fs.exists?('{s}')
+        \\ os.mkdir('{s}', :true)
+        \\ os.exists?('{s}')
     , .{ nested, nested });
     defer alloc.free(source);
 
     try testing.topTrue(source);
 }
 
-test "fs.copy roundtrips contents" {
+test "os.copy roundtrips contents" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "src.txt", .data = "copied!" });
@@ -743,15 +724,15 @@ test "fs.copy roundtrips contents" {
     defer alloc.free(dst);
 
     const source = try alloc.print(
-        \\ fs.copy('{s}', '{s}')
-        \\ fs.open('{s}')?:read()?
+        \\ os.copy('{s}', '{s}')
+        \\ file.open('{s}')?:read()?
     , .{ src, dst, dst });
     defer alloc.free(source);
 
     try testing.topString(source, "copied!");
 }
 
-test "fs.remove recursive deletes tree" {
+test "os.remove recursive deletes tree" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -763,17 +744,17 @@ test "fs.remove recursive deletes tree" {
     defer alloc.free(deep);
 
     const source = try alloc.print(
-        \\ fs.mkdir('{s}/sub', :true)
-        \\ fs.touch('{s}')
-        \\ fs.remove('{s}', :true)
-        \\ fs.exists?('{s}') == :false
+        \\ os.mkdir('{s}/sub', :true)
+        \\ os.touch('{s}')
+        \\ os.remove('{s}', :true)
+        \\ os.exists?('{s}') == :false
     , .{ tree, deep, tree, tree });
     defer alloc.free(source);
 
     try testing.topTrue(source);
 }
 
-test "fs.remove non-recursive on non-empty dir is DirNotEmpty" {
+test "os.remove non-recursive on non-empty dir is DirNotEmpty" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io, "full");
@@ -783,14 +764,14 @@ test "fs.remove non-recursive on non-empty dir is DirNotEmpty" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ match fs.remove('{s}/full') | {{:err, e}} => e | _ => :ok
+        \\ match os.remove('{s}/full') | {{:err, e}} => e | _ => :ok
     , dir_path);
     defer alloc.free(source);
 
     try testing.topAtom(source, "DirNotEmpty");
 }
 
-test "fs.remove explicit false is not recursive" {
+test "os.remove explicit false is not recursive" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io, "full");
@@ -800,7 +781,7 @@ test "fs.remove explicit false is not recursive" {
     defer alloc.free(dir_path);
 
     const source = try sourceForPath(
-        \\ match fs.remove('{s}/full', :false) | {{:err, e}} => e | _ => :ok
+        \\ match os.remove('{s}/full', :false) | {{:err, e}} => e | _ => :ok
     , dir_path);
     defer alloc.free(source);
 
@@ -809,30 +790,30 @@ test "fs.remove explicit false is not recursive" {
 
 test "fs expands tilde to home" {
     const source =
-        \\ fs.exists?("~/")
+        \\ os.exists?("~/")
     ;
     try testing.topTrue(source);
 }
 
 test "fs rejects tilde user paths" {
     try testing.expectRuntimeError(
-        \\ fs.exists?("~nosuchuser12345/x")
+        \\ os.exists?("~nosuchuser12345/x")
     , .Panic);
 }
 
-test "fs.read on non-handle raises" {
+test "file.read on non-handle raises" {
     try testing.expectRuntimeError(
         \\ file.read({})
     , .Panic);
 }
 
-test "fs.mkdir with fractional permissions is a type error" {
+test "os.mkdir with fractional permissions is a type error" {
     try testing.expectRuntimeError(
-        \\ fs.mkdir("/tmp/revo-fs-test-missing-12345", :false, 1.5)
+        \\ os.mkdir("/tmp/revo-fs-test-missing-12345", :false, 1.5)
     , .TypeError);
 }
 
-test "fs.stat reads size from path" {
+test "os.stat reads size from path" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "s.txt", .data = "12345" });
@@ -843,14 +824,14 @@ test "fs.stat reads size from path" {
     defer alloc.free(file_path);
 
     const source = try sourceForPath(
-        \\ fs.stat('{s}')?.size
+        \\ os.stat('{s}')?.size
     , file_path);
     defer alloc.free(source);
 
     try testing.topNumber(source, 5);
 }
 
-test "fs.stat follow flag sees through symlinks" {
+test "os.stat follow flag sees through symlinks" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io, .{ .sub_path = "real.txt", .data = "12345" });
@@ -862,7 +843,7 @@ test "fs.stat follow flag sees through symlinks" {
     defer alloc.free(link_path);
 
     const source = try alloc.print(
-        \\ string({{fs.stat('{s}')?.kind, fs.stat('{s}', :false)?.kind}})
+        \\ string({{os.stat('{s}')?.kind, os.stat('{s}', :false)?.kind}})
     , .{ link_path, link_path });
     defer alloc.free(source);
 
@@ -880,7 +861,7 @@ test "file.stat follow flag reads metadata from handle" {
     defer alloc.free(file_path);
 
     const source = try alloc.print(
-        \\ const f = fs.open('{s}')?
+        \\ const f = file.open('{s}')?
         \\ string({{f:stat()?.size, f:stat(:false)?.size}})
     , .{file_path});
     defer alloc.free(source);

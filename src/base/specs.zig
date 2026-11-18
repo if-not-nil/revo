@@ -39,6 +39,7 @@ pub const Group = struct {
 /// one group per `.rv` next to its zig, in surface order
 pub const groups: []const Group = &.{
     Group.init("top", @embedFile("top.rv"), &.{ @import("root.zig").root_impls, @import("root.zig").os_impls }),
+    Group.init("os", @embedFile("os.rv"), &.{ @import("root.zig").os_module_impls, @import("fs.zig").impls }),
     Group.init("chan", @embedFile("chan.rv"), &.{@import("root.zig").chan_impls}),
     Group.init("fiber", @embedFile("fiber.rv"), &.{@import("root.zig").fiber_impls}),
     Group.init("ffi", @embedFile("ffi.rv"), &.{if (ffi_on) @import("ffi_lib.zig").impls else &.{}}),
@@ -50,11 +51,9 @@ pub const groups: []const Group = &.{
     Group.init("math", @embedFile("math.rv"), &.{@import("math.zig").impls}),
     Group.init("stats", @embedFile("stats.rv"), &.{@import("stats.zig").impls}),
     Group.init("json", @embedFile("json.rv"), &.{@import("json.zig").impls}),
-    Group.init("time", @embedFile("time.rv"), &.{@import("time.zig").impls}),
     Group.init("datetime", @embedFile("datetime.rv"), &.{@import("datetime.zig").impls}),
     Group.init("net", @embedFile("net.rv"), &.{@import("net.zig").impls}),
     Group.init("http", @embedFile("http.rv"), &.{if (http_on) @import("http.zig").impls else &.{}}),
-    Group.init("fs", @embedFile("fs.rv"), &.{@import("fs.zig").impls}),
     Group.init("revo", @embedFile("revo.rv"), &.{@import("revo.zig").impls}),
     Group.init("rng", @embedFile("rng.rv"), &.{@import("rng.zig").impls}),
     Group.init("argparse", @embedFile("argparse.rv"), &.{@import("argparse.zig").impls}),
@@ -225,6 +224,10 @@ fn checkImplSig(spec: FnSpec) !void {
     }
 }
 
+const os_fs_fns = std.StaticStringMap(void).initComptime(.{
+    .{"readdir"}, .{"exists?"}, .{"remove"}, .{"mkdir"}, .{"touch"}, .{"copy"}, .{"rename"}, .{"stat"}, .{"glob"}, .{"chdir"},
+});
+
 /// drop specs of compiled-out modules
 /// ; ffi declares no globals or methods
 /// , so a namespaced-module match is exact
@@ -235,8 +238,8 @@ fn dropDisabledModules(alloc: std.mem.Allocator, specs: []FnSpec) ![]FnSpec {
         const disabled = s.head.kind == .namespaced and s.head.module != null and
             ((std.mem.eql(u8, s.head.module.?, "ffi") and !ffi_on) or
                 (std.mem.eql(u8, s.head.module.?, "http") and !http_on) or
-                (std.mem.eql(u8, s.head.module.?, "fs") and !fs_on) or
                 (std.mem.eql(u8, s.head.module.?, "file") and !fs_on) or
+                (std.mem.eql(u8, s.head.module.?, "os") and !fs_on and os_fs_fns.has(s.name)) or
                 (std.mem.eql(u8, s.head.module.?, "net") and !net_on) or
                 (std.mem.eql(u8, s.head.module.?, "socket") and !net_on));
         if (disabled) {
@@ -1265,8 +1268,8 @@ test "module doc keeps paragraphs" {
 
 test "moduleDoc finds table docs in the single file" {
     _ = try loadAllSpecs(testing.allocator);
-    try testing.expectEqualStrings("filesystem access & ops", moduleDoc("fs"));
-    try testing.expectEqualStrings("filesystem access & ops", moduleDoc("file"));
+    try testing.expect(moduleDoc("os").len > 0);
+    try testing.expectEqualStrings("file handles", moduleDoc("file"));
     // `re` is std now, and it must not match the `revo` table
     try testing.expectEqualStrings("", moduleDoc("re"));
     try testing.expect(moduleDoc("revo").len > 0);

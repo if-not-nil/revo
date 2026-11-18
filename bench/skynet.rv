@@ -1,6 +1,6 @@
 # skynet benchmark of https://github.com/atemerev/skynet
 # ported to revo by cb:0riginaln0 gh:0riginaln0
-let start = time.now()
+let start = os.now()
 
 
 fn skynet(num, size) do
@@ -17,4 +17,4 @@ end
 
 let root = spawn skynet(0, 1000000)
 print("Res:", root:join())
-print(fmt("took %v", (time.now() - start)/1000))
+print(fmt("took %v", (os.now() - start)/1000))

@@ -725,7 +725,7 @@ const SemanticChecker = struct {
                 }
             }
         }
-        // baselib module function lookup: fs.exists?, file.read, time.now
+        // baselib module function lookup
         // , only globals are modules, a local binding shadows the module
         if (cst.identText(object)) |oname| {
             if (self.known_globals.contains(oname) and !self.shadowed_globals.contains(oname)) {

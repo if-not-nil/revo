@@ -58,11 +58,6 @@ pub const Runtime = struct {
     /// arena backing diag_alloc; null when not arena-backed
     diag_arena: ?*std.heap.ArenaAllocator = null,
 
-    /// baseline ns captured at first time.now_ns()/monotonic_ns() call: the
-    /// returned counts stay small enough to be exact f64 integers (deltas are
-    /// then nanosecond-precise; absolute epoch ns would lose the low bits)
-    time_wall_base: i96 = 0,
-    time_mono_base: i96 = 0,
     /// lazily time-seeded prng for the rng baselib; per-vm so equal-ns calls
     /// advance one stream instead of re-seeding identical generators
     prng: ?std.Random.DefaultPrng = null,

@@ -44,6 +44,8 @@ most breaking change yet
 - `revo fmt`, the simple standard formatter
 
 - new imports!
+  along with them, the `std` library was added (a collection of things not immediately necessary just to write revo, but likely very useful)\
+  the split gave way for a bigger change- a restructuring of both `base` and `std`. there are so many changes, that the changelog will only mention the additions and removals, but not renames and deletions. see the reference instead
   - `import("./x")` does not auto-bind anymore, `use` does
      import is now more-or-less lua's require
 
@@ -310,17 +312,12 @@ most breaking change yet
 ### Changed
 
 - range literals work everywhere, not only in `for`!
-  `iter.range`, `string.sub`, `string.with` and `table.slice` are gone, `s[a..b]` and `t[a..b]` slice
-  a slice that runs past the end is an error now, `sub` and `slice` used to clamp
-- tables fall through to `iter`, so thta `t:map(f)` and `t:sum()` just work
-  `table.join`, `index_of`, `flatten` and `unique` moved to `iter`, and they're lazy now
-      (`join` and `index_of` just walk it)
-
-  - `index_of` gives `:undef` when it's not there
-  - `table.count_of` is gone, `t:count(fn(x) x == v)` does it insteaf
+  `0..5` and `0..2..10` are iterators you can pass around, so `(0..5):map(f):sum()` works
+  a slice that runs past the end is an error now, it used to clamp
+- tables fall through to `iter`, so that `t:map(f)` and `t:sum()` just work
+  `index_of` gives `:undef` when it's not there
 - channels and fibers are handles, not `{:chan, n}` and `{:fiber, n}` tables
-  they have their own metatables
-  the `send`, `recv` and `join` globals are gone
+  they have their own metatables, so `c:send(v)`, `c:recv()` and `f:join()` are methods
 - table keys take keywords too, `{end = 1, import = 2}`
 - `number` is the only spelling of the number type
   `num` and `int` no longer exist, so `let x: num` is now an untyped binding

@@ -35,7 +35,7 @@ fn worker(name: string) do
 end
 
 
-let {start, jobs} = {time.now(), {}}
+let {start, jobs} = {os.now(), {}}
 
 jobs:push(spawn worker("alice"))
 jobs:push(spawn worker("bob"))
@@ -49,4 +49,4 @@ for job in jobs do
   job:join()
 end
 
-print("on #{revo.threads()} threads, #{math.max(revo.threads(), 4)} jobs were completed in #{time.now() - start}ms")
+print("on #{revo.threads()} threads, #{math.max(revo.threads(), 4)} jobs were completed in #{os.now() - start}ms")

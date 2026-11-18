@@ -30,7 +30,7 @@ test "baselib sigs: global return types reach the compiler" {
     // semantic knows cwd/read from the os iface; misuse that compiled
     // against .any now errors before codegen
     try t.expectSemanticError(
-        \\ let x = cwd()
+        \\ let x = os.cwd()
         \\ let n: number = x
     );
     try t.expectSemanticError(
@@ -59,16 +59,16 @@ test "baselib sigs variadic global keeps accepting extra args" {
 
 test "baselib sigs untyped call still validates arg count" {
     try t.expectSemanticError(
-        \\ cwd("nope", "more")
+        \\ os.cwd("nope", "more")
     );
 }
 
 test "baselib sigs: module field calls resolve to spec sigs" {
-    try t.topAtom("fs.exists?(\"/definitely/not/a/real/path_xyz\")", "false");
+    try t.topAtom("os.exists?(\"/definitely/not/a/real/path_xyz\")", "false");
     try t.topNumber(
         \\ table.len({1, 2}) + 1
     , 3);
-    try t.topTrue("let b: bool = fs.exists?(\"/tmp\")");
+    try t.topTrue("let b: bool = os.exists?(\"/tmp\")");
 }
 
 test "baselib sigs: a module table is its own self" {
@@ -81,7 +81,7 @@ test "baselib sigs: a module table is its own self" {
 
 test "baselib sigs: module result flows through match" {
     try t.topAtom(
-        \\ let r = fs.open("/definitely/not/a/real/path_xyz")
+        \\ let r = file.open("/definitely/not/a/real/path_xyz")
         \\ match r | {:ok, f} => :found | {:err, e} => e
     , "FileNotFound");
 }
@@ -101,17 +101,17 @@ test "baselib sigs: iter surface names what the impl takes" {
 }
 
 test "baselib sigs: local binding shadows baselib module" {
-    // `fs` here is a local table, not the module
+    // `os` here is a local table, not the module
     // no baselib sig is applied, and the missing field fails at compile time
     // (it can never work, so no point waiting for runtime)
     // so this is EXACTLY what we want. it gets erased
     try t.expectSemanticError(
-        \\ let fs = {}
-        \\ fs.exists?("/tmp")
+        \\ let os = {}
+        \\ os.exists?("/tmp")
     );
 }
 test "baselib sigs: orelse unwraps results" {
-    try t.topTrue("fs.exists?(\"/tmp\")");
+    try t.topTrue("os.exists?(\"/tmp\")");
     try t.topNumber("{:err, \"boom\"} orelse 5", 5);
 }
 
@@ -126,7 +126,7 @@ test "baselib sigs: match narrows call-subject payloads" {
     // the subject is a call, not an ident: the payload still narrows to
     // bool, so the match result is bool (not a result) and `?` is rejected
     try t.expectSemanticError(
-        \\ (match fs.open("/tmp")
+        \\ (match file.open("/tmp")
         \\ | {:ok, v} => v
         \\ | {:err, e} => panic(e))?
     );
@@ -136,15 +136,15 @@ test "eu.rv: result types flow end to end" {
     // the predicate binds as bool, while result calls still bind as !T
     // and flow through match on both arms
     try t.topTrue(
-        \\ let x: bool = fs.exists?("/tmp")
+        \\ let x: bool = os.exists?("/tmp")
         \\ x
     );
     try t.topAtom(
-        \\ let r = fs.open("/definitely/not/a/real/path_xyz")
+        \\ let r = file.open("/definitely/not/a/real/path_xyz")
         \\ match r | {:err, e} => e | _ => :found
     , "FileNotFound");
     try t.topAtom(
-        \\ let x: {:ok, table} | {:err, any} = fs.open("/tmp")
+        \\ let x: {:ok, table} | {:err, any} = file.open("/tmp")
         \\ match x | {:ok, t} => :found | {:err, e} => e
     , "found");
 }
