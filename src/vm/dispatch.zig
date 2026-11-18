@@ -1049,10 +1049,16 @@ inline fn execFiberDispatch(
             const tag = parts.?.tag;
             const payload = parts.?.payload;
 
-            if (tag.asAtom() == revo.CoreAtoms.atomId(.err)) {
+            const tag_atom = tag.asAtom();
+            const is_err = tag_atom == revo.CoreAtoms.atomId(.err);
+            const is_none = tag_atom == revo.CoreAtoms.atomId(.none);
+            if (is_err or is_none) {
                 if (propagate_errors) {
                     if (fiber.frames.items.len == 2) {
-                        self.panicFromErrPayload(payload, fiber.pc) catch |e| return self.runFailure(e);
+                        if (is_none)
+                            self.panicFromNone(fiber.pc) catch |e| return self.runFailure(e)
+                        else
+                            self.panicFromErrPayload(payload, fiber.pc) catch |e| return self.runFailure(e);
                         return self.runFailure(error.Panic);
                     }
                     self.returnRegister(.{ .op = .ret, .a = instr.a }) catch |e| return self.runFailure(e);
@@ -1069,7 +1075,7 @@ inline fn execFiberDispatch(
                 continue :dispatch instr.op;
             }
 
-            if (tag.asAtom() == revo.CoreAtoms.atomId(.ok)) {
+            if (tag_atom == revo.CoreAtoms.atomId(.ok) or tag_atom == revo.CoreAtoms.atomId(.some)) {
                 if (payload) |p| {
                     regWrite(regs, base, instr.a, p);
                 }
@@ -1081,12 +1087,13 @@ inline fn execFiberDispatch(
         .jump_err => {
             const val = regRead(regs, base, instr.a);
             const is_err = self.isErrTable(val);
+            const is_none = self.isNoneTable(val);
             const absent = if (val.asAtom()) |a|
                 a == revo.CoreAtoms.atomId(.nil) or
                     a == revo.CoreAtoms.atomId(.undef)
             else
                 false;
-            if (!absent and !is_err) fiber.pc = instr.bx;
+            if (!absent and !is_err and !is_none) fiber.pc = instr.bx;
 
             fetchNext(self, fiber, &instr);
             continue :dispatch instr.op;

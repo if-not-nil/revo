@@ -840,13 +840,18 @@ pub fn inferOrelseType(left: TypeInfo, right: TypeInfo) TypeInfo {
     return unifyBranchType(unwrapped, right);
 }
 
-fn isResultTag(name: []const u8) bool {
-    return std.mem.eql(u8, name, ":ok") or std.mem.eql(u8, name, "ok") or
-        std.mem.eql(u8, name, ":err") or std.mem.eql(u8, name, "err");
+fn tagIs(name: []const u8, tag: []const u8) bool {
+    const n = if (name.len > 0 and name[0] == ':') name[1..] else name;
+    return std.mem.eql(u8, n, tag);
 }
 
+fn isResultTag(name: []const u8) bool {
+    return tagIs(name, "ok") or tagIs(name, "err") or tagIs(name, "some") or tagIs(name, "none");
+}
+
+/// tags whose payload `?`/`orelse` yield
 fn isOkTag(name: []const u8) bool {
-    return std.mem.eql(u8, name, ":ok") or std.mem.eql(u8, name, "ok");
+    return tagIs(name, "ok") or tagIs(name, "some");
 }
 
 /// tag of one union variant, table-style `{:ok, T}`
@@ -892,16 +897,21 @@ pub fn appendUnionVariantPayload(alloc: std.mem.Allocator, variant: UnionVariant
     }
 }
 
-/// `{:ok, T} | {:err, any}` unions (both the `!T` sugar and the literal form)
+fn isResultUnionType(variants: []const UnionVariant) bool {
+    for (variants) |v| {
+        if (unionVariantTagEql(v, ":ok") or
+            unionVariantTagEql(v, ":err") or
+            unionVariantTagEql(v, ":some") or
+            unionVariantTagEql(v, ":none")) return true;
+    }
+    return false;
+}
+
+/// `{:ok, T} | {:err, any} | {:some, T} | {:none, none}` unions (both the `!T` sugar and the literal form)
 ///     : the shapes `?` and `orelse` unwrap at runtime
 pub fn isResultType(ti: TypeInfo) bool {
     return switch (ti.tag) {
-        .@"union" => |us| blk: {
-            for (us) |v| {
-                if (unionVariantTagEql(v, ":ok") or unionVariantTagEql(v, ":err")) break :blk true;
-            }
-            break :blk false;
-        },
+        .@"union" => |us| isResultUnionType(us),
         .table => |tbl| blk: {
             const fields = tbl.fields orelse break :blk false;
             if (fields.len == 0 or fields[0].field_type.tag != .atom) break :blk false;
@@ -912,14 +922,14 @@ pub fn isResultType(ti: TypeInfo) bool {
 }
 
 ///
-/// unwrap the `:ok` payload from a `{:ok, T} | {:err, any}` union
-///     or a `{:ok, T}` table
+/// unwrap the `:ok`/`:some` payload from a `{:ok, T} | {:err, any}`
+///     or `{:some, T} | {:none, any}` union, or a `{:ok, T}`/`{:some, T}` table
 /// ; mirrors the runtime, which yields only the first payload element
 pub fn okTypeFrom(ti: TypeInfo) TypeInfo {
     return switch (ti.tag) {
         .@"union" => |variants| blk: {
             for (variants) |v| {
-                if (!unionVariantTagEql(v, ":ok")) continue;
+                if (!unionVariantTagEql(v, ":ok") and !unionVariantTagEql(v, ":some")) continue;
                 if (v.types.len > 0 and v.types[0].tag == .table) {
                     const fields = v.types[0].tag.table.fields orelse continue;
                     if (fields.len >= 2 and std.mem.eql(u8, fields[1].name, "1")) break :blk fields[1].field_type;

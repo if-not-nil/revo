@@ -169,6 +169,18 @@ pub export fn revo_err(vm_ptr: *anyopaque, payload: Value) callconv(.c) Value {
     return v.resultTable(.err, payload) catch nil_val;
 }
 
+/// `{:some, payload}` constructor for host results, nil on failure
+pub export fn revo_some(vm_ptr: *anyopaque, payload: Value) callconv(.c) Value {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.resultTable(.some, payload) catch nil_val;
+}
+
+/// `{:none, nil_val}` constructor for host results, nil on failure
+pub export fn revo_none(vm_ptr: *anyopaque, _: Value) callconv(.c) Value {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.resultTable(.none, nil_val) catch nil_val;
+}
+
 /// whether the value is an `{:ok, ...}` table
 pub export fn revo_is_ok(vm_ptr: *anyopaque, val: Value) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
@@ -179,6 +191,16 @@ pub export fn revo_is_ok(vm_ptr: *anyopaque, val: Value) callconv(.c) bool {
 pub export fn revo_is_err(vm_ptr: *anyopaque, val: Value) callconv(.c) bool {
     const v: *VM = @ptrCast(@alignCast(vm_ptr));
     return v.isErrTable(val);
+}
+
+pub export fn revo_is_some(vm_ptr: *anyopaque, val: Value) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.isSomeTable(val);
+}
+
+pub export fn revo_is_none(vm_ptr: *anyopaque, val: Value) callconv(.c) bool {
+    const v: *VM = @ptrCast(@alignCast(vm_ptr));
+    return v.isNoneTable(val);
 }
 
 /// payload of an `{:ok, ...}` table; false otherwise
